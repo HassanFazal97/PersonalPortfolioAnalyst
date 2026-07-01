@@ -7,10 +7,12 @@ one connection pool.
 
 from __future__ import annotations
 
+import hmac
 import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 
 from app.agent.budget import Budget
@@ -54,6 +56,19 @@ class ChatRequest(BaseModel):
     message: str
 
 
+_bearer = HTTPBearer(auto_error=False)
+
+
+def require_auth(
+    creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
+) -> None:
+    """Static single-token bearer auth applied to every route (spec §10)."""
+    token = get_settings().api_token
+    supplied = creds.credentials if creds and creds.scheme.lower() == "bearer" else ""
+    if not token or not supplied or not hmac.compare_digest(supplied, token):
+        raise HTTPException(status_code=401, detail="invalid or missing bearer token")
+
+
 def _require_repo(app: FastAPI) -> Repo:
     repo: Repo | None = app.state.repo
     if repo is None:
@@ -62,7 +77,11 @@ def _require_repo(app: FastAPI) -> Repo:
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="Portfolio Analyst Agent", lifespan=lifespan)
+    app = FastAPI(
+        title="Portfolio Analyst Agent",
+        lifespan=lifespan,
+        dependencies=[Depends(require_auth)],
+    )
 
     @app.get("/health")
     async def health() -> dict:
