@@ -29,10 +29,13 @@ async def sync_wealthsimple_positions(
     service = SnapTradeService(settings)
 
     if refresh:
+        refresh_skipped = 0
         for conn in service.list_connections():
             auth_id = conn.get("id") or conn.get("authorization_id")
-            if auth_id:
-                service.refresh_connection(str(auth_id))
+            if auth_id and not service.refresh_connection(str(auth_id)):
+                refresh_skipped += 1
+    else:
+        refresh_skipped = 0
 
     accounts = [a for a in service.list_accounts() if is_investment_account(a)]
     if not accounts:
@@ -77,6 +80,7 @@ async def sync_wealthsimple_positions(
         "accounts_synced": len(account_summaries),
         "positions_upserted": len(mapped),
         "positions_removed": removed,
+        "refresh_skipped": refresh_skipped,
         "accounts": account_summaries,
         "tickers": sorted({row.ticker for row in mapped}),
     }

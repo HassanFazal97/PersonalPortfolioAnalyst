@@ -29,6 +29,12 @@ class PersonalSnapTradeError(RuntimeError):
     pass
 
 
+def _is_refresh_unavailable(exc: Exception) -> bool:
+    """Real-time plans return 403/1141 — data is already live, refresh is optional."""
+    msg = str(exc)
+    return "1141" in msg or "Manual refresh not enabled" in msg
+
+
 def _is_personal_register_error(exc: Exception) -> bool:
     body = str(exc)
     return "1012" in body or "registerUser is not available" in body
@@ -117,8 +123,15 @@ class PersonalSnapTradeClient:
             raise PersonalSnapTradeError(f"Unexpected connections response: {data!r}")
         return [c for c in data if isinstance(c, dict)]
 
-    def refresh_connection(self, authorization_id: str) -> None:
-        self._request("POST", f"/authorizations/{authorization_id}/refresh")
+    def refresh_connection(self, authorization_id: str) -> bool:
+        """Trigger a holdings refresh. Returns False if the plan disallows manual refresh."""
+        try:
+            self._request("POST", f"/authorizations/{authorization_id}/refresh")
+            return True
+        except PersonalSnapTradeError as exc:
+            if _is_refresh_unavailable(exc):
+                return False
+            raise
 
     def get_account_positions(self, account_id: str) -> list[dict[str, Any]]:
         data = self._request("GET", f"/accounts/{account_id}/positions")

@@ -12,6 +12,7 @@ from app.integrations.snaptrade.personal_client import (
     PersonalSnapTradeClient,
     PersonalSnapTradeError,
     _is_personal_register_error,
+    _is_refresh_unavailable,
 )
 
 WEALTHSIMPLE_BROKER = "WEALTHSIMPLETRADE"
@@ -39,7 +40,7 @@ class _SnapTradeBackend(Protocol):
 
     def list_connections(self) -> list[dict[str, Any]]: ...
 
-    def refresh_connection(self, authorization_id: str) -> None: ...
+    def refresh_connection(self, authorization_id: str) -> bool: ...
 
     def get_account_positions(self, account_id: str) -> list[dict[str, Any]]: ...
 
@@ -111,13 +112,19 @@ class _CommercialBackend:
             raise SnapTradeError(f"Unexpected connections response: {body!r}")
         return [c for c in body if isinstance(c, dict)]
 
-    def refresh_connection(self, authorization_id: str) -> None:
-        response = self._client.connections.refresh_brokerage_authorization(
-            authorization_id=authorization_id,
-            user_id=self.user_id,
-            user_secret=self.user_secret,
-        )
-        _require_ok(response, action="refresh_brokerage_authorization")
+    def refresh_connection(self, authorization_id: str) -> bool:
+        try:
+            response = self._client.connections.refresh_brokerage_authorization(
+                authorization_id=authorization_id,
+                user_id=self.user_id,
+                user_secret=self.user_secret,
+            )
+            _require_ok(response, action="refresh_brokerage_authorization")
+            return True
+        except ApiException as exc:
+            if _is_refresh_unavailable(exc):
+                return False
+            raise
 
     def get_account_positions(self, account_id: str) -> list[dict[str, Any]]:
         response = self._client.account_information.get_user_account_positions(
@@ -194,10 +201,13 @@ class SnapTradeService:
         except PersonalSnapTradeError as exc:
             raise SnapTradeError(str(exc)) from exc
 
-    def refresh_connection(self, authorization_id: str) -> None:
+    def refresh_connection(self, authorization_id: str) -> bool:
+        """Trigger a holdings refresh. Returns False if manual refresh is unavailable."""
         try:
-            self._backend.refresh_connection(authorization_id)
+            return self._backend.refresh_connection(authorization_id)
         except PersonalSnapTradeError as exc:
+            if _is_refresh_unavailable(exc):
+                return False
             raise SnapTradeError(str(exc)) from exc
 
     def get_account_positions(self, account_id: str) -> list[dict[str, Any]]:
