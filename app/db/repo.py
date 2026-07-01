@@ -112,6 +112,20 @@ class Repo:
                 row.updated_at = datetime.now()
             await s.commit()
 
+    async def prune_positions_except(self, keep: set[tuple[str, str]]) -> int:
+        """Delete positions whose (ticker, account) is not in ``keep``."""
+        async with self._session() as s:
+            result = await s.execute(select(Position))
+            rows = list(result.scalars().all())
+            removed = 0
+            for row in rows:
+                if (row.ticker, row.account) not in keep:
+                    await s.delete(row)
+                    removed += 1
+            if removed:
+                await s.commit()
+            return removed
+
     # ---- agent runs & observability -------------------------------------
 
     async def create_run(

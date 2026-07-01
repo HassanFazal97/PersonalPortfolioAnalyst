@@ -23,6 +23,8 @@ from app.config import get_settings
 from app.db.repo import Repo
 from app.delivery.imessage import MAX_ATTEMPTS, pending_payload
 from app.delivery.shortcuts import get_latest_digest
+from app.integrations.snaptrade.client import SnapTradeError, SnapTradeService
+from app.integrations.snaptrade.sync import sync_wealthsimple_positions
 from app.scheduler import DigestScheduler
 from app.tools.registry import CHAT_TOOLS
 
@@ -224,6 +226,26 @@ def create_app() -> FastAPI:
         )
         await repo.enqueue_outbound(result.answer)
         return {"run_id": str(result.run_id), "queued_reply": result.answer}
+
+    # ---- Wealthsimple sync (SnapTrade) ---------------------------------
+
+    @app.get("/portfolio/connect-url")
+    async def portfolio_connect_url() -> dict:
+        """Return a SnapTrade Connection Portal URL for linking Wealthsimple."""
+        try:
+            service = SnapTradeService(get_settings())
+            return {"url": service.connection_portal_url()}
+        except SnapTradeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @app.post("/portfolio/sync")
+    async def portfolio_sync() -> dict:
+        """Pull live Wealthsimple holdings from SnapTrade into positions."""
+        repo = _require_repo(app)
+        try:
+            return await sync_wealthsimple_positions(repo)
+        except (SnapTradeError, RuntimeError) as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     return app
 

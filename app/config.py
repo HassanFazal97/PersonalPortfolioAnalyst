@@ -71,6 +71,12 @@ class Settings(BaseSettings):
     # Phase B: the user's own number the Mac worker texts.
     imessage_recipient: str = Field(default="", alias="IMESSAGE_RECIPIENT")
 
+    # SnapTrade — Wealthsimple portfolio sync (https://snaptrade.com).
+    snaptrade_client_id: str = Field(default="", alias="SNAPTRADE_CLIENT_ID")
+    snaptrade_consumer_key: str = Field(default="", alias="SNAPTRADE_CONSUMER_KEY")
+    snaptrade_user_id: str = Field(default="portfolio-owner", alias="SNAPTRADE_USER_ID")
+    snaptrade_user_secret: str = Field(default="", alias="SNAPTRADE_USER_SECRET")
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -51,7 +51,31 @@ class FakeRepo:
              "latency_ms": latency_ms}
         )
 
+    async def upsert_position(self, *, ticker, quantity, avg_cost, currency, account):
+        from decimal import Decimal
+
+        key = (ticker, account)
+        if not hasattr(self, "_position_rows"):
+            self._position_rows: dict[tuple[str, str], Any] = {}
+        self._position_rows[key] = SimpleNamespace(
+            ticker=ticker,
+            quantity=Decimal(str(quantity)),
+            avg_cost=Decimal(str(avg_cost)),
+            currency=currency,
+            account=account,
+        )
+
+    async def prune_positions_except(self, keep: set[tuple[str, str]]) -> int:
+        if not hasattr(self, "_position_rows"):
+            self._position_rows = {}
+        stale = [k for k in self._position_rows if k not in keep]
+        for k in stale:
+            del self._position_rows[k]
+        return len(stale)
+
     async def list_positions(self):
+        if hasattr(self, "_position_rows"):
+            return list(self._position_rows.values())
         return self._positions
 
     async def upsert_digest(self, *, run_id, body, digest_date):

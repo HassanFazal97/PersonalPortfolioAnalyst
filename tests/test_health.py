@@ -8,6 +8,7 @@ TOKEN = "test-secret-token"
 
 def _client(monkeypatch):
     monkeypatch.setenv("API_TOKEN", TOKEN)
+    monkeypatch.setenv("DATABASE_URL", "")
     get_settings.cache_clear()
     return TestClient(create_app())
 

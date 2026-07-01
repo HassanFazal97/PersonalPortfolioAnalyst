@@ -41,8 +41,59 @@ cp .env.example .env
 | `DIGEST_CRON` | Cron for the morning digest (`45 7 * * 1-5`) |
 | `TZ` | `America/Toronto` |
 | `IMESSAGE_RECIPIENT` | Phase B only: your own number, on the Mac |
+| `SNAPTRADE_CLIENT_ID` / `SNAPTRADE_CONSUMER_KEY` | SnapTrade API keys (Wealthsimple sync) |
+| `SNAPTRADE_USER_ID` / `SNAPTRADE_USER_SECRET` | Per-user SnapTrade credentials (from connect script) |
 
 Generate a token: `python -c "import secrets; print(secrets.token_urlsafe(32))"`
+
+## Connect Wealthsimple (SnapTrade)
+
+This app syncs your live Wealthsimple holdings through [SnapTrade](https://snaptrade.com) — the same third-party API used by apps like Blossom. No Wealthsimple password is stored in this repo; you authenticate once through SnapTrade's Connection Portal.
+
+### 1. Get SnapTrade API keys
+
+1. Sign up at [dashboard.snaptrade.com](https://dashboard.snaptrade.com) (free tier works for personal use).
+2. Copy your **Client ID** and **Consumer Key** into `.env`:
+   ```
+   SNAPTRADE_CLIENT_ID=...
+   SNAPTRADE_CONSUMER_KEY=...
+   ```
+
+### 2. Register and connect
+
+```bash
+python scripts/connect_wealthsimple.py
+```
+
+On first run this registers a SnapTrade user and prints `SNAPTRADE_USER_SECRET` to add to `.env`. Run it again to get a browser URL — open it, log into Wealthsimple, and authorize read access.
+
+Or via the API (after secrets are in `.env`):
+
+```bash
+curl -s localhost:8000/portfolio/connect-url -H "Authorization: Bearer $TOKEN"
+```
+
+### 3. Sync holdings
+
+```bash
+python scripts/sync_wealthsimple.py
+```
+
+This pulls positions from all linked Wealthsimple accounts (TFSA, RRSP, non-registered), maps tickers to Yahoo format, and upserts into the `positions` table. Stale rows are removed.
+
+```bash
+curl -s -X POST localhost:8000/portfolio/sync -H "Authorization: Bearer $TOKEN"
+```
+
+Re-run sync whenever your holdings change, or before the morning digest if you want the freshest book.
+
+### Manual entry (alternative)
+
+```bash
+python scripts/seed_portfolio.py
+```
+
+Interactive fallback if you prefer not to use SnapTrade.
 
 ## Migrate the database
 
@@ -55,13 +106,8 @@ Applies numbered SQL in `app/db/migrations/` and tracks them in
 
 ## Seed your portfolio
 
-```bash
-python scripts/seed_portfolio.py
-```
-
-Interactive: enter ticker (Yahoo format — `NVDA`, `SHOP.TO`, `RY.TO`), quantity,
-average cost, currency, and account (`TFSA` / `RRSP` / `taxable`). Upserts on
-`(ticker, account)`.
+See **Connect Wealthsimple (SnapTrade)** below for the recommended path. To enter
+holdings manually instead:
 
 ## Run the API
 
