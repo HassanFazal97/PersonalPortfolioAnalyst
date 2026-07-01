@@ -20,6 +20,7 @@ class FakeRepo:
         self.tool_calls: list[dict[str, Any]] = []
         self.digests: dict[date, SimpleNamespace] = {}
         self.outbound: list[str] = []
+        self._outbox: dict[uuid.UUID, SimpleNamespace] = {}
         self._positions = positions or []
 
     async def create_run(self, *, trigger, user_message, model, prompt_version):
@@ -62,8 +63,25 @@ class FakeRepo:
         return self.digests.get(digest_date)
 
     async def enqueue_outbound(self, body):
+        msg_id = uuid.uuid4()
         self.outbound.append(body)
-        return uuid.uuid4()
+        self._outbox[msg_id] = SimpleNamespace(
+            id=msg_id, body=body, status="queued", attempts=0
+        )
+        return msg_id
+
+    async def pending_outbound(self, limit=20):
+        return [m for m in self._outbox.values() if m.status == "queued"][:limit]
+
+    async def ack_outbound(self, msg_id, *, status, max_attempts=3):
+        from app.db.repo import resolve_ack_status
+
+        msg = self._outbox.get(msg_id)
+        if msg is None:
+            return None
+        msg.attempts += 1
+        msg.status = resolve_ack_status(status, msg.attempts, max_attempts)
+        return msg.status
 
 
 class ScriptedAnthropic:

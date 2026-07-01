@@ -21,6 +21,7 @@ from app.agent.loop import run_agent
 from app.agent.prompts import CHAT_SYSTEM_PROMPT
 from app.config import get_settings
 from app.db.repo import Repo
+from app.delivery.imessage import MAX_ATTEMPTS, pending_payload
 from app.delivery.shortcuts import get_latest_digest
 from app.scheduler import DigestScheduler
 from app.tools.registry import CHAT_TOOLS
@@ -53,6 +54,14 @@ async def lifespan(app: FastAPI):
 
 
 class ChatRequest(BaseModel):
+    message: str
+
+
+class AckRequest(BaseModel):
+    status: str
+
+
+class InboundRequest(BaseModel):
     message: str
 
 
@@ -169,6 +178,48 @@ def create_app() -> FastAPI:
         if latest is None:
             raise HTTPException(status_code=404, detail="no digest for today yet")
         return latest
+
+    # ---- Phase B: Mac worker outbox ------------------------------------
+
+    @app.get("/outbox/pending")
+    async def outbox_pending() -> dict:
+        repo = _require_repo(app)
+        return {"messages": await pending_payload(repo)}
+
+    @app.post("/outbox/{msg_id}/ack")
+    async def outbox_ack(msg_id: uuid.UUID, req: AckRequest) -> dict:
+        repo = _require_repo(app)
+        if req.status not in ("sent", "failed"):
+            raise HTTPException(status_code=400, detail="status must be 'sent' or 'failed'")
+        result = await repo.ack_outbound(
+            msg_id, status=req.status, max_attempts=MAX_ATTEMPTS
+        )
+        if result is None:
+            raise HTTPException(status_code=404, detail="message not found")
+        return {"id": str(msg_id), "status": result}
+
+    @app.post("/inbound")
+    async def inbound(req: InboundRequest) -> dict:
+        """Stub: run a chat agent for an incoming message and enqueue the reply.
+        Incoming-message reading (chat.db) is out of scope; this endpoint lets
+        the Mac worker be extended to two-way later."""
+        settings = get_settings()
+        repo = _require_repo(app)
+        budget = Budget(
+            max_iterations=settings.chat_max_iterations,
+            max_cost_usd=settings.chat_max_cost_usd,
+            model=settings.model,
+        )
+        result = await run_agent(
+            req.message,
+            trigger="chat",
+            system_prompt=CHAT_SYSTEM_PROMPT,
+            tools=CHAT_TOOLS,
+            budget=budget,
+            db=repo,
+        )
+        await repo.enqueue_outbound(result.answer)
+        return {"run_id": str(result.run_id), "queued_reply": result.answer}
 
     return app
 

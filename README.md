@@ -135,6 +135,50 @@ Deliver the digest to yourself with an iPhone Shortcuts personal automation
 If no digest exists yet the endpoint returns 404; the Shortcut simply sends
 nothing that morning. The scheduled 07:45 generation runs before the 08:05 pull.
 
+## Delivery — Phase B: Mac worker push
+
+A small launchd job on your Mac drains the API outbox and sends each message as
+an iMessage to yourself. Two-way ready: a stubbed `POST /inbound` runs a chat
+agent and enqueues the reply (reading incoming messages from `chat.db` is out of
+scope here).
+
+When `IMESSAGE_RECIPIENT` is set on the API side, `send_digest` (and the digest
+fallback) enqueue to `outbound_messages`. The worker then:
+
+`GET /outbox/pending` → `osascript send.applescript "<body>" "<recipient>"` →
+`POST /outbox/{id}/ack {status}`. A failed send is retried; after 3 attempts the
+message is marked `failed`.
+
+### Install
+
+1. Edit `macworker/com.portfolioagent.macworker.plist`:
+   - the `worker.py` path (replace `CHANGE_ME`),
+   - `PA_API_BASE`, `PA_API_TOKEN`, and `PA_IMESSAGE_RECIPIENT` (your number).
+2. Copy and load it:
+   ```bash
+   cp macworker/com.portfolioagent.macworker.plist ~/Library/LaunchAgents/
+   launchctl load ~/Library/LaunchAgents/com.portfolioagent.macworker.plist
+   ```
+3. Grant Terminal/`osascript` permission to control Messages when macOS prompts
+   (System Settings → Privacy & Security → Automation).
+4. Logs: `/tmp/portfolioagent.macworker.{out,err}.log`. Test one cycle manually:
+   ```bash
+   PA_API_TOKEN=... PA_IMESSAGE_RECIPIENT=+1... python3 macworker/worker.py
+   ```
+
+Unload with
+`launchctl unload ~/Library/LaunchAgents/com.portfolioagent.macworker.plist`.
+
+## Observability & replay
+
+Every model call and tool call is stored in Postgres (`model_calls`,
+`tool_calls`) under an `agent_runs` row, with full request/response JSON. Any run
+is reconstructable from the DB alone:
+
+```bash
+python scripts/replay_run.py <run_id>
+```
+
 ## Testing & linting
 
 ```bash

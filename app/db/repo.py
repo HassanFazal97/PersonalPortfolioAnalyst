@@ -29,6 +29,20 @@ from app.db.models import (
 )
 
 
+def resolve_ack_status(status: str, attempts: int, max_attempts: int) -> str:
+    """Decide an outbound message's status after a worker ack.
+
+    'sent' is terminal; 'failed' stays 'queued' for retry until attempts reach
+    ``max_attempts``, then becomes 'failed'. ``attempts`` is the post-increment
+    count (i.e. including this attempt).
+    """
+    if status == "sent":
+        return "sent"
+    if status == "failed":
+        return "failed" if attempts >= max_attempts else "queued"
+    return status
+
+
 class Repo:
     def __init__(self, database_url: str, *, echo: bool = False) -> None:
         self._engine: AsyncEngine = create_async_engine(database_url, echo=echo)
@@ -273,13 +287,19 @@ class Repo:
             )
             return list(result.scalars().all())
 
-    async def ack_outbound(self, msg_id: uuid.UUID, *, status: str) -> None:
+    async def ack_outbound(
+        self, msg_id: uuid.UUID, *, status: str, max_attempts: int = 3
+    ) -> str | None:
+        """Record a worker ack. Returns the resulting message status, or None
+        if the message does not exist. A 'failed' ack stays 'queued' for retry
+        until ``max_attempts`` is reached, then becomes 'failed'."""
         async with self._session() as s:
             msg = await s.get(OutboundMessage, msg_id)
             if msg is None:
-                return
-            msg.status = status
+                return None
             msg.attempts = (msg.attempts or 0) + 1
-            if status == "sent":
+            msg.status = resolve_ack_status(status, msg.attempts, max_attempts)
+            if msg.status == "sent":
                 msg.sent_at = datetime.now()
             await s.commit()
+            return msg.status
