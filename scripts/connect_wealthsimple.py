@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Register a SnapTrade user (if needed) and print the Wealthsimple connect URL.
+"""Print the SnapTrade Connection Portal URL to link Wealthsimple.
 
 Usage:
   python scripts/connect_wealthsimple.py
-  python scripts/connect_wealthsimple.py --register-only
 
 Prerequisites:
-  1. Create a free SnapTrade developer account at https://dashboard.snaptrade.com
-  2. Add SNAPTRADE_CLIENT_ID and SNAPTRADE_CONSUMER_KEY to .env
-  3. After --register-only (or first run), add the printed SNAPTRADE_USER_SECRET
+  1. Create a SnapTrade account at https://dashboard.snaptrade.com
+  2. Choose SDKs and copy CLIENT_ID + CONSUMER_KEY into .env
+  3. Personal keys (dashboard SDK flow): no user registration needed.
+     Commercial keys: run with --register-only first to get USER_SECRET.
 """
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ from app.config import get_settings  # noqa: E402
 from app.integrations.snaptrade.client import (  # noqa: E402
     SnapTradeError,
     SnapTradeService,
+    is_personal_key_mode,
 )
 
 
@@ -31,7 +32,7 @@ def main() -> None:
     parser.add_argument(
         "--register-only",
         action="store_true",
-        help="Only register a SnapTrade user and print credentials (skip portal URL)",
+        help="Commercial keys only: register a SnapTrade user and print credentials",
     )
     args = parser.parse_args()
 
@@ -44,9 +45,14 @@ def main() -> None:
 
     service = SnapTradeService(settings)
 
-    if not settings.snaptrade_user_secret:
-        print("No SNAPTRADE_USER_SECRET found — registering a new SnapTrade user...\n")
-        creds = service.register_user()
+    if is_personal_key_mode(settings):
+        print("Personal SnapTrade key detected — no user registration needed.\n")
+    elif not settings.snaptrade_user_secret:
+        print("Commercial key: registering a SnapTrade user...\n")
+        try:
+            creds = service.register_user()
+        except SnapTradeError as exc:
+            raise SystemExit(str(exc)) from exc
         print("Add these lines to your .env file:\n")
         print(f"SNAPTRADE_USER_ID={creds['userId']}")
         print(f"SNAPTRADE_USER_SECRET={creds['userSecret']}\n")
@@ -64,9 +70,7 @@ def main() -> None:
 
     print("Open this URL in your browser to link Wealthsimple (expires in ~5 minutes):\n")
     print(url)
-    print(
-        "\nAfter connecting, run:  python scripts/sync_wealthsimple.py"
-    )
+    print("\nAfter connecting, run:  python scripts/sync_wealthsimple.py")
 
 
 if __name__ == "__main__":

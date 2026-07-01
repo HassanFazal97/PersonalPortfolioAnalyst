@@ -76,6 +76,8 @@ class Settings(BaseSettings):
     snaptrade_consumer_key: str = Field(default="", alias="SNAPTRADE_CONSUMER_KEY")
     snaptrade_user_id: str = Field(default="portfolio-owner", alias="SNAPTRADE_USER_ID")
     snaptrade_user_secret: str = Field(default="", alias="SNAPTRADE_USER_SECRET")
+    # personal (dashboard SDK keys) | commercial (multi-user app keys) | auto
+    snaptrade_auth_mode: str = Field(default="auto", alias="SNAPTRADE_AUTH_MODE")
 
 
 @lru_cache

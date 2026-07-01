@@ -42,7 +42,8 @@ cp .env.example .env
 | `TZ` | `America/Toronto` |
 | `IMESSAGE_RECIPIENT` | Phase B only: your own number, on the Mac |
 | `SNAPTRADE_CLIENT_ID` / `SNAPTRADE_CONSUMER_KEY` | SnapTrade API keys (Wealthsimple sync) |
-| `SNAPTRADE_USER_ID` / `SNAPTRADE_USER_SECRET` | Per-user SnapTrade credentials (from connect script) |
+| `SNAPTRADE_USER_ID` / `SNAPTRADE_USER_SECRET` | Commercial keys only — leave empty for Personal dashboard keys |
+| `SNAPTRADE_AUTH_MODE` | `auto` (default), `personal`, or `commercial` |
 
 Generate a token: `python -c "import secrets; print(secrets.token_urlsafe(32))"`
 
@@ -59,13 +60,19 @@ This app syncs your live Wealthsimple holdings through [SnapTrade](https://snapt
    SNAPTRADE_CONSUMER_KEY=...
    ```
 
-### 2. Register and connect
+### 2. Connect Wealthsimple
 
 ```bash
 python scripts/connect_wealthsimple.py
 ```
 
-On first run this registers a SnapTrade user and prints `SNAPTRADE_USER_SECRET` to add to `.env`. Run it again to get a browser URL — open it, log into Wealthsimple, and authorize read access.
+**Personal keys** (what you get from the dashboard SDK flow): only `CLIENT_ID` and
+`CONSUMER_KEY` are needed — leave `SNAPTRADE_USER_ID` and `SNAPTRADE_USER_SECRET`
+empty. The script prints a browser URL; open it, log into Wealthsimple, and
+authorize read access.
+
+**Commercial keys** (multi-user apps): the first run registers a SnapTrade user
+and prints `SNAPTRADE_USER_SECRET` to add to `.env`. Run again for the connect URL.
 
 Or via the API (after secrets are in `.env`):
 
