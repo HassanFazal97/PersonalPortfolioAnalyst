@@ -51,7 +51,7 @@ async def main() -> None:
     if not settings.database_url:
         raise SystemExit("DATABASE_URL is not set. Populate .env first.")
 
-    repo = Repo(settings.database_url)
+    repo = Repo(settings.database_url, ssl=settings.db_ssl)
     count = 0
     try:
         print("Enter positions. Leave ticker blank to finish.\n")

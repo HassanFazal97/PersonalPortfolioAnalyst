@@ -45,7 +45,8 @@ async def main() -> None:
     if not settings.database_url:
         raise SystemExit("DATABASE_URL is not set. Populate .env first.")
 
-    conn = await asyncpg.connect(_asyncpg_dsn(settings.database_url))
+    ssl = "require" if settings.db_ssl else None
+    conn = await asyncpg.connect(_asyncpg_dsn(settings.database_url), ssl=ssl)
     try:
         applied = await _applied_versions(conn)
         files = sorted(MIGRATIONS_DIR.glob("*.sql"))

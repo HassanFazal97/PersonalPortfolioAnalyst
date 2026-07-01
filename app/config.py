@@ -50,6 +50,9 @@ class Settings(BaseSettings):
     anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
     finnhub_api_key: str = Field(default="", alias="FINNHUB_API_KEY")
     database_url: str = Field(default="", alias="DATABASE_URL")
+    # Require TLS to the database (Supabase and most managed Postgres need this;
+    # leave false for a local/Docker Postgres).
+    db_ssl: bool = Field(default=False, alias="DB_SSL")
     api_token: str = Field(default="", alias="API_TOKEN")
 
     model: str = Field(default="claude-sonnet-4-6", alias="MODEL")

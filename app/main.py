@@ -30,7 +30,11 @@ from app.tools.registry import CHAT_TOOLS
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
-    repo = Repo(settings.database_url) if settings.database_url else None
+    repo = (
+        Repo(settings.database_url, ssl=settings.db_ssl)
+        if settings.database_url
+        else None
+    )
     app.state.repo = repo
     app.state.scheduler = None
 

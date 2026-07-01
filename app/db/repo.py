@@ -44,8 +44,13 @@ def resolve_ack_status(status: str, attempts: int, max_attempts: int) -> str:
 
 
 class Repo:
-    def __init__(self, database_url: str, *, echo: bool = False) -> None:
-        self._engine: AsyncEngine = create_async_engine(database_url, echo=echo)
+    def __init__(
+        self, database_url: str, *, echo: bool = False, ssl: bool = False
+    ) -> None:
+        connect_args = {"ssl": "require"} if ssl else {}
+        self._engine: AsyncEngine = create_async_engine(
+            database_url, echo=echo, connect_args=connect_args
+        )
         self._session: async_sessionmaker[AsyncSession] = async_sessionmaker(
             self._engine, expire_on_commit=False
         )
