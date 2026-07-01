@@ -22,7 +22,7 @@ import httpx
 from app.config import Settings
 
 BASE_URL = "https://api.snaptrade.com/api/v1"
-WEALTHSIMPLE_BROKER = "WEALTHSIMPLE"
+WEALTHSIMPLE_BROKER = "WEALTHSIMPLETRADE"
 
 
 class PersonalSnapTradeError(RuntimeError):

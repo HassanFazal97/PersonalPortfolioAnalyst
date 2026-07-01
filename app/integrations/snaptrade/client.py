@@ -14,7 +14,7 @@ from app.integrations.snaptrade.personal_client import (
     _is_personal_register_error,
 )
 
-WEALTHSIMPLE_BROKER = "WEALTHSIMPLE"
+WEALTHSIMPLE_BROKER = "WEALTHSIMPLETRADE"
 
 
 class SnapTradeError(RuntimeError):
