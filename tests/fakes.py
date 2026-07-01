@@ -8,14 +8,19 @@ is available, the same assertions can be re-run against the real Repo.
 from __future__ import annotations
 
 import uuid
+from datetime import date
+from types import SimpleNamespace
 from typing import Any
 
 
 class FakeRepo:
-    def __init__(self) -> None:
+    def __init__(self, positions: list[Any] | None = None) -> None:
         self.runs: dict[uuid.UUID, dict[str, Any]] = {}
         self.model_calls: list[dict[str, Any]] = []
         self.tool_calls: list[dict[str, Any]] = []
+        self.digests: dict[date, SimpleNamespace] = {}
+        self.outbound: list[str] = []
+        self._positions = positions or []
 
     async def create_run(self, *, trigger, user_message, model, prompt_version):
         run_id = uuid.uuid4()
@@ -46,7 +51,19 @@ class FakeRepo:
         )
 
     async def list_positions(self):
-        return []
+        return self._positions
+
+    async def upsert_digest(self, *, run_id, body, digest_date):
+        self.digests[digest_date] = SimpleNamespace(
+            run_id=run_id, body=body, digest_date=digest_date, created_at=None
+        )
+
+    async def get_digest(self, digest_date):
+        return self.digests.get(digest_date)
+
+    async def enqueue_outbound(self, body):
+        self.outbound.append(body)
+        return uuid.uuid4()
 
 
 class ScriptedAnthropic:

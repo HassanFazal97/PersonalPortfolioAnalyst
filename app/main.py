@@ -14,10 +14,13 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from app.agent.budget import Budget
+from app.agent.digest_pipeline import run_digest_pipeline
 from app.agent.loop import run_agent
 from app.agent.prompts import CHAT_SYSTEM_PROMPT
 from app.config import get_settings
 from app.db.repo import Repo
+from app.delivery.shortcuts import get_latest_digest
+from app.scheduler import DigestScheduler
 from app.tools.registry import CHAT_TOOLS
 
 
@@ -26,10 +29,23 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     repo = Repo(settings.database_url) if settings.database_url else None
     app.state.repo = repo
-    app.state.scheduler = None  # populated in M4
+    app.state.scheduler = None
+
+    if repo is not None:
+        async def _run_digest() -> None:
+            await run_digest_pipeline(repo)
+
+        scheduler = DigestScheduler(
+            _run_digest, cron=settings.digest_cron, timezone=settings.tz
+        )
+        scheduler.start()
+        app.state.scheduler = scheduler
+
     try:
         yield
     finally:
+        if app.state.scheduler is not None:
+            app.state.scheduler.shutdown()
         if repo is not None:
             await repo.dispose()
 
@@ -120,6 +136,20 @@ def create_app() -> FastAPI:
         repo = _require_repo(app)
         runs = await repo.list_runs(trigger=trigger, limit=limit)
         return {"runs": [_run_meta(r) for r in runs]}
+
+    @app.post("/digest/run")
+    async def digest_run() -> dict:
+        repo = _require_repo(app)
+        return await run_digest_pipeline(repo)
+
+    @app.get("/digest/latest")
+    async def digest_latest() -> dict:
+        settings = get_settings()
+        repo = _require_repo(app)
+        latest = await get_latest_digest(repo, tz=settings.tz)
+        if latest is None:
+            raise HTTPException(status_code=404, detail="no digest for today yet")
+        return latest
 
     return app
 

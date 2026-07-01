@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
 from app.config import Settings
-from app.tools import market, news, portfolio
+from app.tools import digest, market, news, portfolio
 
 
 @dataclass
@@ -20,6 +20,9 @@ class ToolContext:
 
     settings: Settings
     repo: Any | None = None
+    run_id: Any | None = None
+    # Phase B: when true, send_digest also enqueues to outbound_messages.
+    enqueue_delivery: bool = False
 
 
 ToolFn = Callable[[dict[str, Any], ToolContext], Awaitable[Any]]
@@ -101,7 +104,7 @@ SEARCH_NEWS_SCHEMA = {
 }
 
 
-# Chat runs expose these four. send_digest (M4) is added to the digest toolset.
+# Chat runs (and digest investigations) expose these four — never send_digest.
 CHAT_TOOLS: list[dict[str, Any]] = [
     GET_PORTFOLIO_SCHEMA,
     GET_QUOTE_SCHEMA,
@@ -109,10 +112,15 @@ CHAT_TOOLS: list[dict[str, Any]] = [
     SEARCH_NEWS_SCHEMA,
 ]
 
+# The synthesize stage exposes ONLY send_digest so the run must terminate by
+# delivering the digest.
+DIGEST_TOOLS: list[dict[str, Any]] = [digest.SEND_DIGEST_SCHEMA]
+
 # name -> async callable(payload, ctx)
 DISPATCH: dict[str, ToolFn] = {
     "get_portfolio": portfolio.get_portfolio,
     "get_quote": market.get_quote,
     "get_price_history": market.get_price_history,
     "search_news": news.search_news,
+    "send_digest": digest.send_digest,
 }

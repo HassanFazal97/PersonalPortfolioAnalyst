@@ -182,6 +182,47 @@ def build_initial_messages(user_message: str) -> list[dict[str, Any]]:
     return [{"role": "user", "content": user_message}]
 
 
+async def call_and_log(
+    client: Any,
+    *,
+    model: str,
+    system_prompt: str,
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]] | None,
+    observer: Observer,
+    iteration: int,
+    budget: Budget,
+) -> tuple[list[dict[str, Any]], str | None]:
+    """One model call: record usage into ``budget`` and persist it.
+
+    Shared by the digest planner/synthesizer stages so their calls are logged
+    identically to the main loop. Returns (content_dicts, stop_reason).
+    """
+    kwargs: dict[str, Any] = {
+        "model": model,
+        "max_tokens": 1024,
+        "system": system_prompt,
+        "messages": messages,
+    }
+    if tools:
+        kwargs["tools"] = tools
+    response = await client.messages.create(**kwargs)
+
+    content_dicts = _content_to_dicts(_attr(response, "content"))
+    usage = {
+        "input_tokens": _usage(response, "input_tokens"),
+        "output_tokens": _usage(response, "output_tokens"),
+    }
+    budget.record_usage(usage["input_tokens"], usage["output_tokens"])
+    await observer.model_call(
+        iteration=iteration,
+        request=_request_snapshot(model, system_prompt, messages, tools or []),
+        response={"stop_reason": _attr(response, "stop_reason"), "content": content_dicts},
+        usage=usage,
+    )
+    return content_dicts, _attr(response, "stop_reason")
+
+
 # --------------------------------------------------------------------------
 # run_agent
 # --------------------------------------------------------------------------
@@ -219,6 +260,7 @@ async def run_agent(
         model=settings.model,
         prompt_version=PROMPT_VERSION,
     )
+    ctx.run_id = run_id
     observer = Observer(db, run_id)
 
     messages = build_initial_messages(user_message)
