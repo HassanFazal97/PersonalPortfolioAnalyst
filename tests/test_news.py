@@ -55,3 +55,8 @@ async def test_search_news_validates_inputs():
             raise AssertionError("expected ValueError")
         except ValueError:
             pass
+
+
+def test_finnhub_symbol_candidates_extracts_ticker_from_phrase():
+    assert news._finnhub_symbol_candidates("NOW ServiceNow stock") == ["NOW"]
+    assert news._finnhub_symbol_candidates("SHOP.TO Shopify") == ["SHOP.TO", "SHOP"]

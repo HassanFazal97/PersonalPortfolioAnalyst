@@ -9,11 +9,13 @@ near-duplicate headlines are dropped, and full article text is never returned
 from __future__ import annotations
 
 import asyncio
+import re
 from datetime import UTC, datetime, timedelta
 from difflib import SequenceMatcher
 from typing import Any
 
 from app.config import get_settings
+from app.tools.tickers import normalize_ticker
 
 SUMMARY_MAX_CHARS = 500
 _DUP_RATIO = 0.9
@@ -36,10 +38,41 @@ def _is_near_duplicate(headline: str, seen: list[str]) -> bool:
 # --------------------------------------------------------------------------
 
 
+_TICKER_TOKEN = re.compile(r"^[A-Z]{1,5}(\.[A-Z]{1,3})?$|^[A-Z]{1,5}-[A-Z]$")
+_SKIP_TOKENS = frozenset({"STOCK", "SHARE", "SHARES", "NEWS", "TODAY", "PRICE"})
+
+
+def _finnhub_symbol_candidates(query: str) -> list[str]:
+    """Derive ticker symbols to try with Finnhub from a free-text query."""
+    candidates: list[str] = []
+    for part in query.strip().split()[:4]:
+        token = part.strip().upper()
+        if token in _SKIP_TOKENS or not _TICKER_TOKEN.match(token):
+            continue
+        try:
+            ticker = normalize_ticker(token)
+        except ValueError:
+            continue
+        candidates.append(ticker)
+        if "." in ticker:
+            candidates.append(ticker.split(".", 1)[0])
+    if not candidates and query.strip():
+        head = query.strip().split()[0].upper()
+        if _TICKER_TOKEN.match(head):
+            candidates.append(head)
+    seen: set[str] = set()
+    out: list[str] = []
+    for sym in candidates:
+        if sym not in seen:
+            seen.add(sym)
+            out.append(sym)
+    return out
+
+
 def _fetch_finnhub_news(
     query: str, lookback_days: int, max_results: int
 ) -> list[dict[str, Any]]:
-    """Company news for ``query`` treated as a symbol, via Finnhub."""
+    """Company news for symbols extracted from ``query``, via Finnhub."""
     import finnhub
 
     settings = get_settings()
@@ -48,17 +81,25 @@ def _fetch_finnhub_news(
     client = finnhub.Client(api_key=settings.finnhub_api_key)
     to = datetime.now(UTC).date()
     frm = to - timedelta(days=lookback_days)
-    items = client.company_news(
-        query.upper(), _from=frm.isoformat(), to=to.isoformat()
-    )
-    return items[: max_results * 3]  # over-fetch; dedupe trims later
+    date_from, date_to = frm.isoformat(), to.isoformat()
+
+    for symbol in _finnhub_symbol_candidates(query):
+        items = client.company_news(symbol, _from=date_from, to=date_to)
+        if items:
+            return items[: max_results * 3]  # over-fetch; dedupe trims later
+    return []
 
 
 def _fetch_yfinance_news(query: str) -> list[dict[str, Any]]:
-    """Fallback: yfinance ``.news`` for ``query`` treated as a ticker."""
+    """Fallback: yfinance ``.news`` for the first ticker-like token in ``query``."""
     import yfinance as yf
 
-    return list(yf.Ticker(query.upper()).news or [])
+    symbols = _finnhub_symbol_candidates(query) or [query.strip().upper()]
+    for symbol in symbols:
+        items = list(yf.Ticker(symbol).news or [])
+        if items:
+            return items
+    return []
 
 
 # --------------------------------------------------------------------------
@@ -143,6 +184,8 @@ async def search_news(payload: dict[str, Any], ctx: Any = None) -> dict[str, Any
             _fetch_finnhub_news, query, lookback_days, max_results
         )
         normalized = [_normalize_finnhub(i) for i in raw]
+        if not normalized:
+            raise RuntimeError("finnhub returned no articles")
     except Exception:  # noqa: BLE001 - fall back to yfinance
         source = "yfinance"
         raw = await asyncio.to_thread(_fetch_yfinance_news, query)
