@@ -11,7 +11,7 @@ import hmac
 import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 
@@ -73,11 +73,19 @@ class InboundRequest(BaseModel):
 
 _bearer = HTTPBearer(auto_error=False)
 
+# Exempt from bearer auth so platform liveness probes and uptime pingers — which
+# cannot attach the token — can reach it. /health returns no sensitive data.
+# Every other route stays authed-by-default via the app-level dependency.
+_AUTH_EXEMPT_PATHS = {"/health"}
+
 
 def require_auth(
+    request: Request,
     creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
 ) -> None:
     """Static single-token bearer auth applied to every route (spec §10)."""
+    if request.url.path in _AUTH_EXEMPT_PATHS:
+        return
     token = get_settings().api_token
     supplied = creds.credentials if creds and creds.scheme.lower() == "bearer" else ""
     if not token or not supplied or not hmac.compare_digest(supplied, token):

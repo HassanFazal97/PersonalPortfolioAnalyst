@@ -13,10 +13,13 @@ def _client(monkeypatch):
     return TestClient(create_app())
 
 
-def test_health_requires_token(monkeypatch):
+def test_health_public_no_token(monkeypatch):
+    # /health is deliberately exempt from bearer auth so platform liveness
+    # probes and uptime pingers (which cannot attach the token) can reach it.
     with _client(monkeypatch) as client:
-        assert client.get("/health").status_code == 401
-        assert client.get("/health", headers={"Authorization": "Bearer wrong"}).status_code == 401
+        resp = client.get("/health")
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": False, "db": False, "scheduler": False}
 
 
 def test_health_ok_with_token(monkeypatch):

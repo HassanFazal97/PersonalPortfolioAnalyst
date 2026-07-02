@@ -122,7 +122,8 @@ holdings manually instead:
 uvicorn app.main:app --reload
 ```
 
-Every endpoint requires `Authorization: Bearer $API_TOKEN`.
+Every endpoint requires `Authorization: Bearer $API_TOKEN` — except `/health`,
+which is public so platform liveness probes and uptime pingers can reach it.
 
 ### First chat
 
@@ -167,6 +168,41 @@ Fetch today's digest:
 curl -s localhost:8000/digest/latest -H "Authorization: Bearer $TOKEN" | jq
 # 404 until today's digest has been generated
 ```
+
+## Deploy to the cloud (production)
+
+The morning digest is driven by an **in-process** APScheduler, so the server must
+be running at 07:45 (`TZ`) for the digest to generate. Deploy to an always-on
+host — free tiers that spin down on idle will be asleep and silently skip it.
+
+**Single instance only.** Run exactly one container with one uvicorn worker. A
+second process (extra replica or `--workers >1`) fires the digest twice and
+collides on the `digests.digest_date` unique constraint.
+
+1. **Database:** create a [Supabase](https://supabase.com) project. Use the
+   **Session pooler** connection string (IPv4, port 5432) as `DATABASE_URL` and
+   set `DB_SSL=true`.
+2. **Host:** any Docker host works (the repo ships a `Dockerfile`). Railway is
+   the simplest always-on option; Fly.io (`min_machines_running=1`) or a paid
+   Render web service are equivalent. Point it at this repo — the image runs
+   `scripts/migrate.py` on boot, then `uvicorn`.
+3. **Env vars** (set on the host, never committed): `ANTHROPIC_API_KEY`,
+   `FINNHUB_API_KEY`, `DATABASE_URL`, `DB_SSL=true`, `API_TOKEN`,
+   `TZ=America/Toronto`, and the `SNAPTRADE_*` keys if syncing Wealthsimple.
+4. **Smoke test** once deployed (replace `$HOST`/`$TOKEN`):
+   ```bash
+   curl -s $HOST/health                                   # public, no token
+   curl -s -X POST $HOST/chat -H "Authorization: Bearer $TOKEN" \
+     -H "Content-Type: application/json" -d '{"message":"hi"}'
+   curl -s -X POST $HOST/digest/run -H "Authorization: Bearer $TOKEN"
+   curl -s $HOST/digest/latest -H "Authorization: Bearer $TOKEN"
+   ```
+
+**Belt-and-suspenders scheduling (recommended):** rather than trusting the host
+to stay warm, add an external cron (Supabase `pg_cron`, cron-job.org, or a
+GitHub Actions scheduled workflow) that `POST`s `/digest/run` at 07:45 Toronto.
+`/digest/latest` keys on the Toronto date and the digest is idempotent per day,
+so a redundant trigger is harmless.
 
 ## Delivery — Phase A: iPhone Shortcut (pull)
 
