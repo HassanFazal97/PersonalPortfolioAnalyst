@@ -35,7 +35,7 @@ from app.integrations.snaptrade.onboarding import (
     service_for_user,
 )
 from app.integrations.snaptrade.sync import sync_wealthsimple_positions
-from app.landing import LANDING_HTML
+from app.landing import CONTACT_HTML, LANDING_HTML, PRIVACY_HTML, TERMS_HTML
 from app.scheduler import DigestScheduler, IntervalScheduler
 from app.tools.registry import CHAT_TOOLS
 
@@ -102,7 +102,7 @@ _bearer = HTTPBearer(auto_error=False)
 # Exempt from bearer auth so platform liveness probes and uptime pingers — which
 # cannot attach the token — can reach it. /health returns no sensitive data.
 # Every other route stays authed-by-default via the app-level dependency.
-_AUTH_EXEMPT_PATHS = {"/", "/health"}
+_AUTH_EXEMPT_PATHS = {"/", "/health", "/contact", "/privacy", "/terms"}
 
 _OWNER_USER_ID = uuid.UUID(DEFAULT_USER_ID)
 
@@ -183,6 +183,18 @@ def create_app() -> FastAPI:
     async def landing() -> HTMLResponse:
         """Public marketing page (also used for SnapTrade / partner review)."""
         return HTMLResponse(LANDING_HTML)
+
+    @app.get("/contact", response_class=HTMLResponse)
+    async def contact_page() -> HTMLResponse:
+        return HTMLResponse(CONTACT_HTML)
+
+    @app.get("/privacy", response_class=HTMLResponse)
+    async def privacy_page() -> HTMLResponse:
+        return HTMLResponse(PRIVACY_HTML)
+
+    @app.get("/terms", response_class=HTMLResponse)
+    async def terms_page() -> HTMLResponse:
+        return HTMLResponse(TERMS_HTML)
 
     @app.get("/health")
     async def health() -> dict:
