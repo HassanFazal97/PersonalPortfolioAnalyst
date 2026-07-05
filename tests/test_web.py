@@ -15,7 +15,7 @@ def test_public_pages_no_token(monkeypatch):
     # The marketing + legal pages must be reachable without a bearer token
     # (users and SnapTrade/partner reviewers hit them unauthenticated).
     with _client(monkeypatch) as client:
-        for path in ("/", "/contact", "/privacy", "/terms"):
+        for path in ("/", "/contact", "/privacy", "/terms", "/pricing"):
             resp = client.get(path)
             assert resp.status_code == 200, path
             assert "text/html" in resp.headers.get("content-type", ""), path
@@ -28,6 +28,8 @@ def test_pages_have_expected_content(monkeypatch):
         assert "fazalhassan@live.ca" in client.get("/contact").text
         assert "Privacy Policy" in client.get("/privacy").text
         assert "Terms of Service" in client.get("/terms").text
+        pricing = client.get("/pricing").text
+        assert "Free" in pricing and "Pro" in pricing and "$12" in pricing
         # cross-links between pages
         home = client.get("/").text
         assert "/privacy" in home and "/terms" in home and "/contact" in home

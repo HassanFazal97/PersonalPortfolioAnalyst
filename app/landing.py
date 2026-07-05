@@ -116,11 +116,19 @@ footer { border-top: 1px solid var(--line); background: rgba(0,0,0,0.2); }
 .foot-col a:hover { color: var(--accent); text-decoration: none; }
 .foot-bottom { max-width: 960px; margin: 0 auto; padding: 0 1.5rem 2.5rem; color: var(--muted); font-size: 0.85rem; }
 .foot-bottom .disc { border-top: 1px solid var(--line); padding-top: 1.25rem; }
+/* pricing */
+.card.featured { border-color: var(--accent-dim); box-shadow: 0 0 0 1px var(--accent-dim); }
+.price { font-size: 2.25rem; font-weight: 700; letter-spacing: -0.02em; color: var(--text); margin: 0.25rem 0 0.1rem; }
+.price .per { font-size: 1rem; font-weight: 500; color: var(--muted); }
+.price-note { color: var(--muted); font-size: 0.9rem; margin-bottom: 1rem; }
+.plan-tag { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--accent); }
+.card .btn { margin-top: 1.1rem; }
 """
 
 _NAV_LINKS = (
     ("home", "/", "Home"),
     ("how", "/#how", "How it works"),
+    ("pricing", "/pricing", "Pricing"),
     ("contact", "/contact", "Contact"),
 )
 
@@ -145,7 +153,8 @@ _FOOTER = (
     '<p style="color:var(--muted);font-size:0.9rem;margin-top:0.5rem;max-width:16em;">'
     "AI portfolio analyst for Canadian investors. Read-only. No trade execution.</p></div>"
     '<div class="foot-col"><h4>Product</h4>'
-    '<a href="/">Home</a><a href="/#how">How it works</a><a href="/#faq">FAQ</a></div>'
+    '<a href="/">Home</a><a href="/#how">How it works</a>'
+    '<a href="/pricing">Pricing</a><a href="/#faq">FAQ</a></div>'
     '<div class="foot-col"><h4>Legal</h4>'
     '<a href="/privacy">Privacy</a><a href="/terms">Terms</a></div>'
     '<div class="foot-col"><h4>Contact</h4>'
@@ -564,12 +573,87 @@ _TERMS_BODY = f"""
 """
 
 
+# --------------------------------------------------------------------------
+# Pricing
+# --------------------------------------------------------------------------
+
+_PRICING_BODY = f"""
+<section class="hero" style="padding-bottom:0;">
+  <span class="badge">Pricing</span>
+  <h1>Simple pricing. Start free, go Pro when you're ready.</h1>
+  <p class="lead">Read-only, informational, and built for individual investors.
+  No brokerage password ever leaves your bank — on any plan.</p>
+</section>
+
+<section>
+  <div class="grid">
+    <div class="card">
+      <div class="plan-tag">Free</div>
+      <div class="price">$0<span class="per"> /mo</span></div>
+      <p class="price-note">For getting started and kicking the tires.</p>
+      <ul class="checklist">
+        <li>1 connected account</li>
+        <li>Weekly digest on up to 3 holdings</li>
+        <li>5 chat questions per day</li>
+        <li>No macro alerts</li>
+      </ul>
+      <a class="btn ghost" href="mailto:{CONTACT_EMAIL}?subject=Cirvia%20early%20access">Start free</a>
+    </div>
+    <div class="card featured">
+      <div class="plan-tag">Pro</div>
+      <div class="price">$12<span class="per"> /mo</span></div>
+      <p class="price-note">or $120/yr — two months free.</p>
+      <ul class="checklist">
+        <li>Unlimited connected accounts</li>
+        <li>Daily weekday digest across all holdings</li>
+        <li>Macro alerts when the world moves</li>
+        <li>Unlimited chat</li>
+      </ul>
+      <a class="btn" href="mailto:{CONTACT_EMAIL}?subject=Cirvia%20early%20access">Go Pro</a>
+    </div>
+  </div>
+</section>
+
+<section id="pricing-faq">
+  <div class="eyebrow">Billing FAQ</div>
+  <h2>Questions about plans</h2>
+  <div class="grid">
+    <div class="card"><h3>Can I cancel anytime?</h3><p>Yes. Cancel whenever you like —
+    your Pro features stay active until the end of the current billing period.</p></div>
+    <div class="card"><h3>Is there a yearly option?</h3><p>Yes. Pro is $12/mo or $120/yr,
+    which works out to two months free versus paying monthly.</p></div>
+    <div class="card"><h3>What happens on the Free plan?</h3><p>You keep one connected
+    account, a weekly digest on up to three holdings, and five chat questions a day —
+    free, indefinitely.</p></div>
+    <div class="card"><h3>Do you offer refunds?</h3><p>Reach out and we'll make it right.
+    Email us at <a href="mailto:{CONTACT_EMAIL}">{CONTACT_EMAIL}</a>.</p></div>
+  </div>
+</section>
+
+<section>
+  <div class="cta-band">
+    <h2>Ready when you are.</h2>
+    <p>Cirvia is in early access. Tell us you're interested and we'll get you set up.</p>
+    <a class="btn" href="mailto:{CONTACT_EMAIL}?subject=Cirvia%20early%20access">Go Pro</a>
+  </div>
+</section>
+"""
+
+
 LANDING_HTML = _layout(
     "Cirvia — AI portfolio analyst for Canadian investors",
     "Connect Wealthsimple, get a daily digest, macro alerts, and on-demand answers about your "
     "real holdings. Read-only. No trade execution.",
     _HOME_BODY,
     active="home",
+)
+
+PRICING_HTML = _layout(
+    "Pricing — Cirvia",
+    "Cirvia pricing: start free with a weekly digest and daily chat, or go Pro at $12/mo "
+    "($120/yr) for unlimited accounts, daily digests, macro alerts, and unlimited chat.",
+    _PRICING_BODY,
+    active="pricing",
 )
 
 CONTACT_HTML = _layout(
