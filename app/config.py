@@ -56,6 +56,9 @@ class Settings(BaseSettings):
     anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
     finnhub_api_key: str = Field(default="", alias="FINNHUB_API_KEY")
     database_url: str = Field(default="", alias="DATABASE_URL")
+    # Owner/privileged connection for running migrations (DDL). Falls back to
+    # database_url. Set this when database_url is a restricted non-owner role.
+    migration_database_url: str = Field(default="", alias="MIGRATION_DATABASE_URL")
     # Require TLS to the database (Supabase and most managed Postgres need this;
     # leave false for a local/Docker Postgres).
     db_ssl: bool = Field(default=False, alias="DB_SSL")

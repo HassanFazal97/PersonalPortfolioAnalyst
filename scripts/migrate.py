@@ -42,11 +42,16 @@ async def _applied_versions(conn: asyncpg.Connection) -> set[str]:
 
 async def main() -> None:
     settings = get_settings()
-    if not settings.database_url:
+    # Migrations run DDL and must connect as an owner/privileged role. When the
+    # app runtime uses a restricted (non-owner) role for RLS enforcement, point
+    # MIGRATION_DATABASE_URL at the owner connection; otherwise DATABASE_URL is
+    # used for both.
+    dsn = settings.migration_database_url or settings.database_url
+    if not dsn:
         raise SystemExit("DATABASE_URL is not set. Populate .env first.")
 
     ssl = "require" if settings.db_ssl else None
-    conn = await asyncpg.connect(_asyncpg_dsn(settings.database_url), ssl=ssl)
+    conn = await asyncpg.connect(_asyncpg_dsn(dsn), ssl=ssl)
     try:
         applied = await _applied_versions(conn)
         files = sorted(MIGRATIONS_DIR.glob("*.sql"))
