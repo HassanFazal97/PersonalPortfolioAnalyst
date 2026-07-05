@@ -82,6 +82,8 @@ class Settings(BaseSettings):
     # How often the macro scan runs, in minutes. 0 disables the in-process
     # interval job (still triggerable via POST /macro/scan or external cron).
     macro_scan_interval_minutes: int = Field(default=0, alias="MACRO_SCAN_INTERVAL_MINUTES")
+    macro_max_iterations: int = Field(default=30, alias="MACRO_MAX_ITERATIONS")
+    macro_max_cost_usd: float = Field(default=2.00, alias="MACRO_MAX_COST_USD")
     # Owner attribution until per-user auth lands (roadmap Phase 2).
     default_user_id: str = Field(default=DEFAULT_USER_ID, alias="DEFAULT_USER_ID")
 
@@ -106,6 +108,8 @@ class Settings(BaseSettings):
     snaptrade_user_secret: str = Field(default="", alias="SNAPTRADE_USER_SECRET")
     # personal (dashboard SDK keys) | commercial (multi-user app keys) | auto
     snaptrade_auth_mode: str = Field(default="auto", alias="SNAPTRADE_AUTH_MODE")
+    # Fernet key for encrypting per-user SnapTrade userSecret at rest.
+    broker_secrets_key: str = Field(default="", alias="BROKER_SECRETS_KEY")
 
 
 @lru_cache

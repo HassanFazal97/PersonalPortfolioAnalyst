@@ -108,6 +108,10 @@ async def run_specialist(
 
     response: Any = None
     for i in range(_MAX_CONTINUATIONS + 1):
+        if budget is not None and budget.exceeded():
+            break
+        if budget is not None:
+            budget.start_iteration()
         response = await client.messages.create(
             model=model,
             max_tokens=_MAX_TOKENS,

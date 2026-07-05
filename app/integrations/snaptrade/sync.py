@@ -2,31 +2,40 @@
 
 from __future__ import annotations
 
+import uuid
+from datetime import datetime
 from typing import Any
 
 from app.config import Settings, get_settings
 from app.db.repo import Repo
-from app.integrations.snaptrade.client import SnapTradeService
+from app.integrations.snaptrade.client import SnapTradeError, SnapTradeService
 from app.integrations.snaptrade.mapper import (
     MappedPosition,
     is_investment_account,
     map_account_positions,
 )
+from app.integrations.snaptrade.onboarding import service_for_user
 
 
 async def sync_wealthsimple_positions(
     repo: Repo,
     *,
+    user_id: uuid.UUID | None = None,
     settings: Settings | None = None,
     refresh: bool = True,
 ) -> dict[str, Any]:
-    """Pull all Wealthsimple positions via SnapTrade and upsert into Postgres.
+    """Pull Wealthsimple positions via SnapTrade and upsert into Postgres.
 
-    Positions no longer reported by SnapTrade are removed so the DB mirrors
-    live holdings. Returns a summary dict suitable for CLI or API responses.
+    Scoped to ``user_id`` so each tenant's book stays isolated. Positions no
+    longer reported by SnapTrade are pruned for that user only.
     """
     settings = settings or get_settings()
-    service = SnapTradeService(settings)
+    try:
+        service = await service_for_user(repo, user_id, settings) if user_id else SnapTradeService(settings)
+    except SnapTradeError:
+        if user_id is not None:
+            raise
+        service = SnapTradeService(settings)
 
     if refresh:
         refresh_skipped = 0
@@ -40,8 +49,8 @@ async def sync_wealthsimple_positions(
     accounts = [a for a in service.list_accounts() if is_investment_account(a)]
     if not accounts:
         raise RuntimeError(
-            "No investment accounts found. Run scripts/connect_wealthsimple.py "
-            "and link your Wealthsimple account first."
+            "No investment accounts found. Open the connect URL and link "
+            "Wealthsimple first."
         )
 
     mapped: list[MappedPosition] = []
@@ -72,9 +81,17 @@ async def sync_wealthsimple_positions(
             avg_cost=row.avg_cost,
             currency=row.currency,
             account=row.account,
+            user_id=user_id,
         )
 
-    removed = await repo.prune_positions_except(keep)
+    removed = await repo.prune_positions_except(keep, user_id=user_id)
+
+    if user_id is not None:
+        await repo.update_snaptrade_status(
+            user_id,
+            last_sync_at=datetime.now(),
+            last_sync_error=None,
+        )
 
     return {
         "accounts_synced": len(account_summaries),

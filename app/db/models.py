@@ -17,6 +17,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Integer,
+    LargeBinary,
     Numeric,
     String,
     Text,
@@ -202,6 +203,22 @@ class OutboundMessage(Base):
         DateTime(timezone=True), server_default=func.now()
     )
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class SnaptradeCredentials(Base):
+    __tablename__ = "snaptrade_credentials"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    snaptrade_user_id: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    user_secret_enc: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    connected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_sync_error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
 
 class Alert(Base):

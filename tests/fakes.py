@@ -23,6 +23,7 @@ class FakeRepo:
         self._outbox: dict[uuid.UUID, SimpleNamespace] = {}
         self._positions = positions or []
         self.alerts: dict[str, SimpleNamespace] = {}
+        self._snaptrade: dict[uuid.UUID, SimpleNamespace] = {}
 
     async def create_run(self, *, trigger, user_message, model, prompt_version,
                          user_id=None):
@@ -67,7 +68,7 @@ class FakeRepo:
              "latency_ms": latency_ms}
         )
 
-    async def upsert_position(self, *, ticker, quantity, avg_cost, currency, account):
+    async def upsert_position(self, *, ticker, quantity, avg_cost, currency, account, user_id=None):
         from decimal import Decimal
 
         key = (ticker, account)
@@ -79,9 +80,10 @@ class FakeRepo:
             avg_cost=Decimal(str(avg_cost)),
             currency=currency,
             account=account,
+            user_id=user_id,
         )
 
-    async def prune_positions_except(self, keep: set[tuple[str, str]]) -> int:
+    async def prune_positions_except(self, keep: set[tuple[str, str]], *, user_id=None) -> int:
         if not hasattr(self, "_position_rows"):
             self._position_rows = {}
         stale = [k for k in self._position_rows if k not in keep]
@@ -102,10 +104,41 @@ class FakeRepo:
     async def get_digest(self, digest_date, *, user_id=None):
         return self.digests.get(digest_date)
 
+    async def list_active_user_ids(self):
+        from app.config import DEFAULT_USER_ID
+        return [uuid.UUID(DEFAULT_USER_ID)]
+
+    async def get_snaptrade_credentials(self, user_id):
+        return self._snaptrade.get(user_id)
+
+    async def save_snaptrade_credentials(self, *, user_id, snaptrade_user_id, user_secret_enc):
+        self._snaptrade[user_id] = SimpleNamespace(
+            user_id=user_id,
+            snaptrade_user_id=snaptrade_user_id,
+            user_secret_enc=user_secret_enc,
+            connected_at=None,
+            last_sync_at=None,
+            last_sync_error=None,
+        )
+
+    async def update_snaptrade_status(self, user_id, *, connected_at=None, last_sync_at=None, last_sync_error=None):
+        row = self._snaptrade.get(user_id)
+        if row is None:
+            return
+        if connected_at is not None:
+            row.connected_at = connected_at
+        if last_sync_at is not None:
+            row.last_sync_at = last_sync_at
+        row.last_sync_error = last_sync_error
+
     async def create_alert_if_new(self, *, run_id, category, severity, headline,
                                   body, tickers, fingerprint, user_id=None):
-        if fingerprint in self.alerts:
+        key = (user_id, fingerprint)
+        if not hasattr(self, "_alert_keys"):
+            self._alert_keys: set[tuple] = set()
+        if key in self._alert_keys:
             return None
+        self._alert_keys.add(key)
         alert_id = uuid.uuid4()
         self.alerts[fingerprint] = SimpleNamespace(
             id=alert_id, run_id=run_id, category=category, severity=severity,

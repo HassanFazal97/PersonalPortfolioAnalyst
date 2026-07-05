@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 from snaptrade_client import SnapTrade
@@ -16,6 +17,14 @@ from app.integrations.snaptrade.personal_client import (
 )
 
 WEALTHSIMPLE_BROKER = "WEALTHSIMPLETRADE"
+
+
+@dataclass(frozen=True)
+class SnapTradeUserCredentials:
+    """Per-user SnapTrade identity (commercial mode)."""
+
+    snaptrade_user_id: str
+    user_secret: str
 
 
 class SnapTradeError(RuntimeError):
@@ -48,8 +57,13 @@ class _SnapTradeBackend(Protocol):
 class _CommercialBackend:
     """Commercial SnapTrade keys: clientId + consumerKey + userId + userSecret."""
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        credentials: SnapTradeUserCredentials | None = None,
+    ) -> None:
         self._settings = settings
+        self._credentials = credentials
         self._client = SnapTrade(
             client_id=settings.snaptrade_client_id,
             consumer_key=settings.snaptrade_consumer_key,
@@ -57,10 +71,14 @@ class _CommercialBackend:
 
     @property
     def user_id(self) -> str:
+        if self._credentials is not None:
+            return self._credentials.snaptrade_user_id
         return self._settings.snaptrade_user_id
 
     @property
     def user_secret(self) -> str:
+        if self._credentials is not None:
+            return self._credentials.user_secret
         secret = self._settings.snaptrade_user_secret
         if not secret:
             raise SnapTradeError("SNAPTRADE_USER_SECRET is not set.")
@@ -151,17 +169,22 @@ def is_personal_key_mode(settings: Settings) -> bool:
 class SnapTradeService:
     """SnapTrade client — auto-selects personal vs commercial auth."""
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        *,
+        credentials: SnapTradeUserCredentials | None = None,
+    ) -> None:
         if not settings.snaptrade_client_id or not settings.snaptrade_consumer_key:
             raise SnapTradeError(
                 "SNAPTRADE_CLIENT_ID and SNAPTRADE_CONSUMER_KEY must be set in .env"
             )
         self._settings = settings
-        self.personal_mode = is_personal_key_mode(settings)
+        self.personal_mode = credentials is None and is_personal_key_mode(settings)
         if self.personal_mode:
             self._backend: _SnapTradeBackend = PersonalSnapTradeClient(settings)
         else:
-            self._backend = _CommercialBackend(settings)
+            self._backend = _CommercialBackend(settings, credentials)
 
     def register_user(self, user_id: str | None = None) -> dict[str, str]:
         if self.personal_mode:

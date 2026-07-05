@@ -12,6 +12,7 @@ from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import event, select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -29,6 +30,7 @@ from app.db.models import (
     ModelCall,
     OutboundMessage,
     Position,
+    SnaptradeCredentials,
     ToolCall,
     User,
 )
@@ -114,6 +116,70 @@ class Repo:
             s.add(user)
             await s.commit()
             return user.id
+
+    async def list_active_user_ids(self) -> list[uuid.UUID]:
+        """Users who should receive scheduled macro scans.
+
+        Includes anyone with digest enabled or any synced position."""
+        async with self._session() as s:
+            enabled = await s.execute(
+                select(User.id).where(User.digest_enabled.is_(True))
+            )
+            ids = {row for row in enabled.scalars().all()}
+            positioned = await s.execute(select(Position.user_id).distinct())
+            ids.update(positioned.scalars().all())
+            if not ids:
+                return [_OWNER_USER_ID]
+            return sorted(ids)
+
+    # ---- snaptrade credentials -------------------------------------------
+
+    async def get_snaptrade_credentials(
+        self, user_id: uuid.UUID
+    ) -> SnaptradeCredentials | None:
+        async with self._session() as s:
+            return await s.get(SnaptradeCredentials, user_id)
+
+    async def save_snaptrade_credentials(
+        self,
+        *,
+        user_id: uuid.UUID,
+        snaptrade_user_id: str,
+        user_secret_enc: bytes,
+    ) -> None:
+        async with self._session() as s:
+            row = await s.get(SnaptradeCredentials, user_id)
+            if row is None:
+                s.add(
+                    SnaptradeCredentials(
+                        user_id=user_id,
+                        snaptrade_user_id=snaptrade_user_id,
+                        user_secret_enc=user_secret_enc,
+                    )
+                )
+            else:
+                row.snaptrade_user_id = snaptrade_user_id
+                row.user_secret_enc = user_secret_enc
+            await s.commit()
+
+    async def update_snaptrade_status(
+        self,
+        user_id: uuid.UUID,
+        *,
+        connected_at: datetime | None = None,
+        last_sync_at: datetime | None = None,
+        last_sync_error: str | None = None,
+    ) -> None:
+        async with self._session() as s:
+            row = await s.get(SnaptradeCredentials, user_id)
+            if row is None:
+                return
+            if connected_at is not None:
+                row.connected_at = connected_at
+            if last_sync_at is not None:
+                row.last_sync_at = last_sync_at
+            row.last_sync_error = last_sync_error
+            await s.commit()
 
     # ---- positions -------------------------------------------------------
 
@@ -394,7 +460,11 @@ class Repo:
                 fingerprint=fingerprint,
             )
             s.add(alert)
-            await s.commit()
+            try:
+                await s.commit()
+            except IntegrityError:
+                await s.rollback()
+                return None
             return alert.id
 
     async def recent_alerts(

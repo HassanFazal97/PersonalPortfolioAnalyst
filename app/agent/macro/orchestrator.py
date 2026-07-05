@@ -19,6 +19,7 @@ import hashlib
 import json
 import time
 import traceback
+import uuid
 from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -27,11 +28,14 @@ from app.agent.budget import Budget
 from app.agent.loop import call_and_log
 from app.agent.macro import specialists
 from app.agent.prompts import MACRO_SYNTHESIS_PROMPT, PROMPT_VERSION
-from app.config import get_settings
+from app.auth.context import set_current_user_id
+from app.config import DEFAULT_USER_ID, get_settings
 from app.db.repo import Repo
 from app.observability.logging import Observer
 from app.tools import portfolio
 from app.tools.registry import ToolContext
+
+_OWNER_USER_ID = uuid.UUID(DEFAULT_USER_ID)
 
 
 def _get_client(client: Any) -> Any:
@@ -50,9 +54,17 @@ def _fingerprint(alert: dict[str, Any]) -> str:
     raw = alert.get("fingerprint")
     if isinstance(raw, str) and raw.strip():
         return f"{alert.get('category', 'macro')}:{raw.strip().lower()}"
-    # Fall back to a hash of the headline so dedup still holds.
     digest = hashlib.sha256((alert.get("headline") or "").encode()).hexdigest()[:16]
     return f"{alert.get('category', 'macro')}:{digest}"
+
+
+def format_alert_message(alert: dict[str, Any]) -> str:
+    """Outbound text: headline first, then body (plain text, no markdown)."""
+    headline = (alert.get("headline") or "").strip()
+    body = (alert.get("body") or "").strip()
+    if headline and body:
+        return f"{headline}\n\n{body}"
+    return headline or body
 
 
 def parse_alerts(text: str) -> list[dict[str, Any]]:
@@ -83,10 +95,16 @@ def parse_alerts(text: str) -> list[dict[str, Any]]:
     return out
 
 
-async def run_macro_scan(db: Repo, *, client: Any = None) -> dict[str, Any]:
+async def run_macro_scan(
+    db: Repo,
+    *,
+    user_id: uuid.UUID | None = None,
+    client: Any = None,
+) -> dict[str, Any]:
     settings = get_settings()
+    uid = user_id or _OWNER_USER_ID
     client = _get_client(client)
-    ctx = ToolContext(settings=settings, repo=db)
+    ctx = ToolContext(settings=settings, repo=db, user_id=uid)
 
     started = time.monotonic()
     today = datetime.now(ZoneInfo(settings.tz)).date().isoformat()
@@ -95,11 +113,12 @@ async def run_macro_scan(db: Repo, *, client: Any = None) -> dict[str, Any]:
         user_message="[macro scan]",
         model=settings.macro_model,
         prompt_version=PROMPT_VERSION,
+        user_id=uid,
     )
     observer = Observer(db, run_id)
     budget = Budget(
-        max_iterations=settings.digest_max_iterations,
-        max_cost_usd=settings.digest_max_cost_usd,
+        max_iterations=settings.macro_max_iterations,
+        max_cost_usd=settings.macro_max_cost_usd,
         model=settings.macro_model,
     )
 
@@ -107,8 +126,6 @@ async def run_macro_scan(db: Repo, *, client: Any = None) -> dict[str, Any]:
         pf = await portfolio.get_portfolio({}, ctx)
         tickers = [p["ticker"] for p in pf.get("positions", [])]
 
-        # Stage 2 — specialists in parallel, each on its own iteration band so
-        # their logged model calls don't collide.
         findings = await asyncio.gather(
             *(
                 specialists.run_specialist(
@@ -121,12 +138,14 @@ async def run_macro_scan(db: Repo, *, client: Any = None) -> dict[str, Any]:
                     iteration_base=(idx + 1) * 10,
                 )
                 for idx, category in enumerate(specialists.CATEGORIES)
+                if not budget.exceeded()
             )
         )
         events = [e for group in findings for e in group]
 
         alerts: list[dict[str, Any]] = []
-        if events:
+        if events and not budget.exceeded():
+            budget.start_iteration()
             context = json.dumps({"holdings": tickers, "findings": events}, default=str)
             content, _ = await call_and_log(
                 client,
@@ -143,7 +162,7 @@ async def run_macro_scan(db: Repo, *, client: Any = None) -> dict[str, Any]:
             ).strip()
             alerts = parse_alerts(text)
 
-        delivered = await _deliver_alerts(db, run_id, alerts)
+        delivered = await _deliver_alerts(db, run_id, alerts, user_id=uid)
 
         await db.finalize_run(
             run_id,
@@ -158,6 +177,7 @@ async def run_macro_scan(db: Repo, *, client: Any = None) -> dict[str, Any]:
         return {
             "run_id": str(run_id),
             "status": "completed",
+            "user_id": str(uid),
             "events_found": len(events),
             "alerts": delivered,
         }
@@ -174,11 +194,27 @@ async def run_macro_scan(db: Repo, *, client: Any = None) -> dict[str, Any]:
             latency_ms=int((time.monotonic() - started) * 1000),
             error_detail=traceback.format_exc(),
         )
-        return {"run_id": str(run_id), "status": "error", "alerts": []}
+        return {"run_id": str(run_id), "status": "error", "user_id": str(uid), "alerts": []}
+
+
+async def run_macro_scans_for_all(db: Repo, *, client: Any = None) -> list[dict[str, Any]]:
+    """Scheduled entry point: scan every active user independently."""
+    results: list[dict[str, Any]] = []
+    for uid in await db.list_active_user_ids():
+        set_current_user_id(uid)
+        try:
+            results.append(await run_macro_scan(db, user_id=uid, client=client))
+        finally:
+            set_current_user_id(None)
+    return results
 
 
 async def _deliver_alerts(
-    db: Repo, run_id: Any, alerts: list[dict[str, Any]]
+    db: Repo,
+    run_id: Any,
+    alerts: list[dict[str, Any]],
+    *,
+    user_id: uuid.UUID,
 ) -> list[dict[str, Any]]:
     """Store each new alert and enqueue it for delivery. Dedup by fingerprint
     means a recurring scan that re-sees an event silently skips it."""
@@ -192,10 +228,12 @@ async def _deliver_alerts(
             body=alert["body"],
             tickers=alert["tickers"],
             fingerprint=alert["fingerprint"],
+            user_id=user_id,
         )
         if alert_id is None:
-            continue  # already alerted this event
-        await db.enqueue_outbound(alert["body"])
+            continue
+        message = format_alert_message(alert)
+        await db.enqueue_outbound(message, user_id=user_id)
         await db.mark_alert_delivered(alert_id)
         delivered.append({**alert, "id": str(alert_id)})
     return delivered

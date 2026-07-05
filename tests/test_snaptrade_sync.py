@@ -1,8 +1,10 @@
+import uuid
 from decimal import Decimal
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from app.config import DEFAULT_USER_ID
 from app.integrations.snaptrade.sync import sync_wealthsimple_positions
 from tests.fakes import FakeRepo
 
@@ -39,11 +41,13 @@ async def test_sync_wealthsimple_positions_upserts_and_prunes(monkeypatch):
     mock_service.get_account_positions.return_value = [position]
 
     monkeypatch.setattr(
-        "app.integrations.snaptrade.sync.SnapTradeService",
-        lambda settings: mock_service,
+        "app.integrations.snaptrade.sync.service_for_user",
+        AsyncMock(return_value=mock_service),
     )
 
-    summary = await sync_wealthsimple_positions(repo, settings=MagicMock())
+    summary = await sync_wealthsimple_positions(
+        repo, user_id=uuid.UUID(DEFAULT_USER_ID), settings=MagicMock()
+    )
 
     assert summary["positions_upserted"] == 1
     assert summary["positions_removed"] == 1

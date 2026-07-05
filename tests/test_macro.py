@@ -98,7 +98,7 @@ async def test_run_macro_scan_creates_and_enqueues_alerts(monkeypatch):
     assert result["events_found"] == len(specialists.CATEGORIES)
     assert len(result["alerts"]) == 1
     # Delivered: stored + enqueued to the outbound queue.
-    assert repo.outbound == ["Fed held rates; watch your rate-sensitive names."]
+    assert repo.outbound == ["Fed holds\n\nFed held rates; watch your rate-sensitive names."]
     assert any(a.delivered for a in repo.alerts.values())
     # Run finalized as completed.
     assert list(repo.runs.values())[0]["status"] == "completed"
@@ -126,4 +126,4 @@ async def test_run_macro_scan_dedupes_repeat_events(monkeypatch):
 
     assert len(first["alerts"]) == 1
     assert second["alerts"] == []  # same fingerprint -> not re-delivered
-    assert repo.outbound == ["Oil jumped."]  # enqueued exactly once
+    assert repo.outbound == ["Oil shock\n\nOil jumped."]

@@ -19,7 +19,7 @@ from pydantic import BaseModel
 from app.agent.budget import Budget
 from app.agent.digest_pipeline import run_digest_pipeline
 from app.agent.loop import run_agent
-from app.agent.macro.orchestrator import run_macro_scan
+from app.agent.macro.orchestrator import run_macro_scan, run_macro_scans_for_all
 from app.agent.prompts import CHAT_SYSTEM_PROMPT
 from app.auth.context import set_current_user_id
 from app.auth.jwt import AuthError, jwks_url_for, verify_supabase_jwt
@@ -27,7 +27,12 @@ from app.config import DEFAULT_USER_ID, get_settings
 from app.db.repo import Repo
 from app.delivery.imessage import MAX_ATTEMPTS, pending_payload
 from app.delivery.shortcuts import get_latest_digest
-from app.integrations.snaptrade.client import SnapTradeError, SnapTradeService
+from app.integrations.snaptrade.client import SnapTradeError
+from app.integrations.snaptrade.onboarding import (
+    portfolio_status,
+    register_snaptrade_user,
+    service_for_user,
+)
 from app.integrations.snaptrade.sync import sync_wealthsimple_positions
 from app.scheduler import DigestScheduler, IntervalScheduler
 from app.tools.registry import CHAT_TOOLS
@@ -57,7 +62,7 @@ async def lifespan(app: FastAPI):
 
         if settings.macro_scan_interval_minutes > 0:
             async def _run_macro() -> None:
-                await run_macro_scan(repo)
+                await run_macro_scans_for_all(repo)
 
             macro_scheduler = IntervalScheduler(
                 _run_macro,
@@ -177,7 +182,16 @@ def create_app() -> FastAPI:
         db_ok = await repo.ping() if repo is not None else False
         scheduler = app.state.scheduler
         scheduler_ok = bool(scheduler and getattr(scheduler, "running", False))
-        return {"ok": db_ok, "db": db_ok, "scheduler": scheduler_ok}
+        macro_scheduler = app.state.macro_scheduler
+        macro_scheduler_ok = bool(
+            macro_scheduler and getattr(macro_scheduler, "running", False)
+        )
+        return {
+            "ok": db_ok,
+            "db": db_ok,
+            "scheduler": scheduler_ok,
+            "macro_scheduler": macro_scheduler_ok,
+        }
 
     @app.get("/auth/whoami")
     async def whoami(request: Request) -> dict:
@@ -278,10 +292,14 @@ def create_app() -> FastAPI:
     # ---- Macro alerts --------------------------------------------------
 
     @app.post("/macro/scan")
-    async def macro_scan() -> dict:
-        """Run the macro/geopolitical specialists now and enqueue any new alerts."""
+    async def macro_scan(request: Request) -> dict:
+        """Run macro specialists for the authenticated user (or all users via service token)."""
         repo = _require_repo(app)
-        return await run_macro_scan(repo)
+        user_id = _user_id(request)
+        if user_id == _OWNER_USER_ID and request.headers.get("X-Macro-Scan-All") == "1":
+            results = await run_macro_scans_for_all(repo)
+            return {"scans": results}
+        return await run_macro_scan(repo, user_id=user_id)
 
     @app.get("/alerts")
     async def list_alerts(request: Request, limit: int = 20) -> dict:
@@ -349,21 +367,39 @@ def create_app() -> FastAPI:
 
     # ---- Wealthsimple sync (SnapTrade) ---------------------------------
 
-    @app.get("/portfolio/connect-url")
-    async def portfolio_connect_url() -> dict:
-        """Return a SnapTrade Connection Portal URL for linking Wealthsimple."""
+    @app.post("/portfolio/snaptrade/register")
+    async def portfolio_register(request: Request) -> dict:
+        """Register a SnapTrade user for the caller (idempotent)."""
+        repo = _require_repo(app)
+        user_id = _user_id(request)
         try:
-            service = SnapTradeService(get_settings())
+            return await register_snaptrade_user(repo, user_id, get_settings())
+        except SnapTradeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @app.get("/portfolio/connect-url")
+    async def portfolio_connect_url(request: Request) -> dict:
+        """Return a SnapTrade Connection Portal URL for linking Wealthsimple."""
+        repo = _require_repo(app)
+        user_id = _user_id(request)
+        try:
+            service = await service_for_user(repo, user_id, get_settings())
             return {"url": service.connection_portal_url()}
         except SnapTradeError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
 
+    @app.get("/portfolio/status")
+    async def portfolio_brokerage_status(request: Request) -> dict:
+        """Brokerage registration/connection/sync status for onboarding."""
+        repo = _require_repo(app)
+        return await portfolio_status(repo, _user_id(request), get_settings())
+
     @app.post("/portfolio/sync")
-    async def portfolio_sync() -> dict:
+    async def portfolio_sync(request: Request) -> dict:
         """Pull live Wealthsimple holdings from SnapTrade into positions."""
         repo = _require_repo(app)
         try:
-            return await sync_wealthsimple_positions(repo)
+            return await sync_wealthsimple_positions(repo, user_id=_user_id(request))
         except (SnapTradeError, RuntimeError) as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
 
