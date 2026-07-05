@@ -73,6 +73,9 @@ class Settings(BaseSettings):
     supabase_url: str = Field(default="", alias="SUPABASE_URL")
     supabase_jwt_secret: str = Field(default="", alias="SUPABASE_JWT_SECRET")
     supabase_jwt_aud: str = Field(default="authenticated", alias="SUPABASE_JWT_AUD")
+    # Publishable (anon) key — public by design; embedded in the web app pages
+    # so the browser can sign in with supabase-js.
+    supabase_anon_key: str = Field(default="", alias="SUPABASE_ANON_KEY")
 
     model: str = Field(default="claude-sonnet-4-6", alias="MODEL")
     # Cheap, fast model for news signal tagging (risk/opportunity/neutral).

@@ -142,7 +142,8 @@ def _nav(active: str) -> str:
         '<nav><div class="nav-inner">'
         '<a class="logo" href="/">Cir<span>via</span></a>'
         f'<div class="nav-links">{links}'
-        f'<a class="btn" href="mailto:{CONTACT_EMAIL}?subject=Cirvia%20early%20access">Request access</a>'
+        '<a href="/app">Sign in</a>'
+        '<a class="btn" href="/app">Get started</a>'
         "</div></div></nav>"
     )
 

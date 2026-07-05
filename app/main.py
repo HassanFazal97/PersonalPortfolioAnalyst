@@ -46,6 +46,12 @@ from app.landing import (
 from app.scheduler import DigestScheduler, IntervalScheduler
 from app.tools import portfolio
 from app.tools.registry import CHAT_TOOLS, ToolContext
+from app.webapp import (
+    NOT_CONFIGURED_HTML,
+    dashboard_page,
+    login_page,
+    onboarding_page,
+)
 
 
 @asynccontextmanager
@@ -116,7 +122,19 @@ _bearer = HTTPBearer(auto_error=False)
 # Exempt from bearer auth so platform liveness probes and uptime pingers — which
 # cannot attach the token — can reach it. /health returns no sensitive data.
 # Every other route stays authed-by-default via the app-level dependency.
-_AUTH_EXEMPT_PATHS = {"/", "/health", "/contact", "/privacy", "/terms", "/pricing"}
+_AUTH_EXEMPT_PATHS = {
+    "/",
+    "/health",
+    "/contact",
+    "/privacy",
+    "/terms",
+    "/pricing",
+    # The web app pages are static HTML shells; the browser authenticates the
+    # API calls it makes from them with a Supabase JWT.
+    "/app",
+    "/app/onboarding",
+    "/app/dashboard",
+}
 
 _OWNER_USER_ID = uuid.UUID(DEFAULT_USER_ID)
 
@@ -264,6 +282,29 @@ def create_app() -> FastAPI:
     @app.get("/pricing", response_class=HTMLResponse)
     async def pricing_page() -> HTMLResponse:
         return HTMLResponse(PRICING_HTML)
+
+    # ---- Signed-in web app (Supabase JS auth in the browser) -----------
+
+    def _webapp_html(render) -> HTMLResponse:
+        settings = get_settings()
+        if not settings.supabase_url or not settings.supabase_anon_key:
+            return HTMLResponse(NOT_CONFIGURED_HTML, status_code=503)
+        return HTMLResponse(render(settings.supabase_url, settings.supabase_anon_key))
+
+    @app.get("/app", response_class=HTMLResponse)
+    async def app_login() -> HTMLResponse:
+        """Sign in / sign up page."""
+        return _webapp_html(login_page)
+
+    @app.get("/app/onboarding", response_class=HTMLResponse)
+    async def app_onboarding() -> HTMLResponse:
+        """Connect brokerage -> sync -> digest preferences."""
+        return _webapp_html(onboarding_page)
+
+    @app.get("/app/dashboard", response_class=HTMLResponse)
+    async def app_dashboard() -> HTMLResponse:
+        """Holdings, digest, alerts, and chat."""
+        return _webapp_html(dashboard_page)
 
     @app.get("/health")
     async def health() -> dict:

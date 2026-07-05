@@ -19,6 +19,7 @@ Host is **Railway** (single container). The image runs migrations, then serves.
 | `DB_SSL` | yes (Supabase) | `true` |
 | `API_TOKEN` | yes | service/owner bearer token (cron, Mac worker, single-user) |
 | `SUPABASE_URL` | multi-user | `https://<ref>.supabase.co` — enables per-user JWT auth via JWKS |
+| `SUPABASE_ANON_KEY` | web app | publishable key — powers `/app` sign-in pages (public by design) |
 | `SUPABASE_JWT_SECRET` | legacy only | HS256 shared-secret fallback; leave unset on asymmetric projects |
 | `SUPABASE_JWT_AUD` | no | JWT audience, default `authenticated` |
 | `MIGRATION_DATABASE_URL` | RLS switch | owner connection used only for migrations (see below) |
