@@ -11,6 +11,7 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric import ec
 from fastapi import HTTPException
 from fastapi.security import HTTPAuthorizationCredentials
+from fastapi.testclient import TestClient
 from jwt.algorithms import ECAlgorithm
 
 import app.auth.jwt as auth_jwt
@@ -19,11 +20,14 @@ from app.agent.budget import Budget
 from app.agent.loop import run_agent
 from app.auth.context import get_current_user_id, set_current_user_id
 from app.auth.jwt import AuthError, verify_supabase_jwt
+from app.config import get_settings
+from app.main import create_app
 from app.tools.registry import CHAT_TOOLS
 from tests.fakes import FakeRepo, ScriptedAnthropic, text_turn
 
 SECRET = "test-jwt-secret-with-at-least-32-bytes-of-length"
 JWKS_URL = "https://project.supabase.co/auth/v1/.well-known/jwks.json"
+TOKEN = "svc-token-abc"
 
 
 def _b64(data: bytes) -> str:
@@ -241,3 +245,46 @@ async def test_require_auth_jwt_ignored_when_unconfigured(monkeypatch):
     monkeypatch.setattr(main, "get_settings", lambda: _settings())
     with pytest.raises(HTTPException):
         await main.require_auth(_request(), _creds(make_jwt(_claims())))
+
+
+# ---- /auth/whoami endpoint (end-to-end via TestClient) --------------------
+
+
+def _env(monkeypatch, **over):
+    monkeypatch.setenv("API_TOKEN", TOKEN)
+    monkeypatch.setenv("DATABASE_URL", "")
+    monkeypatch.setenv("SUPABASE_URL", over.get("supabase_url", ""))
+    get_settings.cache_clear()
+
+
+def test_whoami_service_token_is_owner(monkeypatch):
+    _env(monkeypatch)
+    with TestClient(create_app()) as client:
+        resp = client.get("/auth/whoami", headers={"Authorization": f"Bearer {TOKEN}"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["is_owner"] is True
+    assert body["user_id"] == str(main._OWNER_USER_ID)
+
+
+def test_whoami_requires_auth(monkeypatch):
+    _env(monkeypatch)
+    with TestClient(create_app()) as client:
+        assert client.get("/auth/whoami").status_code == 401
+
+
+def test_whoami_jwt_resolves_user(monkeypatch):
+    _env(monkeypatch, supabase_url="https://project.supabase.co")
+    auth_jwt.cache_clear()  # avoid a JWKS entry cached by an earlier test
+    priv, jwks, kid = _es256_keypair(kid="whoami-kid")
+    monkeypatch.setattr(auth_jwt, "_fetch_jwks", lambda url: jwks)
+    app = create_app()
+    with TestClient(app) as client:
+        app.state.repo = FakeRepo()  # inject (lifespan set it None without a DB)
+        token = make_es256(_claims(email="jane@example.com"), priv, kid)
+        resp = client.get("/auth/whoami", headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["is_owner"] is False
+    assert body["email"] == "jane@example.com"
+    assert body["user_id"] != str(main._OWNER_USER_ID)

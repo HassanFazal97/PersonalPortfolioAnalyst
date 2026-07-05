@@ -179,6 +179,22 @@ def create_app() -> FastAPI:
         scheduler_ok = bool(scheduler and getattr(scheduler, "running", False))
         return {"ok": db_ok, "db": db_ok, "scheduler": scheduler_ok}
 
+    @app.get("/auth/whoami")
+    async def whoami(request: Request) -> dict:
+        """Echo the user the current credential resolves to — a quick auth check.
+        Works for both the service/owner token and a Supabase JWT."""
+        user_id = _user_id(request)
+        repo: Repo | None = app.state.repo
+        email = None
+        if repo is not None:
+            user = await repo.get_user(user_id)
+            email = user.email if user is not None else None
+        return {
+            "user_id": str(user_id),
+            "email": email,
+            "is_owner": user_id == _OWNER_USER_ID,
+        }
+
     @app.post("/chat")
     async def chat(req: ChatRequest, request: Request) -> dict:
         settings = get_settings()

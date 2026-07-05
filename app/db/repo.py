@@ -96,6 +96,10 @@ class Repo:
 
     # ---- users -----------------------------------------------------------
 
+    async def get_user(self, user_id: uuid.UUID) -> User | None:
+        async with self._session() as s:
+            return await s.get(User, user_id)
+
     async def get_or_create_user(
         self, *, auth_id: uuid.UUID, email: str | None = None
     ) -> uuid.UUID:

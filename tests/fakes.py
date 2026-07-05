@@ -40,9 +40,15 @@ class FakeRepo:
     async def get_or_create_user(self, *, auth_id, email=None):
         if not hasattr(self, "_users_by_auth"):
             self._users_by_auth: dict[uuid.UUID, uuid.UUID] = {}
+            self._users_by_id: dict[uuid.UUID, Any] = {}
         if auth_id not in self._users_by_auth:
-            self._users_by_auth[auth_id] = uuid.uuid4()
+            uid = uuid.uuid4()
+            self._users_by_auth[auth_id] = uid
+            self._users_by_id[uid] = SimpleNamespace(id=uid, auth_id=auth_id, email=email)
         return self._users_by_auth[auth_id]
+
+    async def get_user(self, user_id):
+        return getattr(self, "_users_by_id", {}).get(user_id)
 
     async def finalize_run(self, run_id, **kwargs):
         self.runs[run_id].update(kwargs)
