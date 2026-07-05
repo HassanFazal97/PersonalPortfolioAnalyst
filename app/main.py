@@ -19,7 +19,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 
 from app.agent.budget import Budget
-from app.agent.digest_pipeline import run_digest_pipeline
+from app.agent.digest_pipeline import run_digest_pipeline, run_digests_for_all
 from app.agent.loop import run_agent
 from app.agent.macro.orchestrator import run_macro_scan, run_macro_scans_for_all
 from app.agent.prompts import CHAT_SYSTEM_PROMPT
@@ -62,7 +62,7 @@ async def lifespan(app: FastAPI):
 
     if repo is not None:
         async def _run_digest() -> None:
-            await run_digest_pipeline(repo)
+            await run_digests_for_all(repo)
 
         scheduler = DigestScheduler(
             _run_digest, cron=settings.digest_cron, timezone=settings.tz
@@ -367,15 +367,20 @@ def create_app() -> FastAPI:
         return {"runs": [_run_meta(r) for r in runs]}
 
     @app.post("/digest/run")
-    async def digest_run() -> dict:
+    async def digest_run(request: Request) -> dict:
         repo = _require_repo(app)
-        return await run_digest_pipeline(repo)
+        user_id = _user_id(request)
+        if user_id == _OWNER_USER_ID and request.headers.get("X-Digest-Run-All") == "1":
+            return {"digests": await run_digests_for_all(repo)}
+        return await run_digest_pipeline(repo, user_id=user_id, force=True)
 
     @app.get("/digest/latest")
-    async def digest_latest() -> dict:
-        settings = get_settings()
+    async def digest_latest(request: Request) -> dict:
         repo = _require_repo(app)
-        latest = await get_latest_digest(repo, tz=settings.tz)
+        user_id = _user_id(request)
+        user = await repo.get_user(user_id)
+        tz = user.timezone if user is not None else get_settings().tz
+        latest = await get_latest_digest(repo, user_id=user_id, tz=tz)
         if latest is None:
             raise HTTPException(status_code=404, detail="no digest for today yet")
         return latest

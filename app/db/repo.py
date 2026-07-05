@@ -153,6 +153,24 @@ class Repo:
                 return [_OWNER_USER_ID]
             return sorted(ids)
 
+    async def list_digest_recipients(self) -> list[uuid.UUID]:
+        """Users eligible for scheduled digests: enabled and holding at least one position."""
+        async with self._session() as s:
+            enabled = await s.execute(
+                select(User.id).where(User.digest_enabled.is_(True))
+            )
+            ids = list(enabled.scalars().all())
+            if not ids:
+                return [_OWNER_USER_ID]
+            out: list[uuid.UUID] = []
+            for uid in ids:
+                pos = await s.execute(
+                    select(Position.id).where(Position.user_id == uid).limit(1)
+                )
+                if pos.scalar_one_or_none() is not None:
+                    out.append(uid)
+            return sorted(out) if out else [_OWNER_USER_ID]
+
     async def list_macro_recipients(self) -> list[uuid.UUID]:
         """Pro users (macro alerts are a Pro feature) with digests enabled."""
         async with self._session() as s:

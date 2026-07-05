@@ -25,6 +25,8 @@ class ToolContext:
     user_id: Any | None = None
     # Phase B: when true, send_digest also enqueues to outbound_messages.
     enqueue_delivery: bool = False
+    # IANA timezone for digest_date (defaults to settings.tz in send_digest).
+    timezone: str | None = None
     # Anthropic client + live budget, threaded through so tools that make their
     # own model calls (e.g. news signal classification) log and cost-account
     # against the current run. Optional: absent in unit tests / prefetch.

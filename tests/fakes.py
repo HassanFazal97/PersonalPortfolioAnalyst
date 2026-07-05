@@ -19,6 +19,7 @@ class FakeRepo:
         self.model_calls: list[dict[str, Any]] = []
         self.tool_calls: list[dict[str, Any]] = []
         self.digests: dict[date, SimpleNamespace] = {}
+        self._digests_by_user: dict[tuple[Any, date], SimpleNamespace] = {}
         self.outbound: list[str] = []
         self._outbox: dict[uuid.UUID, SimpleNamespace] = {}
         self._positions = positions or []
@@ -74,6 +75,20 @@ class FakeRepo:
         if digest_enabled is not None:
             user.digest_enabled = digest_enabled
 
+    async def list_digest_recipients(self):
+        from app.config import DEFAULT_USER_ID
+
+        owner = uuid.UUID(DEFAULT_USER_ID)
+        ids: list[uuid.UUID] = []
+        for u in self._users_by_id.values():
+            if not getattr(u, "digest_enabled", True):
+                continue
+            if any(p.user_id == u.id for p in getattr(self, "_position_rows", {}).values()):
+                ids.append(u.id)
+        if not ids and (self._positions or getattr(self, "_position_rows", {})):
+            return [owner]
+        return sorted(ids) if ids else []
+
     async def list_macro_recipients(self):
         return sorted(
             u.id for u in self._users_by_id.values()
@@ -117,38 +132,61 @@ class FakeRepo:
     async def upsert_position(self, *, ticker, quantity, avg_cost, currency, account, user_id=None):
         from decimal import Decimal
 
-        key = (ticker, account)
+        from app.config import DEFAULT_USER_ID
+
+        uid = user_id or uuid.UUID(DEFAULT_USER_ID)
         if not hasattr(self, "_position_rows"):
-            self._position_rows: dict[tuple[str, str], Any] = {}
+            self._position_rows: dict[tuple[Any, str, str], Any] = {}
+        key = (uid, ticker, account)
         self._position_rows[key] = SimpleNamespace(
             ticker=ticker,
             quantity=Decimal(str(quantity)),
             avg_cost=Decimal(str(avg_cost)),
             currency=currency,
             account=account,
-            user_id=user_id,
+            user_id=uid,
         )
 
     async def prune_positions_except(self, keep: set[tuple[str, str]], *, user_id=None) -> int:
+        from app.config import DEFAULT_USER_ID
+
+        uid = user_id or uuid.UUID(DEFAULT_USER_ID)
         if not hasattr(self, "_position_rows"):
             self._position_rows = {}
-        stale = [k for k in self._position_rows if k not in keep]
+        stale = [
+            k for k in self._position_rows
+            if (k[1], k[2]) not in keep and k[0] == uid
+        ]
         for k in stale:
             del self._position_rows[k]
         return len(stale)
 
     async def list_positions(self, *, user_id=None):
-        if hasattr(self, "_position_rows"):
-            return list(self._position_rows.values())
-        return self._positions
+        from app.config import DEFAULT_USER_ID
+
+        uid = user_id or uuid.UUID(DEFAULT_USER_ID)
+        if hasattr(self, "_position_rows") and self._position_rows:
+            return [p for p in self._position_rows.values() if p.user_id == uid]
+        if uid == uuid.UUID(DEFAULT_USER_ID):
+            return self._positions
+        return []
 
     async def upsert_digest(self, *, run_id, body, digest_date, user_id=None):
-        self.digests[digest_date] = SimpleNamespace(
+        from app.config import DEFAULT_USER_ID
+
+        uid = user_id or uuid.UUID(DEFAULT_USER_ID)
+        row = SimpleNamespace(
             run_id=run_id, body=body, digest_date=digest_date, created_at=None
         )
+        self._digests_by_user[(uid, digest_date)] = row
+        if uid == uuid.UUID(DEFAULT_USER_ID):
+            self.digests[digest_date] = row
 
     async def get_digest(self, digest_date, *, user_id=None):
-        return self.digests.get(digest_date)
+        from app.config import DEFAULT_USER_ID
+
+        uid = user_id or uuid.UUID(DEFAULT_USER_ID)
+        return self._digests_by_user.get((uid, digest_date))
 
     async def list_active_user_ids(self):
         from app.config import DEFAULT_USER_ID

@@ -100,6 +100,7 @@ class Settings(BaseSettings):
     free_monthly_cost_cap_usd: float = Field(default=0.75, alias="FREE_MONTHLY_COST_CAP_USD")
     pro_monthly_cost_cap_usd: float = Field(default=6.00, alias="PRO_MONTHLY_COST_CAP_USD")
     free_daily_chat_limit: int = Field(default=5, alias="FREE_DAILY_CHAT_LIMIT")
+    free_max_digest_holdings: int = Field(default=3, alias="FREE_MAX_DIGEST_HOLDINGS")
 
     digest_cron: str = Field(default="45 7 * * 1-5", alias="DIGEST_CRON")
     tz: str = Field(default="America/Toronto", alias="TZ")

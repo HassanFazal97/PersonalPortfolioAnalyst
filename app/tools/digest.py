@@ -52,7 +52,8 @@ async def send_digest(payload: dict[str, Any], ctx: Any = None) -> dict[str, Any
         raise RuntimeError("send_digest requires database access")
 
     settings = get_settings()
-    digest_date = _today(settings.tz)
+    tz = getattr(ctx, "timezone", None) or settings.tz
+    digest_date = _today(tz)
     run_id = getattr(ctx, "run_id", None)
     user_id = getattr(ctx, "user_id", None)
 

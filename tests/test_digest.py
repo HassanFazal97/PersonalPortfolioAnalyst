@@ -93,7 +93,7 @@ async def test_digest_pipeline_creates_bounded_digest(monkeypatch):
     )
     repo = FakeRepo(positions=[_pos("NVDA", 10, 90.0, "USD")])
 
-    result = await run_digest_pipeline(repo, client=client)
+    result = await run_digest_pipeline(repo, client=client, force=True)
 
     assert result["status"] == "completed"
     assert len(result["body"]) <= DIGEST_MAX_CHARS
