@@ -64,6 +64,11 @@ class Settings(BaseSettings):
     model: str = Field(default="claude-sonnet-4-6", alias="MODEL")
     # Cheap, fast model for news signal tagging (risk/opportunity/neutral).
     classifier_model: str = Field(default="claude-haiku-4-5", alias="CLASSIFIER_MODEL")
+    # Model for macro/geopolitical specialists (needs web_search support).
+    macro_model: str = Field(default="claude-sonnet-4-6", alias="MACRO_MODEL")
+    # How often the macro scan runs, in minutes. 0 disables the in-process
+    # interval job (still triggerable via POST /macro/scan or external cron).
+    macro_scan_interval_minutes: int = Field(default=0, alias="MACRO_SCAN_INTERVAL_MINUTES")
     # Owner attribution until per-user auth lands (roadmap Phase 2).
     default_user_id: str = Field(default=DEFAULT_USER_ID, alias="DEFAULT_USER_ID")
 

@@ -22,6 +22,7 @@ class FakeRepo:
         self.outbound: list[str] = []
         self._outbox: dict[uuid.UUID, SimpleNamespace] = {}
         self._positions = positions or []
+        self.alerts: dict[str, SimpleNamespace] = {}
 
     async def create_run(self, *, trigger, user_message, model, prompt_version):
         run_id = uuid.uuid4()
@@ -85,6 +86,26 @@ class FakeRepo:
 
     async def get_digest(self, digest_date):
         return self.digests.get(digest_date)
+
+    async def create_alert_if_new(self, *, run_id, category, severity, headline,
+                                  body, tickers, fingerprint, user_id=None):
+        if fingerprint in self.alerts:
+            return None
+        alert_id = uuid.uuid4()
+        self.alerts[fingerprint] = SimpleNamespace(
+            id=alert_id, run_id=run_id, category=category, severity=severity,
+            headline=headline, body=body, tickers=tickers, fingerprint=fingerprint,
+            delivered=False, created_at=None,
+        )
+        return alert_id
+
+    async def recent_alerts(self, *, limit=20, user_id=None):
+        return list(self.alerts.values())[:limit]
+
+    async def mark_alert_delivered(self, alert_id):
+        for a in self.alerts.values():
+            if a.id == alert_id:
+                a.delivered = True
 
     async def enqueue_outbound(self, body):
         msg_id = uuid.uuid4()

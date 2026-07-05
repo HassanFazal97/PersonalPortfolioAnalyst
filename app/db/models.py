@@ -202,6 +202,30 @@ class OutboundMessage(Base):
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class Alert(Base):
+    __tablename__ = "alerts"
+    __table_args__ = (UniqueConstraint("user_id", "fingerprint"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    user_id: Mapped[uuid.UUID] = _user_id_column()
+    run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("agent_runs.id")
+    )
+    category: Mapped[str] = mapped_column(Text, nullable=False)
+    severity: Mapped[str] = mapped_column(Text, nullable=False)
+    headline: Mapped[str] = mapped_column(Text, nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    tickers: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'"))
+    fingerprint: Mapped[str] = mapped_column(Text, nullable=False)
+    delivered: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class SchemaMigration(Base):
     """Tracks which numbered migration files have been applied."""
 

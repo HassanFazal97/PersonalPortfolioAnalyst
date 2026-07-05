@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import (
 from app.config import DEFAULT_USER_ID
 from app.db.models import (
     AgentRun,
+    Alert,
     Digest,
     ModelCall,
     OutboundMessage,
@@ -315,6 +316,69 @@ class Repo:
                 )
             )
             return result.scalar_one_or_none()
+
+    # ---- macro alerts ----------------------------------------------------
+
+    async def create_alert_if_new(
+        self,
+        *,
+        run_id: uuid.UUID | None,
+        category: str,
+        severity: str,
+        headline: str,
+        body: str,
+        tickers: list[str],
+        fingerprint: str,
+        user_id: uuid.UUID | None = None,
+    ) -> uuid.UUID | None:
+        """Insert an alert unless (user_id, fingerprint) already exists.
+
+        Returns the new alert id, or None when this event was already alerted
+        (dedup is enforced by the unique constraint — this is the happy path
+        for a recurring scan re-seeing the same story)."""
+        uid = user_id or _OWNER_USER_ID
+        async with self._session() as s:
+            existing = await s.execute(
+                select(Alert.id).where(
+                    Alert.user_id == uid, Alert.fingerprint == fingerprint
+                )
+            )
+            if existing.scalar_one_or_none() is not None:
+                return None
+            alert = Alert(
+                user_id=uid,
+                run_id=run_id,
+                category=category,
+                severity=severity,
+                headline=headline,
+                body=body,
+                tickers=tickers,
+                fingerprint=fingerprint,
+            )
+            s.add(alert)
+            await s.commit()
+            return alert.id
+
+    async def recent_alerts(
+        self, *, limit: int = 20, user_id: uuid.UUID | None = None
+    ) -> list[Alert]:
+        uid = user_id or _OWNER_USER_ID
+        async with self._session() as s:
+            result = await s.execute(
+                select(Alert)
+                .where(Alert.user_id == uid)
+                .order_by(Alert.created_at.desc())
+                .limit(limit)
+            )
+            return list(result.scalars().all())
+
+    async def mark_alert_delivered(self, alert_id: uuid.UUID) -> None:
+        async with self._session() as s:
+            alert = await s.get(Alert, alert_id)
+            if alert is not None:
+                alert.delivered = True
+                alert.delivered_at = datetime.now()
+                await s.commit()
 
     # ---- outbound messages (Phase B) ------------------------------------
 

@@ -18,6 +18,7 @@ from pydantic import BaseModel
 from app.agent.budget import Budget
 from app.agent.digest_pipeline import run_digest_pipeline
 from app.agent.loop import run_agent
+from app.agent.macro.orchestrator import run_macro_scan
 from app.agent.prompts import CHAT_SYSTEM_PROMPT
 from app.config import get_settings
 from app.db.repo import Repo
@@ -25,7 +26,7 @@ from app.delivery.imessage import MAX_ATTEMPTS, pending_payload
 from app.delivery.shortcuts import get_latest_digest
 from app.integrations.snaptrade.client import SnapTradeError, SnapTradeService
 from app.integrations.snaptrade.sync import sync_wealthsimple_positions
-from app.scheduler import DigestScheduler
+from app.scheduler import DigestScheduler, IntervalScheduler
 from app.tools.registry import CHAT_TOOLS
 
 
@@ -39,6 +40,7 @@ async def lifespan(app: FastAPI):
     )
     app.state.repo = repo
     app.state.scheduler = None
+    app.state.macro_scheduler = None
 
     if repo is not None:
         async def _run_digest() -> None:
@@ -50,9 +52,23 @@ async def lifespan(app: FastAPI):
         scheduler.start()
         app.state.scheduler = scheduler
 
+        if settings.macro_scan_interval_minutes > 0:
+            async def _run_macro() -> None:
+                await run_macro_scan(repo)
+
+            macro_scheduler = IntervalScheduler(
+                _run_macro,
+                minutes=settings.macro_scan_interval_minutes,
+                timezone=settings.tz,
+            )
+            macro_scheduler.start()
+            app.state.macro_scheduler = macro_scheduler
+
     try:
         yield
     finally:
+        if app.state.macro_scheduler is not None:
+            app.state.macro_scheduler.shutdown()
         if app.state.scheduler is not None:
             app.state.scheduler.shutdown()
         if repo is not None:
@@ -192,6 +208,34 @@ def create_app() -> FastAPI:
         if latest is None:
             raise HTTPException(status_code=404, detail="no digest for today yet")
         return latest
+
+    # ---- Macro alerts --------------------------------------------------
+
+    @app.post("/macro/scan")
+    async def macro_scan() -> dict:
+        """Run the macro/geopolitical specialists now and enqueue any new alerts."""
+        repo = _require_repo(app)
+        return await run_macro_scan(repo)
+
+    @app.get("/alerts")
+    async def list_alerts(limit: int = 20) -> dict:
+        repo = _require_repo(app)
+        alerts = await repo.recent_alerts(limit=limit)
+        return {
+            "alerts": [
+                {
+                    "id": str(a.id),
+                    "category": a.category,
+                    "severity": a.severity,
+                    "headline": a.headline,
+                    "body": a.body,
+                    "tickers": a.tickers,
+                    "delivered": a.delivered,
+                    "created_at": a.created_at.isoformat() if a.created_at else None,
+                }
+                for a in alerts
+            ]
+        }
 
     # ---- Phase B: Mac worker outbox ------------------------------------
 
