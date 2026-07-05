@@ -95,6 +95,12 @@ class Settings(BaseSettings):
     max_tool_output_tokens: int = Field(default=6000, alias="MAX_TOOL_OUTPUT_TOKENS")
     tool_timeout_seconds: float = Field(default=10.0, alias="TOOL_TIMEOUT_SECONDS")
 
+    # Plan gating + per-user monthly Anthropic cost caps (USD). Enforced against
+    # agent_runs.cost_usd so a heavy user can't exceed their plan's economics.
+    free_monthly_cost_cap_usd: float = Field(default=0.75, alias="FREE_MONTHLY_COST_CAP_USD")
+    pro_monthly_cost_cap_usd: float = Field(default=6.00, alias="PRO_MONTHLY_COST_CAP_USD")
+    free_daily_chat_limit: int = Field(default=5, alias="FREE_DAILY_CHAT_LIMIT")
+
     digest_cron: str = Field(default="45 7 * * 1-5", alias="DIGEST_CRON")
     tz: str = Field(default="America/Toronto", alias="TZ")
 
@@ -110,6 +116,15 @@ class Settings(BaseSettings):
     snaptrade_auth_mode: str = Field(default="auto", alias="SNAPTRADE_AUTH_MODE")
     # Fernet key for encrypting per-user SnapTrade userSecret at rest.
     broker_secrets_key: str = Field(default="", alias="BROKER_SECRETS_KEY")
+
+
+def monthly_cost_cap(plan: str, settings: Settings) -> float:
+    """The per-user monthly USD cost ceiling for a plan."""
+    return (
+        settings.pro_monthly_cost_cap_usd
+        if plan == "pro"
+        else settings.free_monthly_cost_cap_usd
+    )
 
 
 @lru_cache

@@ -6,6 +6,32 @@ Stripe later**.
 
 ---
 
+## 0. Unit economics & cost controls (the load-bearing part)
+
+Two structural guarantees keep cost < revenue regardless of tier lines:
+
+1. **Macro scans the world once, not per user.** Geopolitical/Fed/energy events
+   are global; only the mapping to a user's holdings is per-user. The scheduled
+   scan runs the 4 web-searching specialists **once** (owner-attributed), then
+   each Pro user gets a cheap **Haiku** synthesis (events → their tickers). Turns
+   macro from ~$0.30–0.60 *per user* into one shared scan + ~$0.02/user.
+2. **Per-user monthly cost cap** against `agent_runs.cost_usd`. Free cap ~$0.75,
+   Pro cap ~$6 (config). Over cap → macro/digest skip the user and chat is
+   refused with an upgrade message. A power user cannot run us negative. Owner /
+   service token is exempt.
+
+Plus: Free daily chat limit; macro is **Pro-only**.
+
+**SnapTrade plan: Daily data ($1/user/mo, read-only).** Matches our read-only
+model; half the price of Real-time (which bundles trading we never use); daily
+refresh aligns with the daily digest. ~$0.05 one-time manual sync at onboarding.
+Note this $1/user is a *fixed* COGS the moment someone connects — heaviest on
+Free (a connected free user ≈ $1 SnapTrade + ~$0.75 Anthropic ≈ $1.75/mo at $0
+revenue). Consider a time-limited trial vs perpetual-free later.
+
+Target: Pro price **$12–15/mo** for a comfortable ≥50% margin after the fixes;
+the number lives in config and is easy to change.
+
 ## 1. Pricing model
 
 Two tiers. The split is tunable — this is a sensible starting point.

@@ -7,11 +7,11 @@ functions. The agent loop, tools, and API routes depend only on this surface.
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import event, select, text
+from sqlalchemy import event, func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -118,7 +118,7 @@ class Repo:
             return user.id
 
     async def list_active_user_ids(self) -> list[uuid.UUID]:
-        """Users who should receive scheduled macro scans.
+        """Users who should receive scheduled digests.
 
         Includes anyone with digest enabled or any synced position."""
         async with self._session() as s:
@@ -131,6 +131,42 @@ class Repo:
             if not ids:
                 return [_OWNER_USER_ID]
             return sorted(ids)
+
+    async def list_macro_recipients(self) -> list[uuid.UUID]:
+        """Pro users (macro alerts are a Pro feature) with digests enabled."""
+        async with self._session() as s:
+            result = await s.execute(
+                select(User.id).where(
+                    User.plan == "pro", User.digest_enabled.is_(True)
+                )
+            )
+            return sorted(result.scalars().all())
+
+    async def monthly_cost_usd(self, user_id: uuid.UUID) -> float:
+        """Sum of this user's agent-run cost so far this calendar month (UTC)."""
+        now = datetime.now(timezone.utc)
+        start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        async with self._session() as s:
+            result = await s.execute(
+                select(func.coalesce(func.sum(AgentRun.cost_usd), 0)).where(
+                    AgentRun.user_id == user_id, AgentRun.created_at >= start
+                )
+            )
+            return float(result.scalar_one() or 0)
+
+    async def count_chats_today(self, user_id: uuid.UUID) -> int:
+        """This user's chat runs since UTC midnight (Free daily-limit check)."""
+        now = datetime.now(timezone.utc)
+        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        async with self._session() as s:
+            result = await s.execute(
+                select(func.count()).where(
+                    AgentRun.user_id == user_id,
+                    AgentRun.trigger == "chat",
+                    AgentRun.created_at >= start,
+                )
+            )
+            return int(result.scalar_one() or 0)
 
     # ---- snaptrade credentials -------------------------------------------
 

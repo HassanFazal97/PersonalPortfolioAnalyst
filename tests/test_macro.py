@@ -4,7 +4,11 @@ import uuid
 import app.agent.macro.orchestrator as orch
 from app.agent.budget import Budget
 from app.agent.macro import specialists
-from app.agent.macro.orchestrator import parse_alerts, run_macro_scan
+from app.agent.macro.orchestrator import (
+    parse_alerts,
+    run_macro_scan,
+    run_macro_scans_for_all,
+)
 from app.agent.macro.specialists import parse_events, run_specialist
 from app.observability.logging import Observer
 from tests.fakes import FakeRepo, ScriptedAnthropic, text_turn
@@ -127,3 +131,60 @@ async def test_run_macro_scan_dedupes_repeat_events(monkeypatch):
     assert len(first["alerts"]) == 1
     assert second["alerts"] == []  # same fingerprint -> not re-delivered
     assert repo.outbound == ["Oil shock\n\nOil jumped."]
+
+
+def _alerts_json(fingerprint):
+    return json.dumps({"alerts": [
+        {"category": "monetary", "severity": "high", "headline": "H", "body": "B",
+         "tickers": ["NVDA"], "fingerprint": fingerprint},
+    ]})
+
+
+async def test_scans_for_all_runs_specialists_once_globally(monkeypatch):
+    repo = FakeRepo()
+    u1, u2 = uuid.uuid4(), uuid.uuid4()
+    repo.seed_user(u1, plan="pro")
+    repo.seed_user(u2, plan="pro")
+
+    async def fake_portfolio(payload, ctx):
+        return {"positions": [{"ticker": "NVDA"}]}
+
+    monkeypatch.setattr(orch.portfolio, "get_portfolio", fake_portfolio)
+
+    ev = json.dumps({"events": [{"title": "E", "summary": "s", "themes": ["x"], "severity": "high"}]})
+    # 4 specialists ONCE + one synthesis per user.
+    client = ScriptedAnthropic(
+        [text_turn(ev)] * len(specialists.CATEGORIES)
+        + [text_turn(_alerts_json("a")), text_turn(_alerts_json("b"))]
+    )
+
+    results = await run_macro_scans_for_all(repo, client=client)
+
+    # Specialists (web-search calls) ran 4 times total, not 4 × users.
+    specialist_calls = [c for c in client.calls if c.get("tools")]
+    assert len(specialist_calls) == len(specialists.CATEGORIES)
+    assert results[0]["events_found"] == len(specialists.CATEGORIES)
+    user_results = [r for r in results if "user_id" in r]
+    assert len(user_results) == 2
+    assert repo.outbound == ["H\n\nB", "H\n\nB"]  # both users delivered
+
+
+async def test_scans_for_all_skips_user_over_cost_cap(monkeypatch):
+    repo = FakeRepo()
+    u = uuid.uuid4()
+    repo.seed_user(u, plan="pro")
+    repo._cost_override[u] = 999.0  # far over the Pro monthly cap
+
+    async def fake_portfolio(payload, ctx):
+        return {"positions": [{"ticker": "NVDA"}]}
+
+    monkeypatch.setattr(orch.portfolio, "get_portfolio", fake_portfolio)
+
+    ev = json.dumps({"events": [{"title": "E", "summary": "s", "themes": ["x"], "severity": "high"}]})
+    # Only the global scan is scripted — the capped user gets no synthesis call.
+    client = ScriptedAnthropic([text_turn(ev)] * len(specialists.CATEGORIES))
+
+    results = await run_macro_scans_for_all(repo, client=client)
+
+    assert any(r.get("status") == "skipped_cost_cap" for r in results)
+    assert repo.outbound == []  # nothing delivered to the capped user

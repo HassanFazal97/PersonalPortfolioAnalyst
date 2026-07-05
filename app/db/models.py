@@ -59,6 +59,8 @@ class User(Base):
     email: Mapped[str | None] = mapped_column(Text, unique=True)
     # Supabase Auth uid (JWT sub); NULL for the seeded owner until linked.
     auth_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), unique=True)
+    # 'free' | 'pro' — gates features and per-user cost caps. Owner is 'pro'.
+    plan: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'free'"))
     timezone: Mapped[str] = mapped_column(Text, nullable=False, default="America/Toronto")
     digest_send_time: Mapped[time] = mapped_column(
         Time, nullable=False, server_default=text("'07:45'")

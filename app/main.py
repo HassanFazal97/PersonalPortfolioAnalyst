@@ -24,7 +24,7 @@ from app.agent.macro.orchestrator import run_macro_scan, run_macro_scans_for_all
 from app.agent.prompts import CHAT_SYSTEM_PROMPT
 from app.auth.context import set_current_user_id
 from app.auth.jwt import AuthError, jwks_url_for, verify_supabase_jwt
-from app.config import DEFAULT_USER_ID, get_settings
+from app.config import DEFAULT_USER_ID, get_settings, monthly_cost_cap
 from app.db.repo import Repo
 from app.delivery.imessage import MAX_ATTEMPTS, pending_payload
 from app.delivery.shortcuts import get_latest_digest
@@ -171,6 +171,25 @@ def _require_repo(app: FastAPI) -> Repo:
     return repo
 
 
+async def _enforce_usage_limits(repo: Repo, user_id: uuid.UUID, settings) -> None:
+    """Guard a chat against the per-user monthly cost cap and the Free daily
+    chat limit. Owner/service token is exempt. Raises 402 when over."""
+    if user_id == _OWNER_USER_ID:
+        return
+    user = await repo.get_user(user_id)
+    plan = getattr(user, "plan", "free") if user is not None else "free"
+    if await repo.monthly_cost_usd(user_id) >= monthly_cost_cap(plan, settings):
+        raise HTTPException(
+            status_code=402,
+            detail="Monthly usage limit reached. Upgrade to Pro or try again next month.",
+        )
+    if plan == "free" and await repo.count_chats_today(user_id) >= settings.free_daily_chat_limit:
+        raise HTTPException(
+            status_code=402,
+            detail="Daily chat limit reached on the Free plan. Upgrade to Pro for unlimited chat.",
+        )
+
+
 def create_app() -> FastAPI:
     app = FastAPI(
         title="Cirvia",
@@ -233,6 +252,8 @@ def create_app() -> FastAPI:
     async def chat(req: ChatRequest, request: Request) -> dict:
         settings = get_settings()
         repo = _require_repo(app)
+        user_id = _user_id(request)
+        await _enforce_usage_limits(repo, user_id, settings)
         budget = Budget(
             max_iterations=settings.chat_max_iterations,
             max_cost_usd=settings.chat_max_cost_usd,
@@ -245,7 +266,7 @@ def create_app() -> FastAPI:
             tools=CHAT_TOOLS,
             budget=budget,
             db=repo,
-            user_id=_user_id(request),
+            user_id=user_id,
         )
         return {
             "run_id": str(result.run_id),

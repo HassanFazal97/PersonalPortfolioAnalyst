@@ -24,6 +24,16 @@ class FakeRepo:
         self._positions = positions or []
         self.alerts: dict[str, SimpleNamespace] = {}
         self._snaptrade: dict[uuid.UUID, SimpleNamespace] = {}
+        self._users_by_auth: dict[uuid.UUID, uuid.UUID] = {}
+        self._users_by_id: dict[uuid.UUID, Any] = {}
+        self._cost_override: dict[uuid.UUID, float] = {}
+        self._chats_override: dict[uuid.UUID, int] = {}
+
+    def seed_user(self, user_id, *, plan="free", digest_enabled=True, email=None):
+        self._users_by_id[user_id] = SimpleNamespace(
+            id=user_id, auth_id=None, email=email, plan=plan,
+            digest_enabled=digest_enabled,
+        )
 
     async def create_run(self, *, trigger, user_message, model, prompt_version,
                          user_id=None):
@@ -39,17 +49,39 @@ class FakeRepo:
         return run_id
 
     async def get_or_create_user(self, *, auth_id, email=None):
-        if not hasattr(self, "_users_by_auth"):
-            self._users_by_auth: dict[uuid.UUID, uuid.UUID] = {}
-            self._users_by_id: dict[uuid.UUID, Any] = {}
         if auth_id not in self._users_by_auth:
             uid = uuid.uuid4()
             self._users_by_auth[auth_id] = uid
-            self._users_by_id[uid] = SimpleNamespace(id=uid, auth_id=auth_id, email=email)
+            self._users_by_id[uid] = SimpleNamespace(
+                id=uid, auth_id=auth_id, email=email, plan="free", digest_enabled=True
+            )
         return self._users_by_auth[auth_id]
 
     async def get_user(self, user_id):
-        return getattr(self, "_users_by_id", {}).get(user_id)
+        return self._users_by_id.get(user_id)
+
+    async def list_macro_recipients(self):
+        return sorted(
+            u.id for u in self._users_by_id.values()
+            if getattr(u, "plan", "free") == "pro" and getattr(u, "digest_enabled", True)
+        )
+
+    async def monthly_cost_usd(self, user_id):
+        if user_id in self._cost_override:
+            return self._cost_override[user_id]
+        return sum(
+            float(r["cost_usd"])
+            for r in self.runs.values()
+            if r.get("user_id") == user_id and r.get("cost_usd") is not None
+        )
+
+    async def count_chats_today(self, user_id):
+        if user_id in self._chats_override:
+            return self._chats_override[user_id]
+        return sum(
+            1 for r in self.runs.values()
+            if r.get("user_id") == user_id and r.get("trigger") == "chat"
+        )
 
     async def finalize_run(self, run_id, **kwargs):
         self.runs[run_id].update(kwargs)
