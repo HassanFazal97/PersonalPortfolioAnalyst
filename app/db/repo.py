@@ -102,6 +102,27 @@ class Repo:
         async with self._session() as s:
             return await s.get(User, user_id)
 
+    async def update_user_preferences(
+        self,
+        user_id: uuid.UUID,
+        *,
+        timezone: str | None = None,
+        digest_send_time: Any = None,
+        digest_enabled: bool | None = None,
+    ) -> None:
+        """Update only the provided preference fields on the user's row."""
+        async with self._session() as s:
+            user = await s.get(User, user_id)
+            if user is None:
+                return
+            if timezone is not None:
+                user.timezone = timezone
+            if digest_send_time is not None:
+                user.digest_send_time = digest_send_time
+            if digest_enabled is not None:
+                user.digest_enabled = digest_enabled
+            await s.commit()
+
     async def get_or_create_user(
         self, *, auth_id: uuid.UUID, email: str | None = None
     ) -> uuid.UUID:

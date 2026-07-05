@@ -11,6 +11,7 @@ import asyncio
 import hmac
 import uuid
 from contextlib import asynccontextmanager
+from datetime import time
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
@@ -43,7 +44,8 @@ from app.landing import (
     TERMS_HTML,
 )
 from app.scheduler import DigestScheduler, IntervalScheduler
-from app.tools.registry import CHAT_TOOLS
+from app.tools import portfolio
+from app.tools.registry import CHAT_TOOLS, ToolContext
 
 
 @asynccontextmanager
@@ -101,6 +103,12 @@ class AckRequest(BaseModel):
 
 class InboundRequest(BaseModel):
     message: str
+
+
+class PreferencesRequest(BaseModel):
+    timezone: str | None = None
+    digest_send_time: str | None = None  # "HH:MM"
+    digest_enabled: bool | None = None
 
 
 _bearer = HTTPBearer(auto_error=False)
@@ -175,6 +183,38 @@ def _require_repo(app: FastAPI) -> Repo:
     if repo is None:
         raise HTTPException(status_code=503, detail="database not configured")
     return repo
+
+
+def _fmt_time(value) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value[:5]
+    return value.strftime("%H:%M")
+
+
+async def _me_payload(repo: Repo, user_id: uuid.UUID) -> dict:
+    user = await repo.get_user(user_id)
+    is_owner = user_id == _OWNER_USER_ID
+    if user is None:
+        return {
+            "user_id": str(user_id),
+            "email": None,
+            "plan": "pro" if is_owner else "free",
+            "timezone": "America/Toronto",
+            "digest_send_time": "07:45",
+            "digest_enabled": True,
+            "is_owner": is_owner,
+        }
+    return {
+        "user_id": str(user_id),
+        "email": user.email,
+        "plan": user.plan,
+        "timezone": user.timezone,
+        "digest_send_time": _fmt_time(user.digest_send_time),
+        "digest_enabled": user.digest_enabled,
+        "is_owner": is_owner,
+    }
 
 
 async def _enforce_usage_limits(repo: Repo, user_id: uuid.UUID, settings) -> None:
@@ -453,6 +493,42 @@ def create_app() -> FastAPI:
             return await sync_wealthsimple_positions(repo, user_id=_user_id(request))
         except (SnapTradeError, RuntimeError) as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    # ---- User profile & holdings ---------------------------------------
+
+    @app.get("/me")
+    async def get_me(request: Request) -> dict:
+        """The authenticated user's profile + preferences."""
+        repo = _require_repo(app)
+        return await _me_payload(repo, _user_id(request))
+
+    @app.patch("/me")
+    async def update_me(req: PreferencesRequest, request: Request) -> dict:
+        """Update digest preferences (timezone, send-time, enabled)."""
+        repo = _require_repo(app)
+        user_id = _user_id(request)
+        send_time: time | None = None
+        if req.digest_send_time is not None:
+            try:
+                send_time = time.fromisoformat(req.digest_send_time)
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=400, detail="digest_send_time must be HH:MM"
+                ) from exc
+        await repo.update_user_preferences(
+            user_id,
+            timezone=req.timezone,
+            digest_send_time=send_time,
+            digest_enabled=req.digest_enabled,
+        )
+        return await _me_payload(repo, user_id)
+
+    @app.get("/portfolio")
+    async def portfolio_holdings(request: Request) -> dict:
+        """The authenticated user's holdings with live valuations."""
+        repo = _require_repo(app)
+        ctx = ToolContext(settings=get_settings(), repo=repo, user_id=_user_id(request))
+        return await portfolio.get_portfolio({}, ctx)
 
     return app
 

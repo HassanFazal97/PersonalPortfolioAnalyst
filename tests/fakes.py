@@ -32,7 +32,8 @@ class FakeRepo:
     def seed_user(self, user_id, *, plan="free", digest_enabled=True, email=None):
         self._users_by_id[user_id] = SimpleNamespace(
             id=user_id, auth_id=None, email=email, plan=plan,
-            digest_enabled=digest_enabled,
+            digest_enabled=digest_enabled, timezone="America/Toronto",
+            digest_send_time="07:45",
         )
 
     async def create_run(self, *, trigger, user_message, model, prompt_version,
@@ -53,12 +54,25 @@ class FakeRepo:
             uid = uuid.uuid4()
             self._users_by_auth[auth_id] = uid
             self._users_by_id[uid] = SimpleNamespace(
-                id=uid, auth_id=auth_id, email=email, plan="free", digest_enabled=True
+                id=uid, auth_id=auth_id, email=email, plan="free", digest_enabled=True,
+                timezone="America/Toronto", digest_send_time="07:45",
             )
         return self._users_by_auth[auth_id]
 
     async def get_user(self, user_id):
         return self._users_by_id.get(user_id)
+
+    async def update_user_preferences(self, user_id, *, timezone=None,
+                                      digest_send_time=None, digest_enabled=None):
+        user = self._users_by_id.get(user_id)
+        if user is None:
+            return
+        if timezone is not None:
+            user.timezone = timezone
+        if digest_send_time is not None:
+            user.digest_send_time = digest_send_time
+        if digest_enabled is not None:
+            user.digest_enabled = digest_enabled
 
     async def list_macro_recipients(self):
         return sorted(
