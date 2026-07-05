@@ -22,7 +22,7 @@ from app.agent.prompts import CHAT_SYSTEM_PROMPT, PROMPT_VERSION
 from app.config import get_settings
 from app.db.repo import Repo
 from app.observability.logging import Observer
-from app.tools import market, portfolio
+from app.tools import market, news, portfolio
 from app.tools.registry import CHAT_TOOLS, ToolContext
 
 FALLBACK_BODY = "Digest failed this morning — check /runs for details."
@@ -104,6 +104,11 @@ async def run_digest_pipeline(db: Repo, *, client: Any = None) -> dict[str, Any]
         )
 
         # Stage 2 — investigate (separate sub-runs, chat toolset, small budget).
+        # Warm the news cache for every holding once, in parallel, so the
+        # sub-agent investigations read hot cache instead of each re-fetching.
+        tickers = [p["ticker"] for p in json.loads(market_context).get("positions", [])]
+        await news.prefetch_news_for_tickers(tickers)
+
         results: list[dict[str, str]] = []
         for inv in investigations:
             sub_budget = Budget(max_iterations=5, max_cost_usd=0.30, model=settings.model)

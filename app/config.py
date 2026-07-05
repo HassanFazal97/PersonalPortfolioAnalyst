@@ -30,6 +30,7 @@ class ModelPrice:
 # Price table keyed by model name. Update here, never at call sites.
 MODEL_PRICES: dict[str, ModelPrice] = {
     "claude-sonnet-4-6": ModelPrice(input_per_mtok=3.0, output_per_mtok=15.0),
+    "claude-haiku-4-5": ModelPrice(input_per_mtok=1.0, output_per_mtok=5.0),
 }
 
 # Fallback price for unknown models so cost accounting never crashes a run.
@@ -38,6 +39,11 @@ DEFAULT_MODEL_PRICE = ModelPrice(input_per_mtok=3.0, output_per_mtok=15.0)
 
 def price_for(model: str) -> ModelPrice:
     return MODEL_PRICES.get(model, DEFAULT_MODEL_PRICE)
+
+
+# The single owner's user id (user #1), seeded by migration 002. Until per-user
+# auth (roadmap Phase 2), every request/run/write is attributed to this user.
+DEFAULT_USER_ID = "00000000-0000-0000-0000-000000000001"
 
 
 class Settings(BaseSettings):
@@ -56,6 +62,10 @@ class Settings(BaseSettings):
     api_token: str = Field(default="", alias="API_TOKEN")
 
     model: str = Field(default="claude-sonnet-4-6", alias="MODEL")
+    # Cheap, fast model for news signal tagging (risk/opportunity/neutral).
+    classifier_model: str = Field(default="claude-haiku-4-5", alias="CLASSIFIER_MODEL")
+    # Owner attribution until per-user auth lands (roadmap Phase 2).
+    default_user_id: str = Field(default=DEFAULT_USER_ID, alias="DEFAULT_USER_ID")
 
     chat_max_iterations: int = Field(default=10, alias="CHAT_MAX_ITERATIONS")
     chat_max_cost_usd: float = Field(default=0.50, alias="CHAT_MAX_COST_USD")

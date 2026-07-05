@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import time
 from datetime import UTC, datetime, timedelta
 from difflib import SequenceMatcher
 from typing import Any
@@ -19,6 +20,23 @@ from app.tools.tickers import normalize_ticker
 
 SUMMARY_MAX_CHARS = 500
 _DUP_RATIO = 0.9
+
+# News moves slower than quotes; a longer TTL lets one morning's investigations
+# (and repeated chat calls) share a single fetch per symbol. Mirrors the quote
+# cache pattern in ``app/tools/market.py``.
+NEWS_TTL_SECONDS = 900.0
+
+# (symbol-candidate signature, lookback_days) -> (monotonic_ts, (normalized, source))
+_news_cache: dict[tuple[Any, int], tuple[float, tuple[list[dict[str, Any]], str]]] = {}
+
+
+def _clock() -> float:
+    return time.monotonic()
+
+
+def cache_clear() -> None:
+    """Test/utility helper to reset the news cache."""
+    _news_cache.clear()
 
 
 def _canonical(headline: str) -> str:
@@ -160,6 +178,63 @@ def _dedupe(items: list[dict[str, Any]], max_results: int) -> list[dict[str, Any
 
 
 # --------------------------------------------------------------------------
+# Cached fetch (shared by search_news and the digest prefetch)
+# --------------------------------------------------------------------------
+
+
+def _cache_key(query: str, lookback_days: int) -> tuple[Any, int]:
+    """Key by resolved symbol candidates so different phrasings for the same
+    ticker share a cache entry; fall back to the normalized raw query."""
+    candidates = _finnhub_symbol_candidates(query)
+    basis: Any = tuple(candidates) if candidates else query.strip().lower()
+    return (basis, lookback_days)
+
+
+async def _cached_fetch(
+    query: str, lookback_days: int, max_results: int
+) -> tuple[list[dict[str, Any]], str]:
+    """Return (normalized_items, source), served from the TTL cache when warm."""
+    key = _cache_key(query, lookback_days)
+    cached = _news_cache.get(key)
+    if cached and _clock() - cached[0] < NEWS_TTL_SECONDS:
+        return cached[1]
+
+    source = "finnhub"
+    try:
+        raw = await asyncio.to_thread(
+            _fetch_finnhub_news, query, lookback_days, max_results
+        )
+        normalized = [_normalize_finnhub(i) for i in raw]
+        if not normalized:
+            raise RuntimeError("finnhub returned no articles")
+    except Exception:  # noqa: BLE001 - fall back to yfinance
+        source = "yfinance"
+        raw = await asyncio.to_thread(_fetch_yfinance_news, query)
+        normalized = [_normalize_yfinance(i) for i in raw]
+
+    _news_cache[key] = (_clock(), (normalized, source))
+    return normalized, source
+
+
+async def prefetch_news_for_tickers(
+    tickers: list[str], lookback_days: int = 3, max_results: int = 8
+) -> None:
+    """Warm the news cache for every holding in one parallel pass.
+
+    Called once at the start of the digest investigation stage so the 2–4
+    sub-agent investigations read hot cache instead of each re-fetching. Failures
+    are swallowed per-ticker — prefetch is best-effort, not a correctness gate.
+    """
+    async def _warm(ticker: str) -> None:
+        try:
+            await _cached_fetch(ticker, lookback_days, max_results)
+        except Exception:  # noqa: BLE001 - best effort; real fetch retries later
+            pass
+
+    await asyncio.gather(*(_warm(t) for t in tickers))
+
+
+# --------------------------------------------------------------------------
 # Tool entrypoint
 # --------------------------------------------------------------------------
 
@@ -177,19 +252,15 @@ async def search_news(payload: dict[str, Any], ctx: Any = None) -> dict[str, Any
     if not isinstance(max_results, int) or not (1 <= max_results <= 20):
         raise ValueError("max_results must be an integer between 1 and 20")
 
-    source = "finnhub"
-    normalized: list[dict[str, Any]] = []
-    try:
-        raw = await asyncio.to_thread(
-            _fetch_finnhub_news, query, lookback_days, max_results
-        )
-        normalized = [_normalize_finnhub(i) for i in raw]
-        if not normalized:
-            raise RuntimeError("finnhub returned no articles")
-    except Exception:  # noqa: BLE001 - fall back to yfinance
-        source = "yfinance"
-        raw = await asyncio.to_thread(_fetch_yfinance_news, query)
-        normalized = [_normalize_yfinance(i) for i in raw]
+    classify = payload.get("classify", True)
 
+    normalized, source = await _cached_fetch(query, lookback_days, max_results)
     items = _dedupe(normalized, max_results)
+
+    if classify:
+        # Local import avoids a cycle (classify imports config/observability).
+        from app.tools.classify import classify_news
+
+        items = await classify_news(items, ctx)
+
     return {"query": query, "source": source, "count": len(items), "items": items}

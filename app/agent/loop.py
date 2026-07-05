@@ -251,6 +251,10 @@ async def run_agent(
     client = _get_client(client)
     if ctx is None:
         ctx = ToolContext(settings=settings, repo=db)
+    # Let tools that make their own model calls (news classification) log and
+    # cost-account against this run.
+    ctx.client = client
+    ctx.budget = budget
     schemas_by_name = {t["name"]: t for t in tools}
 
     started = time.monotonic()

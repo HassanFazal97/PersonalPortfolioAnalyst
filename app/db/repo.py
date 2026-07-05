@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from app.config import DEFAULT_USER_ID
 from app.db.models import (
     AgentRun,
     Digest,
@@ -27,6 +28,10 @@ from app.db.models import (
     Position,
     ToolCall,
 )
+
+# Owner (user #1) attribution until per-user auth lands (roadmap Phase 2). Every
+# tenant-scoped read/write defaults to this user; pass user_id to scope to another.
+_OWNER_USER_ID = uuid.UUID(DEFAULT_USER_ID)
 
 
 def resolve_ack_status(status: str, attempts: int, max_attempts: int) -> str:
@@ -73,9 +78,10 @@ class Repo:
 
     # ---- positions -------------------------------------------------------
 
-    async def list_positions(self) -> list[Position]:
+    async def list_positions(self, *, user_id: uuid.UUID | None = None) -> list[Position]:
+        uid = user_id or _OWNER_USER_ID
         async with self._session() as s:
-            result = await s.execute(select(Position))
+            result = await s.execute(select(Position).where(Position.user_id == uid))
             return list(result.scalars().all())
 
     async def upsert_position(
@@ -86,18 +92,23 @@ class Repo:
         avg_cost: Decimal,
         currency: str,
         account: str,
+        user_id: uuid.UUID | None = None,
     ) -> None:
-        """Insert or update a position keyed by (ticker, account)."""
+        """Insert or update a position keyed by (user_id, ticker, account)."""
+        uid = user_id or _OWNER_USER_ID
         async with self._session() as s:
             existing = await s.execute(
                 select(Position).where(
-                    Position.ticker == ticker, Position.account == account
+                    Position.user_id == uid,
+                    Position.ticker == ticker,
+                    Position.account == account,
                 )
             )
             row = existing.scalar_one_or_none()
             if row is None:
                 s.add(
                     Position(
+                        user_id=uid,
                         ticker=ticker,
                         quantity=quantity,
                         avg_cost=avg_cost,
@@ -112,10 +123,13 @@ class Repo:
                 row.updated_at = datetime.now()
             await s.commit()
 
-    async def prune_positions_except(self, keep: set[tuple[str, str]]) -> int:
-        """Delete positions whose (ticker, account) is not in ``keep``."""
+    async def prune_positions_except(
+        self, keep: set[tuple[str, str]], *, user_id: uuid.UUID | None = None
+    ) -> int:
+        """Delete this user's positions whose (ticker, account) is not in ``keep``."""
+        uid = user_id or _OWNER_USER_ID
         async with self._session() as s:
-            result = await s.execute(select(Position))
+            result = await s.execute(select(Position).where(Position.user_id == uid))
             rows = list(result.scalars().all())
             removed = 0
             for row in rows:
@@ -135,9 +149,11 @@ class Repo:
         user_message: str,
         model: str,
         prompt_version: str,
+        user_id: uuid.UUID | None = None,
     ) -> uuid.UUID:
         async with self._session() as s:
             run = AgentRun(
+                user_id=user_id or _OWNER_USER_ID,
                 trigger=trigger,
                 user_message=user_message,
                 model=model,
@@ -266,32 +282,47 @@ class Repo:
     # ---- digests ---------------------------------------------------------
 
     async def upsert_digest(
-        self, *, run_id: uuid.UUID, body: str, digest_date: date
+        self,
+        *,
+        run_id: uuid.UUID,
+        body: str,
+        digest_date: date,
+        user_id: uuid.UUID | None = None,
     ) -> None:
+        uid = user_id or _OWNER_USER_ID
         async with self._session() as s:
             existing = await s.execute(
-                select(Digest).where(Digest.digest_date == digest_date)
+                select(Digest).where(
+                    Digest.user_id == uid, Digest.digest_date == digest_date
+                )
             )
             row = existing.scalar_one_or_none()
             if row is None:
-                s.add(Digest(run_id=run_id, body=body, digest_date=digest_date))
+                s.add(Digest(user_id=uid, run_id=run_id, body=body, digest_date=digest_date))
             else:
                 row.body = body
                 row.run_id = run_id
             await s.commit()
 
-    async def get_digest(self, digest_date: date) -> Digest | None:
+    async def get_digest(
+        self, digest_date: date, *, user_id: uuid.UUID | None = None
+    ) -> Digest | None:
+        uid = user_id or _OWNER_USER_ID
         async with self._session() as s:
             result = await s.execute(
-                select(Digest).where(Digest.digest_date == digest_date)
+                select(Digest).where(
+                    Digest.user_id == uid, Digest.digest_date == digest_date
+                )
             )
             return result.scalar_one_or_none()
 
     # ---- outbound messages (Phase B) ------------------------------------
 
-    async def enqueue_outbound(self, body: str) -> uuid.UUID:
+    async def enqueue_outbound(
+        self, body: str, *, user_id: uuid.UUID | None = None
+    ) -> uuid.UUID:
         async with self._session() as s:
-            msg = OutboundMessage(body=body)
+            msg = OutboundMessage(body=body, user_id=user_id or _OWNER_USER_ID)
             s.add(msg)
             await s.commit()
             return msg.id

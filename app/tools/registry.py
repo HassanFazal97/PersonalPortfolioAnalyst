@@ -23,6 +23,11 @@ class ToolContext:
     run_id: Any | None = None
     # Phase B: when true, send_digest also enqueues to outbound_messages.
     enqueue_delivery: bool = False
+    # Anthropic client + live budget, threaded through so tools that make their
+    # own model calls (e.g. news signal classification) log and cost-account
+    # against the current run. Optional: absent in unit tests / prefetch.
+    client: Any | None = None
+    budget: Any | None = None
 
 
 ToolFn = Callable[[dict[str, Any], ToolContext], Awaitable[Any]]
@@ -80,7 +85,9 @@ SEARCH_NEWS_SCHEMA = {
     "description": (
         "Recent, de-duplicated news headlines with short summaries for a query "
         "(usually a ticker or company). Returns headline, source, url, "
-        "published_at, and summary. Never returns full article text."
+        "published_at, summary, and a signal tag ('warning' for risks, "
+        "'opportunity' for positive catalysts, 'neutral' otherwise) with a "
+        "0–1 salience score. Never returns full article text."
     ),
     "input_schema": {
         "type": "object",
@@ -97,6 +104,11 @@ SEARCH_NEWS_SCHEMA = {
                 "minimum": 1,
                 "maximum": 20,
                 "default": 8,
+            },
+            "classify": {
+                "type": "boolean",
+                "default": True,
+                "description": "Tag each item with a risk/opportunity signal.",
             },
         },
         "required": ["query"],
