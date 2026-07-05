@@ -8,7 +8,7 @@ SnapTrade / partner reviewers see.
 
 from __future__ import annotations
 
-CONTACT_EMAIL = "hello@cirvia.ca"
+CONTACT_EMAIL = "fazalhassan@live.ca"
 LAST_UPDATED = "July 5, 2026"
 
 _CSS = """
@@ -299,80 +299,138 @@ _PRIVACY_BODY = f"""
   <h1>Privacy Policy</h1>
   <p class="updated">Last updated: {LAST_UPDATED}</p>
 
-  <p>Cirvia ("Cirvia", "we", "us") provides an AI portfolio analysis service for individual
-  investors. This policy explains what personal information we collect, how we use and protect
-  it, and the choices you have. By using Cirvia you agree to this policy.</p>
+  <p>Cirvia ("Cirvia", "we", "us", or "our") provides an AI portfolio analysis service for
+  individual investors. This Privacy Policy explains what personal information we collect, why we
+  collect it, how we use, share, and protect it, and the choices and rights you have. It is
+  written to align with Canada's <em>Personal Information Protection and Electronic Documents Act</em>
+  (PIPEDA). By creating an account or using Cirvia, you consent to the collection, use, and
+  disclosure of your information as described here.</p>
 
-  <h2>1. Information we collect</h2>
+  <h2>1. Accountability</h2>
+  <p>Cirvia is responsible for personal information under its control. Questions, requests, and
+  privacy complaints can be directed to our privacy contact at
+  <a href="mailto:{CONTACT_EMAIL}">{CONTACT_EMAIL}</a>.</p>
+
+  <h2>2. Information we collect</h2>
   <ul>
-    <li><strong>Account information.</strong> When you sign in, our authentication provider
-    stores your email address and a unique account identifier.</li>
+    <li><strong>Account information.</strong> When you sign in, our authentication provider stores
+    your email address and a unique account identifier.</li>
     <li><strong>Brokerage holdings data.</strong> With your authorization, we retrieve
-    <em>read-only</em> account, position, and balance information from your connected brokerage
-    through SnapTrade. We do <strong>not</strong> receive or store your brokerage username or
-    password — you authenticate directly with your brokerage inside SnapTrade's secure portal.</li>
-    <li><strong>Usage data.</strong> We log your requests to and interactions with the service
-    (for example, questions you ask and digests generated) to operate, secure, and improve it.</li>
+    <em>read-only</em> account, position, transaction, and balance information from your connected
+    brokerage through SnapTrade.</li>
+    <li><strong>Usage and technical data.</strong> We log your interactions with the service (such
+    as questions you ask and digests generated), along with limited technical data (such as
+    timestamps and request metadata) needed to operate and secure it.</li>
+    <li><strong>Communications.</strong> If you contact us, we keep your messages and contact
+    details to respond.</li>
   </ul>
 
-  <h2>2. How we use your information</h2>
+  <h2>3. Information we do NOT collect</h2>
+  <ul>
+    <li>Your brokerage username, password, or other login credentials — you authenticate directly
+    with your brokerage inside SnapTrade's secure portal; those credentials never pass through or
+    reach Cirvia.</li>
+    <li>Payment card details, if and when paid plans are offered — these would be handled directly
+    by a third-party payment processor, not stored by Cirvia.</li>
+  </ul>
+
+  <h2>4. Purposes and how we use your information</h2>
   <ul>
     <li>To provide the service — syncing your holdings, generating your daily digest and macro
     alerts, and answering your questions.</li>
     <li>To secure, maintain, debug, and improve the service.</li>
     <li>To communicate with you about your account, support requests, and service updates.</li>
+    <li>To comply with legal obligations.</li>
   </ul>
-  <p>We do not sell your personal information, and we do not use your holdings data for
-  advertising.</p>
+  <p>We use your information only for the purposes identified here or for which you provide
+  consent. We do <strong>not</strong> sell your personal information, and we do not use your
+  holdings data for advertising.</p>
 
-  <h2>3. Service providers we share data with</h2>
-  <p>We share the minimum data necessary with providers that help us operate Cirvia, each under
-  their own terms and privacy commitments:</p>
+  <h2>5. Consent</h2>
+  <p>We collect, use, and disclose your personal information with your consent. You provide consent
+  by creating an account and by connecting your brokerage. You may withdraw consent at any time by
+  disconnecting your brokerage and/or closing your account (see Section 9); withdrawing consent may
+  limit or end your ability to use the service.</p>
+
+  <h2>6. Automated processing and AI</h2>
+  <p>Cirvia uses artificial intelligence to generate analysis, summaries, and alerts from your
+  holdings and public market data. This output is informational only and does not constitute
+  automated decision-making that produces legal or similarly significant effects about you. AI
+  output may be inaccurate or incomplete and should not be solely relied upon.</p>
+
+  <h2>7. Service providers and disclosure</h2>
+  <p>We share the minimum information necessary with service providers that process data on our
+  behalf to operate Cirvia, each bound by their own terms and privacy and security commitments:</p>
   <ul>
     <li><strong>SnapTrade</strong> — secure brokerage connectivity (read-only holdings).</li>
     <li><strong>Supabase</strong> — authentication and database hosting.</li>
     <li><strong>Anthropic</strong> — the AI model that generates analysis (we send relevant
-    portfolio context and news; we do not send your brokerage credentials).</li>
-    <li><strong>Finnhub / market-data providers</strong> — public market and news data.</li>
+    portfolio context and public news; we do not send your brokerage credentials).</li>
+    <li><strong>Finnhub and other market-data providers</strong> — public market and news data.</li>
     <li><strong>Railway</strong> — application hosting.</li>
   </ul>
+  <p>We may also disclose information if required by law, to enforce our Terms, or to protect the
+  rights, property, or safety of Cirvia, our users, or others. If Cirvia is involved in a merger,
+  acquisition, or asset sale, information may be transferred subject to this policy.</p>
 
-  <h2>4. How we protect your data</h2>
+  <h2>8. International storage and transfer</h2>
+  <p>Cirvia and its service providers may store and process your information on servers located in
+  the United States and other countries. As a result, your information may be subject to the laws
+  of those jurisdictions, including lawful access requests by courts or authorities. By using
+  Cirvia, you consent to this transfer, storage, and processing outside your province or country of
+  residence.</p>
+
+  <h2>9. Retention and deletion</h2>
+  <p>We retain your information for as long as your account is active or as needed to provide the
+  service and meet legal, accounting, or reporting requirements. You may request deletion of your
+  account and associated data at any time by emailing
+  <a href="mailto:{CONTACT_EMAIL}">{CONTACT_EMAIL}</a>; we will delete or de-identify it within a
+  reasonable period, except where retention is required by law. Disconnecting your brokerage stops
+  further data retrieval immediately.</p>
+
+  <h2>10. Safeguards</h2>
   <ul>
     <li>Brokerage credentials are never seen or stored by Cirvia.</li>
     <li>Brokerage connection secrets are encrypted at rest.</li>
-    <li>Every account's data is isolated at the database level using row-level security, so one
-    user cannot access another user's information.</li>
+    <li>Each account's data is isolated at the database level using row-level security, so one user
+    cannot access another user's information.</li>
     <li>Data is transmitted over encrypted (TLS) connections.</li>
   </ul>
-  <p>No method of transmission or storage is completely secure, but we work to protect your
-  information using industry-standard measures.</p>
+  <p>No method of transmission or storage is completely secure. In the event of a data breach that
+  poses a real risk of significant harm, we will notify affected individuals and the appropriate
+  authorities as required by applicable law.</p>
 
-  <h2>5. Data retention and deletion</h2>
-  <p>We retain your information for as long as your account is active or as needed to provide the
-  service. You may request deletion of your account and associated data at any time by emailing
-  <a href="mailto:{CONTACT_EMAIL}">{CONTACT_EMAIL}</a>; we will delete it within a reasonable
-  period, except where retention is required by law.</p>
+  <h2>11. Cookies and tracking</h2>
+  <p>Our marketing pages do not use advertising or cross-site tracking cookies. The application
+  uses only the cookies and tokens strictly necessary to keep you signed in and to operate the
+  service securely.</p>
 
-  <h2>6. Your rights</h2>
-  <p>Depending on your jurisdiction (including under Canada's PIPEDA), you may have the right to
-  access, correct, or delete your personal information, and to withdraw consent. To exercise
-  these rights, contact us at <a href="mailto:{CONTACT_EMAIL}">{CONTACT_EMAIL}</a>. You can also
-  disconnect your brokerage at any time, which stops further data retrieval.</p>
+  <h2>12. Your rights</h2>
+  <p>Subject to applicable law (including PIPEDA), you may request to access, correct, or delete
+  your personal information, and to withdraw consent. To exercise these rights, contact
+  <a href="mailto:{CONTACT_EMAIL}">{CONTACT_EMAIL}</a>. If you are not satisfied with our response,
+  you may contact the <a href="https://www.priv.gc.ca/" rel="noopener">Office of the Privacy
+  Commissioner of Canada</a>.</p>
 
-  <h2>7. Children</h2>
-  <p>Cirvia is not directed to individuals under 18 and we do not knowingly collect their
-  information.</p>
+  <h2>13. Children</h2>
+  <p>Cirvia is intended for adults (18+) and is not directed to children. We do not knowingly
+  collect personal information from anyone under 18.</p>
 
-  <h2>8. Changes to this policy</h2>
-  <p>We may update this policy from time to time. Material changes will be reflected by the
-  "Last updated" date above and, where appropriate, communicated to you.</p>
+  <h2>14. Third-party links</h2>
+  <p>Our site and service may link to third-party websites or services (such as SnapTrade). Their
+  privacy practices are governed by their own policies, not this one.</p>
 
-  <h2>9. Contact</h2>
-  <p>Questions about this policy or your data? Email <a href="mailto:{CONTACT_EMAIL}">{CONTACT_EMAIL}</a>.</p>
+  <h2>15. Changes to this policy</h2>
+  <p>We may update this policy from time to time. Material changes will be reflected by the "Last
+  updated" date above and, where appropriate, communicated to you. Your continued use after changes
+  take effect constitutes acceptance.</p>
 
-  <div class="callout"><strong>Not financial advice.</strong> Cirvia is informational only and
-  does not provide personalized investment advice.</div>
+  <h2>16. Contact</h2>
+  <p>Questions about this policy or your data? Email
+  <a href="mailto:{CONTACT_EMAIL}">{CONTACT_EMAIL}</a>.</p>
+
+  <div class="callout"><strong>Not financial advice.</strong> Cirvia is informational only and does
+  not provide personalized investment advice.</div>
 </div>
 """
 
@@ -385,76 +443,122 @@ _TERMS_BODY = f"""
   <h1>Terms of Service</h1>
   <p class="updated">Last updated: {LAST_UPDATED}</p>
 
-  <p>These Terms of Service ("Terms") govern your use of Cirvia (the "Service"). By accessing or
-  using the Service, you agree to these Terms. If you do not agree, do not use the Service.</p>
+  <p>These Terms of Service ("Terms") form a binding agreement between you and Cirvia ("Cirvia",
+  "we", "us") governing your access to and use of the Cirvia website, application, and services
+  (collectively, the "Service"). By accessing or using the Service, you agree to these Terms and to
+  our <a href="/privacy">Privacy Policy</a>. If you do not agree, do not use the Service.</p>
 
   <h2>1. The Service</h2>
   <p>Cirvia is an informational tool that connects to your brokerage account on a
   <strong>read-only</strong> basis to sync your holdings, and uses artificial intelligence to
-  generate a daily digest, macro alerts, and on-demand answers about your portfolio. Cirvia
-  cannot place trades, transfer funds, or take any action on your brokerage account.</p>
+  generate a daily digest, macro alerts, and on-demand answers about your portfolio. Cirvia cannot
+  place trades, transfer funds, or take any action on your brokerage account. We may modify,
+  suspend, or discontinue any part of the Service at any time.</p>
 
   <h2>2. Not financial, investment, tax, or legal advice</h2>
-  <p>Cirvia provides information and context for educational and informational purposes only. It
-  is not a registered investment adviser, broker-dealer, or financial planner, and nothing it
-  produces is personalized investment advice or a recommendation to buy, sell, or hold any
-  security. You are solely responsible for your own investment decisions. Past performance does
-  not guarantee future results, and investing involves risk, including the possible loss of
-  principal. Consider consulting a qualified professional before making financial decisions.</p>
+  <p>Cirvia provides information and context for educational and informational purposes only. It is
+  not a registered investment adviser, portfolio manager, dealer, or financial planner, and nothing
+  it produces is personalized investment advice, a solicitation, or a recommendation to buy, sell, or
+  hold any security. No fiduciary or advisory relationship is created by your use of the Service. You
+  are solely responsible for your own investment decisions. Past performance does not guarantee future
+  results, and investing involves risk, including the possible loss of principal. Consider consulting a
+  qualified professional before making financial decisions.</p>
 
   <h2>3. Eligibility and accounts</h2>
-  <p>You must be at least 18 years old and capable of forming a binding contract. You are
-  responsible for maintaining the confidentiality of your login credentials and for all activity
-  under your account. Notify us promptly of any unauthorized use.</p>
+  <p>You must be at least 18 years old and able to form a binding contract. You agree to provide
+  accurate information, to keep your login credentials confidential, and to be responsible for all
+  activity under your account. Notify us promptly at
+  <a href="mailto:{CONTACT_EMAIL}">{CONTACT_EMAIL}</a> of any unauthorized use.</p>
 
   <h2>4. Brokerage connection and third-party services</h2>
-  <p>Connecting a brokerage account is done through SnapTrade and your brokerage, subject to their
-  terms. You authorize Cirvia to retrieve your read-only account data through that connection. We
-  rely on third-party services (including SnapTrade, market-data providers, and AI providers) and
-  are not responsible for their acts, omissions, or availability.</p>
+  <p>Connecting a brokerage account is performed through SnapTrade and your brokerage, subject to
+  their respective terms and privacy policies. You authorize Cirvia to retrieve your read-only
+  account data through that connection, and you represent that you are entitled to do so. We rely on
+  third-party services (including SnapTrade, market-data providers, hosting, and AI providers) and are
+  not responsible for their acts, omissions, availability, or accuracy.</p>
 
-  <h2>5. Data accuracy</h2>
-  <p>Information provided by the Service — including holdings, prices, news, and AI-generated
-  analysis — may be delayed, incomplete, or inaccurate, and may contain errors. Do not rely on it
-  as the sole basis for any financial decision. Verify important information with your brokerage
-  and other primary sources.</p>
+  <h2>5. Fees and subscriptions</h2>
+  <p>The Service is currently offered in early access, and some features may be provided free of
+  charge. We may introduce paid plans or subscriptions in the future. If you purchase a paid plan, the
+  applicable prices, billing period, and features will be presented to you at the time of purchase and
+  are incorporated into these Terms. Payments would be processed by a third-party payment processor;
+  you authorize us and the processor to charge your selected payment method. Unless required by law or
+  stated otherwise, fees are non-refundable, and you are responsible for applicable taxes. You may
+  cancel a subscription at any time, effective at the end of the current billing period. We may change
+  fees on prospective notice.</p>
 
-  <h2>6. Acceptable use</h2>
-  <p>You agree not to misuse the Service, including by attempting to access other users' data,
-  disrupting the Service, reverse-engineering it, or using it for unlawful purposes.</p>
+  <h2>6. Data accuracy</h2>
+  <p>Information provided by the Service — including holdings, prices, news, and AI-generated analysis
+  — may be delayed, incomplete, or inaccurate, and may contain errors. Do not rely on it as the sole
+  basis for any financial decision. Verify important information with your brokerage and other primary
+  sources.</p>
 
-  <h2>7. Intellectual property</h2>
-  <p>The Service, including its software, content, and branding, is owned by Cirvia and protected
-  by applicable laws. We grant you a limited, non-exclusive, non-transferable right to use the
-  Service for your personal, non-commercial use.</p>
+  <h2>7. Acceptable use</h2>
+  <p>You agree not to: (a) attempt to access accounts or data that are not yours; (b) disrupt,
+  overload, or interfere with the Service; (c) reverse-engineer, scrape, or copy the Service except as
+  permitted by law; (d) use the Service to violate any law or third-party right; or (e) use the Service
+  to provide investment advice or services to third parties.</p>
 
-  <h2>8. Disclaimers</h2>
+  <h2>8. Intellectual property and license</h2>
+  <p>The Service, including its software, content, and branding, is owned by Cirvia and protected by
+  applicable laws. We grant you a limited, non-exclusive, non-transferable, revocable license to use
+  the Service for your personal, non-commercial use, subject to these Terms.</p>
+
+  <h2>9. Privacy</h2>
+  <p>Your use of the Service is subject to our <a href="/privacy">Privacy Policy</a>, which describes
+  how we collect, use, and protect your information.</p>
+
+  <h2>10. Disclaimers</h2>
   <p>THE SERVICE IS PROVIDED "AS IS" AND "AS AVAILABLE" WITHOUT WARRANTIES OF ANY KIND, EXPRESS OR
-  IMPLIED, INCLUDING MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT. We do
-  not warrant that the Service will be uninterrupted, timely, secure, or error-free.</p>
+  IMPLIED, INCLUDING MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT. We do not
+  warrant that the Service will be uninterrupted, timely, secure, error-free, or that any information
+  will be accurate or complete.</p>
 
-  <h2>9. Limitation of liability</h2>
+  <h2>11. Limitation of liability</h2>
   <p>TO THE MAXIMUM EXTENT PERMITTED BY LAW, CIRVIA AND ITS OPERATORS WILL NOT BE LIABLE FOR ANY
-  INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR EXEMPLARY DAMAGES, OR FOR ANY INVESTMENT LOSSES,
-  ARISING FROM OR RELATED TO YOUR USE OF THE SERVICE.</p>
+  INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, PUNITIVE, OR EXEMPLARY DAMAGES, OR FOR ANY INVESTMENT
+  OR TRADING LOSSES, ARISING FROM OR RELATED TO YOUR USE OF THE SERVICE. OUR TOTAL AGGREGATE LIABILITY
+  FOR ANY CLAIM RELATING TO THE SERVICE WILL NOT EXCEED THE GREATER OF THE AMOUNT YOU PAID US IN THE
+  12 MONTHS BEFORE THE CLAIM OR CAD $100. Some jurisdictions do not allow certain limitations, so some
+  of the above may not apply to you.</p>
 
-  <h2>10. Indemnification</h2>
-  <p>You agree to indemnify and hold Cirvia harmless from claims arising out of your use of the
-  Service or your violation of these Terms.</p>
+  <h2>12. Indemnification</h2>
+  <p>You agree to indemnify and hold Cirvia and its operators harmless from any claims, losses, and
+  expenses (including reasonable legal fees) arising out of your use of the Service or your violation
+  of these Terms or applicable law.</p>
 
-  <h2>11. Termination</h2>
+  <h2>13. Termination</h2>
   <p>You may stop using the Service and disconnect your brokerage at any time. We may suspend or
-  terminate access if you violate these Terms or to protect the Service.</p>
+  terminate your access at any time if you violate these Terms or to protect the Service or other
+  users. Sections that by their nature should survive termination (including Sections 2, 6, 10–12, 14,
+  and 16) will survive.</p>
 
-  <h2>12. Governing law</h2>
-  <p>These Terms are governed by the laws of the Province of Ontario and the federal laws of
-  Canada applicable therein, without regard to conflict-of-laws principles.</p>
+  <h2>14. Governing law and dispute resolution</h2>
+  <p>These Terms are governed by the laws of the Province of Ontario and the federal laws of Canada
+  applicable therein, without regard to conflict-of-laws principles. Before filing a claim, you agree
+  to first contact us at <a href="mailto:{CONTACT_EMAIL}">{CONTACT_EMAIL}</a> to seek an informal
+  resolution. The courts located in Ontario will have exclusive jurisdiction over any dispute not
+  resolved informally, and you consent to that jurisdiction and venue.</p>
 
-  <h2>13. Changes to these Terms</h2>
-  <p>We may update these Terms from time to time. Continued use after changes take effect
-  constitutes acceptance of the updated Terms.</p>
+  <h2>15. Electronic communications</h2>
+  <p>You consent to receive communications from us electronically (by email or through the Service),
+  and you agree that electronic communications satisfy any legal requirement that such communications
+  be in writing.</p>
 
-  <h2>14. Contact</h2>
+  <h2>16. Changes to these Terms</h2>
+  <p>We may update these Terms from time to time. Material changes will be reflected by the "Last
+  updated" date above and, where appropriate, communicated to you. Your continued use after changes
+  take effect constitutes acceptance of the updated Terms.</p>
+
+  <h2>17. General</h2>
+  <p>These Terms and the Privacy Policy are the entire agreement between you and Cirvia regarding the
+  Service. If any provision is found unenforceable, the remaining provisions remain in effect. Our
+  failure to enforce a provision is not a waiver. You may not assign these Terms without our consent;
+  we may assign them in connection with a merger, acquisition, or sale of assets. We are not liable
+  for delays or failures caused by events beyond our reasonable control. Section headings are for
+  convenience only.</p>
+
+  <h2>18. Contact</h2>
   <p>Questions about these Terms? Email <a href="mailto:{CONTACT_EMAIL}">{CONTACT_EMAIL}</a>.</p>
 </div>
 """
