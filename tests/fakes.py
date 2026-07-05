@@ -24,7 +24,8 @@ class FakeRepo:
         self._positions = positions or []
         self.alerts: dict[str, SimpleNamespace] = {}
 
-    async def create_run(self, *, trigger, user_message, model, prompt_version):
+    async def create_run(self, *, trigger, user_message, model, prompt_version,
+                         user_id=None):
         run_id = uuid.uuid4()
         self.runs[run_id] = {
             "trigger": trigger,
@@ -32,8 +33,16 @@ class FakeRepo:
             "model": model,
             "prompt_version": prompt_version,
             "status": "running",
+            "user_id": user_id,
         }
         return run_id
+
+    async def get_or_create_user(self, *, auth_id, email=None):
+        if not hasattr(self, "_users_by_auth"):
+            self._users_by_auth: dict[uuid.UUID, uuid.UUID] = {}
+        if auth_id not in self._users_by_auth:
+            self._users_by_auth[auth_id] = uuid.uuid4()
+        return self._users_by_auth[auth_id]
 
     async def finalize_run(self, run_id, **kwargs):
         self.runs[run_id].update(kwargs)
@@ -74,17 +83,17 @@ class FakeRepo:
             del self._position_rows[k]
         return len(stale)
 
-    async def list_positions(self):
+    async def list_positions(self, *, user_id=None):
         if hasattr(self, "_position_rows"):
             return list(self._position_rows.values())
         return self._positions
 
-    async def upsert_digest(self, *, run_id, body, digest_date):
+    async def upsert_digest(self, *, run_id, body, digest_date, user_id=None):
         self.digests[digest_date] = SimpleNamespace(
             run_id=run_id, body=body, digest_date=digest_date, created_at=None
         )
 
-    async def get_digest(self, digest_date):
+    async def get_digest(self, digest_date, *, user_id=None):
         return self.digests.get(digest_date)
 
     async def create_alert_if_new(self, *, run_id, category, severity, headline,
@@ -107,7 +116,7 @@ class FakeRepo:
             if a.id == alert_id:
                 a.delivered = True
 
-    async def enqueue_outbound(self, body):
+    async def enqueue_outbound(self, body, *, user_id=None):
         msg_id = uuid.uuid4()
         self.outbound.append(body)
         self._outbox[msg_id] = SimpleNamespace(

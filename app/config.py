@@ -59,7 +59,13 @@ class Settings(BaseSettings):
     # Require TLS to the database (Supabase and most managed Postgres need this;
     # leave false for a local/Docker Postgres).
     db_ssl: bool = Field(default=False, alias="DB_SSL")
+    # Service/owner token: internal callers (cron, Mac worker) and single-user
+    # mode. Also grants owner access when Supabase Auth is not configured.
     api_token: str = Field(default="", alias="API_TOKEN")
+    # Supabase Auth: when set, Bearer JWTs signed with this secret authenticate
+    # per-user requests (Settings → API → JWT Secret). Empty = single-user mode.
+    supabase_jwt_secret: str = Field(default="", alias="SUPABASE_JWT_SECRET")
+    supabase_jwt_aud: str = Field(default="authenticated", alias="SUPABASE_JWT_AUD")
 
     model: str = Field(default="claude-sonnet-4-6", alias="MODEL")
     # Cheap, fast model for news signal tagging (risk/opportunity/neutral).

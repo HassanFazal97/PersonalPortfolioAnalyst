@@ -11,14 +11,16 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import select, text
+from sqlalchemy import event, select, text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
+from sqlalchemy.orm import Session
 
+from app.auth.context import get_current_user_id
 from app.config import DEFAULT_USER_ID
 from app.db.models import (
     AgentRun,
@@ -28,11 +30,26 @@ from app.db.models import (
     OutboundMessage,
     Position,
     ToolCall,
+    User,
 )
 
-# Owner (user #1) attribution until per-user auth lands (roadmap Phase 2). Every
-# tenant-scoped read/write defaults to this user; pass user_id to scope to another.
+# Owner (user #1) attribution until per-user auth lands. Every tenant-scoped
+# read/write defaults to this user; pass user_id to scope to another.
 _OWNER_USER_ID = uuid.UUID(DEFAULT_USER_ID)
+
+
+@event.listens_for(Session, "after_begin")
+def _apply_rls_user(session: Session, transaction, connection) -> None:
+    """Set the per-transaction ``app.current_user_id`` GUC that RLS policies
+    filter on, from the request's ContextVar. Background jobs (ContextVar unset)
+    fall back to the owner. Under the table-owner DB role this is a harmless
+    no-op (RLS is bypassed); it takes effect once DATABASE_URL points at a
+    non-owner role (roadmap Phase 2 deploy step). The value is always a uuid, so
+    inlining it is injection-safe."""
+    uid = get_current_user_id() or _OWNER_USER_ID
+    connection.exec_driver_sql(
+        f"SELECT set_config('app.current_user_id', '{uid}', true)"
+    )
 
 
 def resolve_ack_status(status: str, attempts: int, max_attempts: int) -> str:
@@ -76,6 +93,23 @@ class Repo:
             return True
         except Exception:
             return False
+
+    # ---- users -----------------------------------------------------------
+
+    async def get_or_create_user(
+        self, *, auth_id: uuid.UUID, email: str | None = None
+    ) -> uuid.UUID:
+        """Resolve the app user for a Supabase auth uid, provisioning on first
+        sight. Returns the app ``users.id`` (distinct from the auth uid)."""
+        async with self._session() as s:
+            existing = await s.execute(select(User.id).where(User.auth_id == auth_id))
+            row = existing.scalar_one_or_none()
+            if row is not None:
+                return row
+            user = User(auth_id=auth_id, email=email)
+            s.add(user)
+            await s.commit()
+            return user.id
 
     # ---- positions -------------------------------------------------------
 

@@ -34,7 +34,7 @@ async def get_portfolio(payload: dict[str, Any], ctx: Any = None) -> dict[str, A
     if ctx is None or getattr(ctx, "repo", None) is None:
         raise RuntimeError("get_portfolio requires database access")
 
-    positions = await ctx.repo.list_positions()
+    positions = await ctx.repo.list_positions(user_id=getattr(ctx, "user_id", None))
     if not positions:
         return {"positions": [], "totals": {}, "note": "No positions on record."}
 

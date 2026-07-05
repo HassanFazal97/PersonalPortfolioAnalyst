@@ -20,7 +20,9 @@ from app.agent.digest_pipeline import run_digest_pipeline
 from app.agent.loop import run_agent
 from app.agent.macro.orchestrator import run_macro_scan
 from app.agent.prompts import CHAT_SYSTEM_PROMPT
-from app.config import get_settings
+from app.auth.context import set_current_user_id
+from app.auth.jwt import AuthError, verify_supabase_jwt
+from app.config import DEFAULT_USER_ID, get_settings
 from app.db.repo import Repo
 from app.delivery.imessage import MAX_ATTEMPTS, pending_payload
 from app.delivery.shortcuts import get_latest_digest
@@ -94,18 +96,58 @@ _bearer = HTTPBearer(auto_error=False)
 # Every other route stays authed-by-default via the app-level dependency.
 _AUTH_EXEMPT_PATHS = {"/health"}
 
+_OWNER_USER_ID = uuid.UUID(DEFAULT_USER_ID)
 
-def require_auth(
+
+async def require_auth(
     request: Request,
     creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
 ) -> None:
-    """Static single-token bearer auth applied to every route (spec §10)."""
+    """Resolve the caller to a user and bind it for the request.
+
+    Two accepted credentials:
+      1. the static service/owner token (``API_TOKEN``) → acts as the owner;
+         used by internal callers (cron, Mac worker) and single-user mode.
+      2. a Supabase Auth JWT (when ``SUPABASE_JWT_SECRET`` is set) → the
+         per-user identity, provisioned on first sight.
+    The resolved user_id is stashed on the request and in the ContextVar the DB
+    layer reads to scope RLS."""
     if request.url.path in _AUTH_EXEMPT_PATHS:
         return
-    token = get_settings().api_token
+    settings = get_settings()
     supplied = creds.credentials if creds and creds.scheme.lower() == "bearer" else ""
-    if not token or not supplied or not hmac.compare_digest(supplied, token):
+    if not supplied:
         raise HTTPException(status_code=401, detail="invalid or missing bearer token")
+
+    # 1) Service/owner static token.
+    if settings.api_token and hmac.compare_digest(supplied, settings.api_token):
+        _bind_user(request, _OWNER_USER_ID)
+        return
+
+    # 2) Supabase per-user JWT.
+    if settings.supabase_jwt_secret:
+        try:
+            claims = verify_supabase_jwt(
+                supplied, settings.supabase_jwt_secret, audience=settings.supabase_jwt_aud
+            )
+            auth_id = uuid.UUID(str(claims["sub"]))
+        except (AuthError, ValueError) as exc:
+            raise HTTPException(status_code=401, detail="invalid token") from exc
+        repo = _require_repo(request.app)
+        user_id = await repo.get_or_create_user(auth_id=auth_id, email=claims.get("email"))
+        _bind_user(request, user_id)
+        return
+
+    raise HTTPException(status_code=401, detail="invalid or missing bearer token")
+
+
+def _bind_user(request: Request, user_id: uuid.UUID) -> None:
+    request.state.user_id = user_id
+    set_current_user_id(user_id)
+
+
+def _user_id(request: Request) -> uuid.UUID:
+    return getattr(request.state, "user_id", _OWNER_USER_ID)
 
 
 def _require_repo(app: FastAPI) -> Repo:
@@ -131,7 +173,7 @@ def create_app() -> FastAPI:
         return {"ok": db_ok, "db": db_ok, "scheduler": scheduler_ok}
 
     @app.post("/chat")
-    async def chat(req: ChatRequest) -> dict:
+    async def chat(req: ChatRequest, request: Request) -> dict:
         settings = get_settings()
         repo = _require_repo(app)
         budget = Budget(
@@ -146,6 +188,7 @@ def create_app() -> FastAPI:
             tools=CHAT_TOOLS,
             budget=budget,
             db=repo,
+            user_id=_user_id(request),
         )
         return {
             "run_id": str(result.run_id),
@@ -218,9 +261,9 @@ def create_app() -> FastAPI:
         return await run_macro_scan(repo)
 
     @app.get("/alerts")
-    async def list_alerts(limit: int = 20) -> dict:
+    async def list_alerts(request: Request, limit: int = 20) -> dict:
         repo = _require_repo(app)
-        alerts = await repo.recent_alerts(limit=limit)
+        alerts = await repo.recent_alerts(limit=limit, user_id=_user_id(request))
         return {
             "alerts": [
                 {
@@ -257,12 +300,13 @@ def create_app() -> FastAPI:
         return {"id": str(msg_id), "status": result}
 
     @app.post("/inbound")
-    async def inbound(req: InboundRequest) -> dict:
+    async def inbound(req: InboundRequest, request: Request) -> dict:
         """Stub: run a chat agent for an incoming message and enqueue the reply.
         Incoming-message reading (chat.db) is out of scope; this endpoint lets
         the Mac worker be extended to two-way later."""
         settings = get_settings()
         repo = _require_repo(app)
+        user_id = _user_id(request)
         budget = Budget(
             max_iterations=settings.chat_max_iterations,
             max_cost_usd=settings.chat_max_cost_usd,
@@ -275,8 +319,9 @@ def create_app() -> FastAPI:
             tools=CHAT_TOOLS,
             budget=budget,
             db=repo,
+            user_id=user_id,
         )
-        await repo.enqueue_outbound(result.answer)
+        await repo.enqueue_outbound(result.answer, user_id=user_id)
         return {"run_id": str(result.run_id), "queued_reply": result.answer}
 
     # ---- Wealthsimple sync (SnapTrade) ---------------------------------

@@ -56,6 +56,8 @@ class User(Base):
         UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
     )
     email: Mapped[str | None] = mapped_column(Text, unique=True)
+    # Supabase Auth uid (JWT sub); NULL for the seeded owner until linked.
+    auth_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), unique=True)
     timezone: Mapped[str] = mapped_column(Text, nullable=False, default="America/Toronto")
     digest_send_time: Mapped[time] = mapped_column(
         Time, nullable=False, server_default=text("'07:45'")

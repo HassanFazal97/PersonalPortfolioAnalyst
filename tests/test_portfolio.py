@@ -8,7 +8,7 @@ class FakeRepo:
     def __init__(self, positions):
         self._positions = positions
 
-    async def list_positions(self):
+    async def list_positions(self, *, user_id=None):
         return self._positions
 
 

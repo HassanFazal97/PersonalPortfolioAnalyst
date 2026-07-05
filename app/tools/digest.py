@@ -54,12 +54,15 @@ async def send_digest(payload: dict[str, Any], ctx: Any = None) -> dict[str, Any
     settings = get_settings()
     digest_date = _today(settings.tz)
     run_id = getattr(ctx, "run_id", None)
+    user_id = getattr(ctx, "user_id", None)
 
-    await ctx.repo.upsert_digest(run_id=run_id, body=body, digest_date=digest_date)
+    await ctx.repo.upsert_digest(
+        run_id=run_id, body=body, digest_date=digest_date, user_id=user_id
+    )
 
     # Phase B: enqueue for the Mac worker. Harmless if no worker is running.
     if getattr(ctx, "enqueue_delivery", False):
-        await ctx.repo.enqueue_outbound(body)
+        await ctx.repo.enqueue_outbound(body, user_id=user_id)
 
     return {
         "status": "sent",

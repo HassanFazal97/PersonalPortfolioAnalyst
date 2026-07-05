@@ -21,6 +21,7 @@ from typing import Any
 
 from app.agent.budget import Budget
 from app.agent.prompts import BUDGET_SUMMARY_PROMPT, PROMPT_VERSION
+from app.auth.context import set_current_user_id
 from app.config import get_settings
 from app.db.repo import Repo
 from app.observability.logging import Observer
@@ -246,11 +247,17 @@ async def run_agent(
     db: Repo,
     client: Any = None,
     ctx: ToolContext | None = None,
+    user_id: Any | None = None,
 ) -> AgentResult:
     settings = get_settings()
     client = _get_client(client)
+    # Bind the current user so both RLS (via the DB GUC) and the WHERE-filters
+    # scope to it. Safe to call again if the request already set it.
+    if user_id is not None:
+        set_current_user_id(user_id)
     if ctx is None:
         ctx = ToolContext(settings=settings, repo=db)
+    ctx.user_id = user_id
     # Let tools that make their own model calls (news classification) log and
     # cost-account against this run.
     ctx.client = client
@@ -263,6 +270,7 @@ async def run_agent(
         user_message=user_message,
         model=settings.model,
         prompt_version=PROMPT_VERSION,
+        user_id=user_id,
     )
     ctx.run_id = run_id
     observer = Observer(db, run_id)
