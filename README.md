@@ -1,9 +1,9 @@
-# Portfolio Analyst Agent
+# Cirvia
 
-A personal, single-user AI portfolio analyst. It answers on-demand questions
-about your real holdings via a hand-written tool-using agent loop, runs every
-weekday morning to produce a compressed digest, and logs every model call and
-tool call to Postgres so any run is fully replayable.
+**Cirvia** (`cirvia.ca`) is an AI portfolio analyst for Canadian investors. It
+answers on-demand questions about real holdings via a hand-written tool-using
+agent loop, runs every weekday morning to produce a compressed digest, and logs
+every model call and tool call to Postgres so any run is fully replayable.
 
 No agent frameworks — the loop, tool dispatch, budgeting, and orchestration are
 written by hand. See `PROJECT_SPEC.md` for the full design.

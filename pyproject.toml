@@ -1,7 +1,7 @@
 [project]
 name = "portfolio-agent"
 version = "0.1.0"
-description = "Personal AI portfolio analyst — hand-written tool-using agent with full observability."
+description = "Cirvia — AI portfolio analyst for Canadian investors."
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",

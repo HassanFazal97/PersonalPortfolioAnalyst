@@ -13,6 +13,7 @@ import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 
@@ -34,6 +35,7 @@ from app.integrations.snaptrade.onboarding import (
     service_for_user,
 )
 from app.integrations.snaptrade.sync import sync_wealthsimple_positions
+from app.landing import LANDING_HTML
 from app.scheduler import DigestScheduler, IntervalScheduler
 from app.tools.registry import CHAT_TOOLS
 
@@ -100,7 +102,7 @@ _bearer = HTTPBearer(auto_error=False)
 # Exempt from bearer auth so platform liveness probes and uptime pingers — which
 # cannot attach the token — can reach it. /health returns no sensitive data.
 # Every other route stays authed-by-default via the app-level dependency.
-_AUTH_EXEMPT_PATHS = {"/health"}
+_AUTH_EXEMPT_PATHS = {"/", "/health"}
 
 _OWNER_USER_ID = uuid.UUID(DEFAULT_USER_ID)
 
@@ -171,10 +173,16 @@ def _require_repo(app: FastAPI) -> Repo:
 
 def create_app() -> FastAPI:
     app = FastAPI(
-        title="Portfolio Analyst Agent",
+        title="Cirvia",
+        description="AI portfolio analyst for Canadian investors — read-only brokerage sync, daily digest, macro alerts.",
         lifespan=lifespan,
         dependencies=[Depends(require_auth)],
     )
+
+    @app.get("/", response_class=HTMLResponse)
+    async def landing() -> HTMLResponse:
+        """Public marketing page (also used for SnapTrade / partner review)."""
+        return HTMLResponse(LANDING_HTML)
 
     @app.get("/health")
     async def health() -> dict:

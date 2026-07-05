@@ -1,6 +1,6 @@
 # Deploy & Activation Runbook
 
-How to deploy the Portfolio Analyst Agent and turn on multi-user auth + RLS.
+How to deploy **Cirvia** and turn on multi-user auth + RLS.
 Host is **Railway** (single container). The image runs migrations, then serves.
 
 > **One replica only.** The morning digest and macro scan are driven by an
