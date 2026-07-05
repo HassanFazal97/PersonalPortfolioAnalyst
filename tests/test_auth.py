@@ -6,10 +6,14 @@ import time
 import uuid
 from types import SimpleNamespace
 
+import jwt as pyjwt
 import pytest
+from cryptography.hazmat.primitives.asymmetric import ec
 from fastapi import HTTPException
 from fastapi.security import HTTPAuthorizationCredentials
+from jwt.algorithms import ECAlgorithm
 
+import app.auth.jwt as auth_jwt
 import app.main as main
 from app.agent.budget import Budget
 from app.agent.loop import run_agent
@@ -18,7 +22,8 @@ from app.auth.jwt import AuthError, verify_supabase_jwt
 from app.tools.registry import CHAT_TOOLS
 from tests.fakes import FakeRepo, ScriptedAnthropic, text_turn
 
-SECRET = "test-jwt-secret"
+SECRET = "test-jwt-secret-with-at-least-32-bytes-of-length"
+JWKS_URL = "https://project.supabase.co/auth/v1/.well-known/jwks.json"
 
 
 def _b64(data: bytes) -> str:
@@ -45,6 +50,17 @@ def _claims(**over):
     }
     base.update(over)
     return base
+
+
+def _es256_keypair(kid="kid-1"):
+    priv = ec.generate_private_key(ec.SECP256R1())
+    jwk = json.loads(ECAlgorithm.to_jwk(priv.public_key()))
+    jwk.update({"kid": kid, "alg": "ES256", "use": "sig"})
+    return priv, {"keys": [jwk]}, kid
+
+
+def make_es256(claims, priv, kid):
+    return pyjwt.encode(claims, priv, algorithm="ES256", headers={"kid": kid})
 
 
 # ---- JWT verifier ---------------------------------------------------------
@@ -86,6 +102,41 @@ def test_verify_rejects_missing_sub():
         verify_supabase_jwt(make_jwt(claims), SECRET)
 
 
+# ---- ES256 via JWKS (the Supabase asymmetric default) ---------------------
+
+
+def test_verify_accepts_es256_via_jwks(monkeypatch):
+    auth_jwt.cache_clear()
+    priv, jwks, kid = _es256_keypair()
+    monkeypatch.setattr(auth_jwt, "_fetch_jwks", lambda url: jwks)
+    claims = _claims()
+    out = verify_supabase_jwt(make_es256(claims, priv, kid), jwks_url=JWKS_URL)
+    assert out["sub"] == claims["sub"]
+
+
+def test_verify_es256_rejects_unknown_kid(monkeypatch):
+    auth_jwt.cache_clear()
+    priv, jwks, _ = _es256_keypair(kid="kid-1")
+    monkeypatch.setattr(auth_jwt, "_fetch_jwks", lambda url: jwks)
+    with pytest.raises(AuthError):
+        verify_supabase_jwt(make_es256(_claims(), priv, "kid-unknown"), jwks_url=JWKS_URL)
+
+
+def test_verify_es256_rejects_wrong_signing_key(monkeypatch):
+    auth_jwt.cache_clear()
+    _, jwks_pub, kid = _es256_keypair(kid="kid-1")
+    other_priv, _, _ = _es256_keypair(kid="kid-1")  # signs with a key not in JWKS
+    monkeypatch.setattr(auth_jwt, "_fetch_jwks", lambda url: jwks_pub)
+    with pytest.raises(AuthError):
+        verify_supabase_jwt(make_es256(_claims(), other_priv, kid), jwks_url=JWKS_URL)
+
+
+def test_verify_asymmetric_without_jwks_config():
+    priv, _, kid = _es256_keypair()
+    with pytest.raises(AuthError):
+        verify_supabase_jwt(make_es256(_claims(), priv, kid), jwks_url=None)
+
+
 # ---- user_id threading through run_agent ----------------------------------
 
 
@@ -120,7 +171,12 @@ def _creds(token):
 
 
 def _settings(**over):
-    base = {"api_token": "svc-token", "supabase_jwt_secret": "", "supabase_jwt_aud": "authenticated"}
+    base = {
+        "api_token": "svc-token",
+        "supabase_url": "",
+        "supabase_jwt_secret": "",
+        "supabase_jwt_aud": "authenticated",
+    }
     base.update(over)
     return SimpleNamespace(**base)
 
@@ -161,8 +217,27 @@ async def test_require_auth_jwt_provisions_user(monkeypatch):
     assert req.state.user_id != main._OWNER_USER_ID
 
 
-async def test_require_auth_jwt_ignored_when_secret_unset(monkeypatch):
+async def test_require_auth_es256_jwt_provisions_user(monkeypatch):
+    set_current_user_id(None)
+    auth_jwt.cache_clear()
+    priv, jwks, kid = _es256_keypair()
+    monkeypatch.setattr(auth_jwt, "_fetch_jwks", lambda url: jwks)
+    monkeypatch.setattr(
+        main, "get_settings",
+        lambda: _settings(supabase_url="https://project.supabase.co"),
+    )
+    repo = FakeRepo()
+    claims = _claims()
+    req = _request(repo=repo)
+
+    await main.require_auth(req, _creds(make_es256(claims, priv, kid)))
+
+    assert req.state.user_id == repo._users_by_auth[uuid.UUID(claims["sub"])]
+    assert req.state.user_id != main._OWNER_USER_ID
+
+
+async def test_require_auth_jwt_ignored_when_unconfigured(monkeypatch):
     # Single-user mode: only the service token works, JWTs are rejected.
-    monkeypatch.setattr(main, "get_settings", lambda: _settings(supabase_jwt_secret=""))
+    monkeypatch.setattr(main, "get_settings", lambda: _settings())
     with pytest.raises(HTTPException):
         await main.require_auth(_request(), _creds(make_jwt(_claims())))

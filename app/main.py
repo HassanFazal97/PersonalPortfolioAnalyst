@@ -7,6 +7,7 @@ one connection pool.
 
 from __future__ import annotations
 
+import asyncio
 import hmac
 import uuid
 from contextlib import asynccontextmanager
@@ -21,7 +22,7 @@ from app.agent.loop import run_agent
 from app.agent.macro.orchestrator import run_macro_scan
 from app.agent.prompts import CHAT_SYSTEM_PROMPT
 from app.auth.context import set_current_user_id
-from app.auth.jwt import AuthError, verify_supabase_jwt
+from app.auth.jwt import AuthError, jwks_url_for, verify_supabase_jwt
 from app.config import DEFAULT_USER_ID, get_settings
 from app.db.repo import Repo
 from app.delivery.imessage import MAX_ATTEMPTS, pending_payload
@@ -124,11 +125,17 @@ async def require_auth(
         _bind_user(request, _OWNER_USER_ID)
         return
 
-    # 2) Supabase per-user JWT.
-    if settings.supabase_jwt_secret:
+    # 2) Supabase per-user JWT — asymmetric (JWKS) with HS256 legacy fallback.
+    if settings.supabase_url or settings.supabase_jwt_secret:
+        jwks_url = jwks_url_for(settings.supabase_url) if settings.supabase_url else None
         try:
-            claims = verify_supabase_jwt(
-                supplied, settings.supabase_jwt_secret, audience=settings.supabase_jwt_aud
+            # Verification (incl. a possible blocking JWKS fetch) runs off-loop.
+            claims = await asyncio.to_thread(
+                verify_supabase_jwt,
+                supplied,
+                settings.supabase_jwt_secret or None,
+                jwks_url=jwks_url,
+                audience=settings.supabase_jwt_aud,
             )
             auth_id = uuid.UUID(str(claims["sub"]))
         except (AuthError, ValueError) as exc:

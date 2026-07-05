@@ -62,8 +62,12 @@ class Settings(BaseSettings):
     # Service/owner token: internal callers (cron, Mac worker) and single-user
     # mode. Also grants owner access when Supabase Auth is not configured.
     api_token: str = Field(default="", alias="API_TOKEN")
-    # Supabase Auth: when set, Bearer JWTs signed with this secret authenticate
-    # per-user requests (Settings → API → JWT Secret). Empty = single-user mode.
+    # Supabase Auth. Set SUPABASE_URL (https://<ref>.supabase.co) to verify the
+    # project's asymmetric JWTs (ES256/RS256) via its JWKS endpoint — the current
+    # default for new projects, and rotation-safe. SUPABASE_JWT_SECRET is the
+    # legacy HS256 shared-secret fallback. Either (or both) enables per-user auth;
+    # neither = single-user mode.
+    supabase_url: str = Field(default="", alias="SUPABASE_URL")
     supabase_jwt_secret: str = Field(default="", alias="SUPABASE_JWT_SECRET")
     supabase_jwt_aud: str = Field(default="authenticated", alias="SUPABASE_JWT_AUD")
 
