@@ -99,17 +99,19 @@ h1 {
   max-width: 36em; margin: 1.4rem auto 0;
 }
 .cta-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.8rem; margin-top: 2rem; }
-/* hero product stage: central digest panel + floating satellite cards */
+/* hero product stage: central digest panel + floating satellite cards.
+   The panel is 540px centered; cards live in the side gutters and never
+   cover the panel. Below 1100px the gutters vanish, so cards stack. */
 .stage {
-  position: relative; max-width: 920px; margin: clamp(3rem, 6vw, 4.5rem) auto 0;
-  padding: 1.5rem 0 2.5rem; text-align: left;
+  position: relative; max-width: 1060px; margin: clamp(3rem, 6vw, 4.5rem) auto 0;
+  padding: 1rem 0 1.5rem; text-align: left;
 }
 .mock-glow {
   position: absolute; inset: -10% -12%; pointer-events: none;
   background: radial-gradient(closest-side, oklch(48% 0.18 295 / 0.16), transparent 72%);
 }
 .mock-panel {
-  position: relative; max-width: 560px; margin: 0 auto;
+  position: relative; max-width: 540px; margin: 0 auto;
   background: var(--surface-1); border: 1px solid var(--line);
   border-radius: var(--r-l); padding: 1.25rem 1.4rem 1.4rem;
 }
@@ -120,9 +122,9 @@ h1 {
   box-shadow: 0 18px 44px oklch(0% 0 0 / 0.38);
   animation: floaty 7s ease-in-out infinite alternate;
 }
-.fc-total { left: 1%; top: 10%; width: 190px; }
-.fc-alert { right: 0.5%; top: 26%; width: 280px; animation-delay: -2.5s; }
-.fc-chat { left: 4%; bottom: -3%; width: 290px; animation-delay: -4.5s; }
+.fc-total { left: 0; top: 6%; width: 220px; }
+.fc-alert { right: 0; top: 28%; width: 240px; animation-delay: -2.5s; }
+.fc-chat { left: 0; bottom: 4%; width: 240px; animation-delay: -4.5s; }
 @keyframes floaty { from { transform: translateY(-5px); } to { transform: translateY(7px); } }
 .fc-k { display: block; font-size: 0.74rem; font-weight: 600; color: var(--ink-3); }
 .fc-v { display: block; font-size: 1.35rem; font-weight: 800; color: var(--ink);
@@ -130,7 +132,7 @@ h1 {
 .fc-d { font-size: 0.82rem; font-weight: 600; }
 .fc-q { font-weight: 600; color: var(--ink); margin-bottom: 0.3rem; }
 .fc-a { color: var(--ink-2); }
-@media (max-width: 920px) {
+@media (max-width: 1100px) {
   .stage { padding: 0; }
   .float-card { position: static; width: min(100%, 430px); margin: 0.8rem auto 0;
     animation: none; box-shadow: none; }
