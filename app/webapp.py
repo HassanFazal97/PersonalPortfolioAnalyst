@@ -10,85 +10,100 @@ from __future__ import annotations
 
 import json
 
-from app.landing import _CSS, CONTACT_EMAIL
+from app.landing import _CSS, _FONT_LINKS, CONTACT_EMAIL, MOTION_CDN
 
 _APP_CSS = """
-.app-wrap { max-width: 860px; margin: 0 auto; padding: 2.5rem 1.5rem 4rem; }
-.auth-card { max-width: 400px; margin: 3rem auto; background: var(--surface);
-  border: 1px solid var(--line); border-radius: var(--radius); padding: 2rem; }
-.auth-card h1 { font-size: 1.5rem; margin-bottom: 0.35rem; }
-.auth-card .sub { color: var(--muted); font-size: 0.95rem; margin-bottom: 1.5rem; }
-label { display: block; font-size: 0.85rem; font-weight: 600; color: var(--muted);
+/* app register: fixed rem type scale, quieter headings, denser rhythm */
+.app-wrap { max-width: 880px; margin: 0 auto; padding: 2.25rem 1.5rem 4rem; }
+.app-wrap h1 { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.015em;
+  line-height: 1.25; max-width: none; margin: 0; }
+.app-wrap h2 { font-size: 1.25rem; font-weight: 650; letter-spacing: -0.01em; }
+.app-wrap h3 { font-size: 1rem; font-weight: 600; margin-bottom: 0; }
+.auth-card { max-width: 400px; margin: 3.5rem auto; background: var(--surface-1);
+  border: 1px solid var(--line); border-radius: var(--r-l); padding: 2rem; }
+.auth-card h1 { margin-bottom: 0.35rem; }
+.auth-card .sub { color: var(--ink-3); font-size: 0.95rem; margin-bottom: 1.4rem; }
+label { display: block; font-size: 0.84rem; font-weight: 600; color: var(--ink-3);
   margin: 0.9rem 0 0.3rem; }
 input[type=email], input[type=password], input[type=time], select {
-  width: 100%; padding: 0.65rem 0.8rem; border-radius: 9px;
-  border: 1px solid var(--line); background: var(--surface-2); color: var(--text);
-  font-size: 0.95rem; outline: none; }
-input:focus, select:focus { border-color: var(--accent-dim); }
-.btn.full { width: 100%; text-align: center; margin-top: 1.25rem; cursor: pointer;
-  font-size: 0.95rem; border: none; }
-.btn[disabled] { opacity: 0.55; cursor: default; }
-.switch-mode { text-align: center; margin-top: 1rem; font-size: 0.9rem; color: var(--muted); }
-.error-box { background: rgba(220, 90, 90, 0.12); border: 1px solid rgba(220, 90, 90, 0.4);
-  color: #e89b9b; border-radius: 9px; padding: 0.7rem 0.9rem; font-size: 0.9rem;
+  width: 100%; padding: 0.65rem 0.8rem; border-radius: var(--r-s);
+  border: 1px solid var(--line); background: var(--surface-2); color: var(--ink);
+  font-family: var(--font); font-size: 0.95rem; outline: none;
+  transition: border-color 0.15s var(--ease); }
+input:focus, select:focus { border-color: var(--accent-hover); }
+.btn.full { width: 100%; text-align: center; margin-top: 1.25rem; font-size: 0.95rem; }
+.btn[disabled] { opacity: 0.55; cursor: default; transform: none; }
+.switch-mode { text-align: center; margin-top: 1rem; font-size: 0.9rem; color: var(--ink-3); }
+.error-box { background: oklch(72% 0.14 25 / 0.1); border: 1px solid oklch(72% 0.14 25 / 0.4);
+  color: var(--loss); border-radius: var(--r-s); padding: 0.7rem 0.9rem; font-size: 0.9rem;
   margin-top: 1rem; display: none; }
-.notice-box { background: rgba(91, 159, 212, 0.10); border: 1px solid var(--accent-dim);
-  color: var(--text); border-radius: 9px; padding: 0.7rem 0.9rem; font-size: 0.9rem;
+.notice-box { background: oklch(48% 0.18 295 / 0.12); border: 1px solid var(--accent);
+  color: var(--ink); border-radius: var(--r-s); padding: 0.7rem 0.9rem; font-size: 0.9rem;
   margin-top: 1rem; display: none; }
 /* onboarding stepper */
 .stepper { display: flex; gap: 0.5rem; margin: 1.5rem 0 2rem; }
-.stepper .s { flex: 1; height: 4px; border-radius: 4px; background: var(--surface-2); }
-.stepper .s.done { background: var(--accent); }
-.step-panel { background: var(--surface); border: 1px solid var(--line);
-  border-radius: var(--radius); padding: 1.75rem; }
+.stepper .s { flex: 1; height: 4px; border-radius: 4px; background: var(--surface-2);
+  transition: background 0.25s var(--ease); }
+.stepper .s.done { background: var(--accent-hover); }
+.step-panel { background: var(--surface-1); border: 1px solid var(--line);
+  border-radius: var(--r-l); padding: 1.75rem; }
 .step-panel h2 { margin-bottom: 0.4rem; }
-.step-panel p { color: var(--muted); font-size: 0.95rem; }
+.step-panel p { color: var(--ink-2); font-size: 0.95rem; }
 .status-line { display: flex; align-items: center; gap: 0.6rem; margin: 1rem 0;
-  color: var(--muted); font-size: 0.95rem; }
+  color: var(--ink-3); font-size: 0.95rem; }
 .spinner { width: 16px; height: 16px; border: 2px solid var(--line);
-  border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite;
-  display: inline-block; }
+  border-top-color: var(--accent-text); border-radius: 50%;
+  animation: spin 0.8s linear infinite; display: inline-block; }
 @keyframes spin { to { transform: rotate(360deg); } }
+/* skeleton loading */
+.skl { height: 0.85rem; border-radius: 6px; background: var(--surface-2);
+  margin: 0.65rem 0; animation: skl-pulse 1.4s ease-in-out infinite; }
+.skl.short { width: 55%; }
+@keyframes skl-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+@media (prefers-reduced-motion: reduce) { .skl { animation: none; opacity: 0.7; } }
 /* dashboard */
 .dash-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
 @media (max-width: 700px) { .dash-grid { grid-template-columns: 1fr; } }
-.dash-card { background: var(--surface); border: 1px solid var(--line);
-  border-radius: var(--radius); padding: 1.4rem 1.5rem; }
+.dash-card { background: var(--surface-1); border: 1px solid var(--line);
+  border-radius: var(--r-l); padding: 1.4rem 1.5rem; }
 .dash-card.wide { grid-column: 1 / -1; }
-.dash-card h3 { display: flex; justify-content: space-between; align-items: baseline; }
-.dash-card h3 .tag { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.04em;
-  text-transform: uppercase; color: var(--accent); }
-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; margin-top: 0.75rem; }
-th { text-align: left; color: var(--muted); font-weight: 600; font-size: 0.78rem;
+.dash-card h3 { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; }
+.dash-card h3 .tag { font-size: 0.8rem; font-weight: 600; color: var(--ink-3);
+  font-variant-numeric: tabular-nums; }
+table { width: 100%; border-collapse: collapse; font-size: 0.9rem; margin-top: 0.75rem;
+  font-variant-numeric: tabular-nums; }
+th { text-align: left; color: var(--ink-3); font-weight: 600; font-size: 0.72rem;
   text-transform: uppercase; letter-spacing: 0.05em; padding: 0.4rem 0.5rem;
-  border-bottom: 1px solid var(--line); }
-td { padding: 0.5rem; border-bottom: 1px solid var(--line); }
+  border-bottom: 1px solid var(--line-strong); }
+td { padding: 0.55rem 0.5rem; border-bottom: 1px solid var(--line); }
 tr:last-child td { border-bottom: none; }
-.pos { color: #7fd49b; } .neg { color: #e89b9b; }
-.digest-body { white-space: pre-wrap; color: #c6d2df; font-size: 0.95rem;
+.pos { color: var(--gain); } .neg { color: var(--loss); }
+.digest-body { white-space: pre-wrap; color: var(--ink-2); font-size: 0.95rem;
   margin-top: 0.75rem; line-height: 1.6; }
 .alert-item { padding: 0.75rem 0; border-bottom: 1px solid var(--line); }
 .alert-item:last-child { border-bottom: none; }
-.alert-item .head { font-weight: 600; font-size: 0.95rem; }
-.alert-item .meta { color: var(--muted); font-size: 0.8rem; margin-top: 0.15rem; }
-.sev-high { color: #e89b9b; } .sev-medium { color: #e8c98b; } .sev-low { color: var(--muted); }
+.alert-item .head { font-weight: 600; font-size: 0.95rem; color: var(--ink); }
+.alert-item .meta { color: var(--ink-3); font-size: 0.8rem; margin-top: 0.15rem; }
+.sev-high { color: var(--loss); } .sev-medium { color: var(--warn); } .sev-low { color: var(--ink-3); }
 /* chat */
 .chat-log { max-height: 320px; overflow-y: auto; margin: 0.75rem 0; }
-.chat-msg { padding: 0.6rem 0.9rem; border-radius: 10px; margin: 0.5rem 0;
-  font-size: 0.93rem; line-height: 1.55; white-space: pre-wrap; }
+.chat-msg { padding: 0.6rem 0.9rem; border-radius: var(--r-m); margin: 0.5rem 0;
+  font-size: 0.93rem; line-height: 1.55; white-space: pre-wrap; color: var(--ink-2); }
 .chat-msg.user { background: var(--surface-2); margin-left: 2rem; }
-.chat-msg.bot { background: rgba(91, 159, 212, 0.10); margin-right: 2rem; color: #d5e2ee; }
+.chat-msg.bot { background: oklch(30% 0.1 295 / 0.35); margin-right: 2rem; }
 .chat-row { display: flex; gap: 0.5rem; }
-.chat-row input { flex: 1; padding: 0.65rem 0.8rem; border-radius: 9px;
-  border: 1px solid var(--line); background: var(--surface-2); color: var(--text);
-  font-size: 0.95rem; outline: none; }
-.chat-row .btn { cursor: pointer; border: none; }
+.chat-row input { flex: 1; padding: 0.65rem 0.8rem; border-radius: var(--r-s);
+  border: 1px solid var(--line); background: var(--surface-2); color: var(--ink);
+  font-family: var(--font); font-size: 0.95rem; outline: none; }
+.chat-row input:focus { border-color: var(--accent-hover); }
+.chat-row .btn { border: none; }
 .topbar { display: flex; justify-content: space-between; align-items: center;
-  margin-bottom: 1.5rem; }
-.topbar .who { color: var(--muted); font-size: 0.9rem; }
-.link-btn { background: none; border: none; color: var(--accent); cursor: pointer;
-  font-size: 0.9rem; padding: 0; }
-.muted-note { color: var(--muted); font-size: 0.88rem; margin-top: 0.75rem; }
+  margin-bottom: 1.5rem; gap: 1rem; }
+.topbar .who { color: var(--ink-3); font-size: 0.9rem; }
+.link-btn { background: none; border: none; color: var(--accent-text); cursor: pointer;
+  font-family: var(--font); font-size: 0.9rem; padding: 0; }
+.link-btn:hover { text-decoration: underline; }
+.muted-note { color: var(--ink-3); font-size: 0.88rem; margin-top: 0.75rem; }
 """
 
 _SHELL_JS = """
@@ -126,6 +141,23 @@ async function signOut() {
   await sb.auth.signOut();
   window.location.href = '/app';
 }
+
+// Product-register motion: short state transitions only, skipped for
+// reduced-motion users or if the Motion CDN script failed to load.
+const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const EASE = [0.22, 1, 0.36, 1];
+
+function riseIn(el, duration = 0.22) {
+  if (REDUCED || !window.Motion || !el) return;
+  Motion.animate(el,
+    { opacity: [0, 1], transform: ['translateY(6px)', 'translateY(0px)'] },
+    { duration, ease: EASE });
+}
+
+function staggerIn(els, duration = 0.25, gap = 0.04) {
+  if (REDUCED || !window.Motion || !els || !els.length) return;
+  Motion.animate(els, { opacity: [0, 1] }, { duration, delay: Motion.stagger(gap), ease: EASE });
+}
 """
 
 
@@ -140,12 +172,12 @@ def _page(
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{title}</title>
 <meta name="robots" content="noindex">
-<style>{_CSS}{_APP_CSS}</style>
+{_FONT_LINKS}<style>{_CSS}{_APP_CSS}</style>
 </head>
 <body>
 <nav><div class="nav-inner">
 <a class="logo" href="/">Cir<span>via</span></a>
-<div class="nav-links"><a href="/app/dashboard">Dashboard</a>
+<div class="nav-links"><a class="keep" href="/app/dashboard">Dashboard</a>
 <button class="link-btn" onclick="signOut()">Sign out</button></div>
 </div></nav>
 <main class="app-wrap">
@@ -153,6 +185,7 @@ def _page(
 </main>
 <script>window.CIRVIA_CONFIG = {config};</script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="{MOTION_CDN}"></script>
 <script>{_SHELL_JS}</script>
 <script>{extra_js}</script>
 </body>
@@ -240,6 +273,8 @@ form.addEventListener('submit', async (ev) => {
 
 // Already signed in? Skip the form.
 getToken().then((t) => { if (t) routeAfterAuth(); });
+
+riseIn(document.querySelector('.auth-card'), 0.28);
 """
 
 
@@ -255,7 +290,7 @@ _ONBOARDING_BODY = """
 
 <div class="step-panel" id="panel-connect">
   <h2>Connect your brokerage</h2>
-  <p>Link Wealthsimple through SnapTrade's secure portal. Read-only — Cirvia can
+  <p>Link Wealthsimple through SnapTrade's secure portal. Read-only: Cirvia can
   never trade or move money, and your brokerage password is never shared with us.</p>
   <div class="status-line" id="connect-status" style="display:none;">
     <span class="spinner"></span><span id="connect-status-text">Waiting for connection…</span>
@@ -301,8 +336,14 @@ for (const z of list) {
 }
 
 function showPanel(id) {
-  for (const p of ['panel-connect','panel-sync','panel-prefs'])
-    document.getElementById(p).style.display = p === id ? 'block' : 'none';
+  let changed = false;
+  for (const p of ['panel-connect','panel-sync','panel-prefs']) {
+    const el = document.getElementById(p);
+    const show = p === id;
+    if (show && el.style.display === 'none') changed = true;
+    el.style.display = show ? 'block' : 'none';
+  }
+  if (changed) riseIn(document.getElementById(id));
   document.getElementById('s2').classList.toggle('done', id !== 'panel-connect');
   document.getElementById('s3').classList.toggle('done', id === 'panel-prefs');
 }
@@ -411,15 +452,21 @@ _DASHBOARD_BODY = """
 <div class="dash-grid">
   <div class="dash-card wide">
     <h3>Holdings <span class="tag" id="totals"></span></h3>
-    <div id="holdings"><div class="status-line"><span class="spinner"></span>Loading…</div></div>
+    <div id="holdings"><div aria-hidden="true">
+      <div class="skl"></div><div class="skl"></div><div class="skl short"></div>
+    </div></div>
   </div>
   <div class="dash-card">
     <h3>Today's digest</h3>
-    <div id="digest"><div class="status-line"><span class="spinner"></span>Loading…</div></div>
+    <div id="digest"><div aria-hidden="true">
+      <div class="skl"></div><div class="skl"></div><div class="skl short"></div>
+    </div></div>
   </div>
   <div class="dash-card">
     <h3>Recent alerts</h3>
-    <div id="alerts"><div class="status-line"><span class="spinner"></span>Loading…</div></div>
+    <div id="alerts"><div aria-hidden="true">
+      <div class="skl"></div><div class="skl short"></div>
+    </div></div>
   </div>
   <div class="dash-card wide">
     <h3>Ask Cirvia</h3>
@@ -428,7 +475,7 @@ _DASHBOARD_BODY = """
       <input id="chat-input" placeholder="Any news on my holdings today?" maxlength="500">
       <button class="btn" id="chat-btn">Send</button>
     </div>
-    <p class="muted-note">Informational only — Cirvia never gives buy/sell advice.</p>
+    <p class="muted-note">Informational only. Cirvia never gives buy or sell advice.</p>
   </div>
 </div>
 """
@@ -482,6 +529,7 @@ async function loadHoldings() {
     }
     el.innerHTML = '<table><thead><tr><th>Ticker</th><th>Qty</th><th>Value</th>' +
       '<th>Day</th><th>Total</th></tr></thead><tbody>' + rows + '</tbody></table>';
+    staggerIn(el.querySelectorAll('tbody tr'));
   } catch (e) {
     el.innerHTML = '<p class="muted-note">Could not load holdings.</p>';
   }
@@ -515,6 +563,7 @@ async function loadAlerts() {
       `<div class="meta"><span class="sev-${esc(a.severity)}">${esc(a.severity)}</span>` +
       ` · ${esc(a.category)}${a.tickers && a.tickers.length ? ' · ' + a.tickers.map(esc).join(', ') : ''}</div></div>`
     ).join('');
+    staggerIn(el.querySelectorAll('.alert-item'));
   } catch (e) {
     el.innerHTML = '<p class="muted-note">Could not load alerts.</p>';
   }
@@ -530,6 +579,7 @@ function addMsg(text, cls) {
   div.textContent = text;
   log.appendChild(div);
   log.scrollTop = log.scrollHeight;
+  riseIn(div, 0.18);
   return div;
 }
 
@@ -548,7 +598,7 @@ async function sendChat() {
       pending.textContent = data.answer || '(no answer)';
     }
   } catch (e) {
-    pending.textContent = 'Network error — try again.';
+    pending.textContent = 'Network error. Try again.';
   } finally {
     sendBtn.disabled = false; input.focus();
   }
@@ -593,7 +643,7 @@ def dashboard_page(supabase_url: str, anon_key: str) -> str:
 
 NOT_CONFIGURED_HTML = f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><title>Cirvia</title>
-<style>{_CSS}</style></head><body>
+{_FONT_LINKS}<style>{_CSS}</style></head><body>
 <main class="wrap" style="text-align:center;padding-top:5rem;">
 <h1>App not available yet</h1>
 <p class="lead" style="margin:1rem auto;">Sign-in isn't configured on this deployment.
