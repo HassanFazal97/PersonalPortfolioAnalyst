@@ -338,9 +338,9 @@ def _layout(title: str, description: str, body: str, active: str = "") -> str:
 _HOME_BODY = """
 <section class="hero">
   <span class="badge" data-hero>Early access · Built in Canada</span>
-  <h1 data-hero>Your portfolio, explained before the market opens.</h1>
+  <h1 data-hero>Know what matters to your portfolio before the market opens.</h1>
   <p class="lead" data-hero>Cirvia is an AI analyst that knows your actual holdings.
-  Connect Wealthsimple read-only and get a weekday morning digest, macro alerts when
+  Connect your brokerage and get a weekday morning digest, macro alerts when
   the world moves, and clear answers about your positions whenever you ask.</p>
   <div class="cta-row" data-hero>
     <a class="btn" href="/app">Get started free</a>
