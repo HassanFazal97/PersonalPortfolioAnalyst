@@ -19,10 +19,45 @@ _APP_CSS = """
   line-height: 1.25; max-width: none; margin: 0; }
 .app-wrap h2 { font-size: 1.25rem; font-weight: 650; letter-spacing: -0.01em; }
 .app-wrap h3 { font-size: 1rem; font-weight: 600; margin-bottom: 0; }
-.auth-card { max-width: 400px; margin: 3.5rem auto; background: var(--surface-1);
-  border: 1px solid var(--line); border-radius: var(--r-l); padding: 2rem; }
-.auth-card h1 { margin-bottom: 0.35rem; }
-.auth-card .sub { color: var(--ink-3); font-size: 0.95rem; margin-bottom: 1.4rem; }
+/* auth: full-viewport split, brand panel left, form right */
+.auth-split { display: grid; grid-template-columns: minmax(400px, 44%) 1fr;
+  min-height: 100dvh; }
+.auth-brand { display: flex; flex-direction: column; justify-content: space-between;
+  gap: 2.5rem; margin: 1rem 0 1rem 1rem; padding: 2.25rem 2.25rem 2rem;
+  border: 1px solid var(--line); border-radius: var(--r-l); overflow: hidden;
+  background:
+    radial-gradient(120% 85% at 50% -25%, oklch(45% 0.16 295 / 0.6), transparent 72%),
+    radial-gradient(70% 55% at 8% 30%, oklch(36% 0.12 265 / 0.35), transparent 70%),
+    var(--surface-1); }
+.auth-brand h2 { font-size: 1.7rem; font-weight: 750; letter-spacing: -0.02em;
+  line-height: 1.25; color: var(--ink); max-width: 22ch; text-wrap: balance; }
+.auth-brand .brand-sub { color: var(--ink-2); font-size: 0.95rem; margin-top: 0.6rem;
+  max-width: 40ch; }
+.auth-steps { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 1.75rem;
+  max-width: 320px; }
+.auth-step { display: flex; align-items: center; gap: 0.7rem; padding: 0.72rem 0.95rem;
+  border-radius: var(--r-m); font-size: 0.9rem; font-weight: 600;
+  background: oklch(15% 0.015 300 / 0.55); color: var(--ink-3); }
+.auth-step .n { width: 22px; height: 22px; border-radius: 50%; flex: none;
+  display: grid; place-items: center; font-size: 0.72rem; font-weight: 700;
+  background: oklch(28% 0.02 300); color: var(--ink-2); }
+.auth-step.active { background: var(--ink); color: oklch(15% 0.015 300); }
+.auth-step.active .n { background: oklch(24% 0.02 300); color: #fff; }
+.brand-note { color: var(--ink-3); font-size: 0.85rem; max-width: 36ch; }
+.auth-form-col { display: flex; align-items: center; justify-content: center;
+  padding: 3rem 1.5rem; }
+.auth-form { width: 100%; max-width: 380px; }
+.auth-form .form-logo { display: none; margin-bottom: 2rem; }
+.auth-form h1 { font-size: 1.6rem; font-weight: 750; letter-spacing: -0.02em;
+  line-height: 1.25; max-width: none; margin: 0 0 0.35rem; }
+.auth-form .sub { color: var(--ink-3); font-size: 0.95rem; margin-bottom: 1.4rem; }
+.field-hint { color: var(--ink-3); font-size: 0.8rem; margin-top: 0.35rem; display: none; }
+@media (max-width: 880px) {
+  .auth-split { grid-template-columns: 1fr; }
+  .auth-brand { display: none; }
+  .auth-form .form-logo { display: inline-block; }
+  .auth-form-col { padding: 3.5rem 1.5rem; align-items: flex-start; }
+}
 label { display: block; font-size: 0.84rem; font-weight: 600; color: var(--ink-3);
   margin: 0.9rem 0 0.3rem; }
 input[type=email], input[type=password], input[type=time], select {
@@ -40,13 +75,39 @@ input:focus, select:focus { border-color: var(--accent-hover); }
 .notice-box { background: oklch(48% 0.18 295 / 0.12); border: 1px solid var(--accent);
   color: var(--ink); border-radius: var(--r-s); padding: 0.7rem 0.9rem; font-size: 0.9rem;
   margin-top: 1rem; display: none; }
-/* onboarding stepper */
-.stepper { display: flex; gap: 0.5rem; margin: 1.5rem 0 2rem; }
-.stepper .s { flex: 1; height: 4px; border-radius: 4px; background: var(--surface-2);
-  transition: background 0.25s var(--ease); }
-.stepper .s.done { background: var(--accent-hover); }
+/* onboarding: step rail left, active panel right */
+.ob-wrap { max-width: 1000px; }
+.ob-layout { display: grid; grid-template-columns: 300px 1fr; gap: 2.5rem;
+  align-items: start; margin-top: 1.75rem; }
+.ob-rail { display: flex; flex-direction: column; gap: 0.25rem; }
+.ob-step { display: grid; grid-template-columns: 30px 1fr; column-gap: 0.85rem;
+  padding: 0.85rem 0.9rem; border-radius: var(--r-m); border: 1px solid transparent;
+  transition: background 0.2s var(--ease), border-color 0.2s var(--ease); }
+.ob-step .n { width: 30px; height: 30px; border-radius: 50%; display: grid;
+  place-items: center; font-size: 0.8rem; font-weight: 700; grid-row: 1 / 3;
+  background: var(--surface-2); color: var(--ink-3);
+  border: 1px solid var(--line-strong);
+  transition: background 0.2s var(--ease), color 0.2s var(--ease); }
+.ob-step .t { font-size: 0.93rem; font-weight: 650; color: var(--ink-3); align-self: center; }
+.ob-step .d { font-size: 0.83rem; color: var(--ink-3); margin-top: 0.15rem;
+  display: none; }
+.ob-step.active { background: var(--surface-1); border-color: var(--line); }
+.ob-step.active .n { background: var(--accent); border-color: transparent; color: #fff; }
+.ob-step.active .t { color: var(--ink); }
+.ob-step.active .d { display: block; }
+.ob-step.done .n { background: var(--accent-deep); border-color: transparent;
+  color: var(--accent-text); }
+.ob-step.done .t { color: var(--ink-2); }
 .step-panel { background: var(--surface-1); border: 1px solid var(--line);
-  border-radius: var(--r-l); padding: 1.75rem; }
+  border-radius: var(--r-l); padding: 2rem; }
+@media (max-width: 800px) {
+  .ob-layout { grid-template-columns: 1fr; gap: 1.25rem; }
+  .ob-rail { flex-direction: row; gap: 0.4rem; }
+  .ob-step { grid-template-columns: 26px auto; padding: 0.5rem 0.7rem; flex: none; }
+  .ob-step .n { width: 26px; height: 26px; }
+  .ob-step .d { display: none !important; }
+  .ob-step:not(.active) .t { display: none; }
+}
 .step-panel h2 { margin-bottom: 0.4rem; }
 .step-panel p { color: var(--ink-2); font-size: 0.95rem; }
 .status-line { display: flex; align-items: center; gap: 0.6rem; margin: 1rem 0;
@@ -162,9 +223,27 @@ function staggerIn(els, duration = 0.25, gap = 0.04) {
 
 
 def _page(
-    title: str, body: str, *, supabase_url: str, anon_key: str, extra_js: str
+    title: str,
+    body: str,
+    *,
+    supabase_url: str,
+    anon_key: str,
+    extra_js: str,
+    chrome: bool = True,
+    wrap_class: str = "app-wrap",
 ) -> str:
     config = json.dumps({"supabaseUrl": supabase_url, "supabaseAnonKey": anon_key})
+    if chrome:
+        shell = f"""<nav><div class="nav-inner">
+<a class="logo" href="/">Cir<span>via</span></a>
+<div class="nav-links"><a class="keep" href="/app/dashboard">Dashboard</a>
+<button class="link-btn" onclick="signOut()">Sign out</button></div>
+</div></nav>
+<main class="{wrap_class}">
+{body}
+</main>"""
+    else:
+        shell = body
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -175,14 +254,7 @@ def _page(
 {_FONT_LINKS}<style>{_CSS}{_APP_CSS}</style>
 </head>
 <body>
-<nav><div class="nav-inner">
-<a class="logo" href="/">Cir<span>via</span></a>
-<div class="nav-links"><a class="keep" href="/app/dashboard">Dashboard</a>
-<button class="link-btn" onclick="signOut()">Sign out</button></div>
-</div></nav>
-<main class="app-wrap">
-{body}
-</main>
+{shell}
 <script>window.CIRVIA_CONFIG = {config};</script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="{MOTION_CDN}"></script>
@@ -197,22 +269,41 @@ def _page(
 # --------------------------------------------------------------------------
 
 _LOGIN_BODY = """
-<div class="auth-card">
-  <h1 id="auth-title">Sign in to Cirvia</h1>
-  <p class="sub" id="auth-sub">Your AI portfolio analyst.</p>
-  <form id="auth-form">
-    <label for="email">Email</label>
-    <input type="email" id="email" autocomplete="email" required>
-    <label for="password">Password</label>
-    <input type="password" id="password" autocomplete="current-password" minlength="8" required>
-    <button class="btn full" id="auth-btn" type="submit">Sign in</button>
-  </form>
-  <div class="error-box" id="auth-error"></div>
-  <div class="notice-box" id="auth-notice"></div>
-  <p class="switch-mode">
-    <span id="switch-label">New to Cirvia?</span>
-    <button class="link-btn" id="switch-btn" type="button">Create an account</button>
-  </p>
+<div class="auth-split">
+  <aside class="auth-brand">
+    <a class="logo" href="/">Cir<span>via</span></a>
+    <div>
+      <h2>Know what matters to your portfolio before the market opens.</h2>
+      <p class="brand-sub">Three steps and your first morning digest is on its way.</p>
+      <div class="auth-steps">
+        <div class="auth-step active"><span class="n">1</span> Create your account</div>
+        <div class="auth-step"><span class="n">2</span> Connect your brokerage</div>
+        <div class="auth-step"><span class="n">3</span> Get your morning digest</div>
+      </div>
+    </div>
+    <p class="brand-note">Read-only by design. Cirvia can never trade or move money.</p>
+  </aside>
+  <div class="auth-form-col">
+    <div class="auth-form">
+      <a class="logo form-logo" href="/">Cir<span>via</span></a>
+      <h1 id="auth-title">Sign in</h1>
+      <p class="sub" id="auth-sub">Continue to your portfolio brief.</p>
+      <form id="auth-form">
+        <label for="email">Email</label>
+        <input type="email" id="email" autocomplete="email" required>
+        <label for="password">Password</label>
+        <input type="password" id="password" autocomplete="current-password" minlength="8" required>
+        <p class="field-hint" id="pw-hint">At least 8 characters.</p>
+        <button class="btn full" id="auth-btn" type="submit">Sign in</button>
+      </form>
+      <div class="error-box" id="auth-error"></div>
+      <div class="notice-box" id="auth-notice"></div>
+      <p class="switch-mode">
+        <span id="switch-label">New to Cirvia?</span>
+        <button class="link-btn" id="switch-btn" type="button">Create an account</button>
+      </p>
+    </div>
+  </div>
 </div>
 """
 
@@ -225,13 +316,20 @@ const btn = document.getElementById('auth-btn');
 
 document.getElementById('switch-btn').addEventListener('click', () => {
   mode = mode === 'signin' ? 'signup' : 'signin';
+  const signin = mode === 'signin';
   document.getElementById('auth-title').textContent =
-    mode === 'signin' ? 'Sign in to Cirvia' : 'Create your Cirvia account';
+    signin ? 'Sign in' : 'Create your account';
+  document.getElementById('auth-sub').textContent =
+    signin ? 'Continue to your portfolio brief.'
+           : 'Free to start. No card required.';
   document.getElementById('switch-label').textContent =
-    mode === 'signin' ? 'New to Cirvia?' : 'Already have an account?';
+    signin ? 'New to Cirvia?' : 'Already have an account?';
   document.getElementById('switch-btn').textContent =
-    mode === 'signin' ? 'Create an account' : 'Sign in';
-  btn.textContent = mode === 'signin' ? 'Sign in' : 'Create account';
+    signin ? 'Create an account' : 'Sign in';
+  btn.textContent = signin ? 'Sign in' : 'Create account';
+  document.getElementById('pw-hint').style.display = signin ? 'none' : 'block';
+  document.getElementById('password').setAttribute('autocomplete',
+    signin ? 'current-password' : 'new-password');
   errBox.style.display = 'none'; noticeBox.style.display = 'none';
 });
 
@@ -274,7 +372,7 @@ form.addEventListener('submit', async (ev) => {
 // Already signed in? Skip the form.
 getToken().then((t) => { if (t) routeAfterAuth(); });
 
-riseIn(document.querySelector('.auth-card'), 0.28);
+riseIn(document.querySelector('.auth-form'), 0.28);
 """
 
 
@@ -283,40 +381,56 @@ riseIn(document.querySelector('.auth-card'), 0.28);
 # --------------------------------------------------------------------------
 
 _ONBOARDING_BODY = """
-<h1 style="font-size:1.6rem;">Set up Cirvia</h1>
-<div class="stepper">
-  <div class="s done" id="s1"></div><div class="s" id="s2"></div><div class="s" id="s3"></div>
-</div>
-
-<div class="step-panel" id="panel-connect">
-  <h2>Connect your brokerage</h2>
-  <p>Link Wealthsimple through SnapTrade's secure portal. Read-only: Cirvia can
-  never trade or move money, and your brokerage password is never shared with us.</p>
-  <div class="status-line" id="connect-status" style="display:none;">
-    <span class="spinner"></span><span id="connect-status-text">Waiting for connection…</span>
+<h1>Set up Cirvia</h1>
+<div class="ob-layout">
+  <div class="ob-rail" aria-label="Setup progress">
+    <div class="ob-step active" id="step-1">
+      <span class="n">1</span><span class="t">Connect your brokerage</span>
+      <span class="d">Link Wealthsimple through SnapTrade's secure portal.</span>
+    </div>
+    <div class="ob-step" id="step-2">
+      <span class="n">2</span><span class="t">Sync your holdings</span>
+      <span class="d">Cirvia pulls your positions, read-only.</span>
+    </div>
+    <div class="ob-step" id="step-3">
+      <span class="n">3</span><span class="t">Digest preferences</span>
+      <span class="d">Pick when your morning brief arrives.</span>
+    </div>
   </div>
-  <button class="btn full" id="connect-btn">Connect Wealthsimple</button>
-  <button class="btn ghost full" id="connected-btn" style="display:none;">I've finished connecting</button>
-  <div class="error-box" id="connect-error"></div>
-  <p class="muted-note">A new tab will open. Come back here when you're done.</p>
-</div>
+  <div class="ob-content">
 
-<div class="step-panel" id="panel-sync" style="display:none;">
-  <h2>Syncing your holdings</h2>
-  <div class="status-line"><span class="spinner"></span>
-  <span id="sync-status-text">Pulling your positions…</span></div>
-  <div class="error-box" id="sync-error"></div>
-</div>
+  <div class="step-panel" id="panel-connect">
+    <h2>Connect your brokerage</h2>
+    <p>Link Wealthsimple through SnapTrade's secure portal. Read-only: Cirvia can
+    never trade or move money, and your brokerage password is never shared with us.</p>
+    <div class="status-line" id="connect-status" style="display:none;">
+      <span class="spinner"></span><span id="connect-status-text">Waiting for connection…</span>
+    </div>
+    <button class="btn full" id="connect-btn">Connect Wealthsimple</button>
+    <button class="btn ghost full" id="connected-btn" style="display:none;">I've finished connecting</button>
+    <div class="error-box" id="connect-error"></div>
+    <p class="muted-note">A new tab will open. Come back here when you're done.</p>
+  </div>
 
-<div class="step-panel" id="panel-prefs" style="display:none;">
-  <h2>Digest preferences</h2>
-  <p>When should your morning digest arrive?</p>
-  <label for="tz">Timezone</label>
-  <select id="tz"></select>
-  <label for="send-time">Send time</label>
-  <input type="time" id="send-time" value="07:45">
-  <button class="btn full" id="prefs-btn">Finish setup</button>
-  <div class="error-box" id="prefs-error"></div>
+  <div class="step-panel" id="panel-sync" style="display:none;">
+    <h2>Syncing your holdings</h2>
+    <div class="status-line"><span class="spinner"></span>
+    <span id="sync-status-text">Pulling your positions…</span></div>
+    <div class="error-box" id="sync-error"></div>
+  </div>
+
+  <div class="step-panel" id="panel-prefs" style="display:none;">
+    <h2>Digest preferences</h2>
+    <p>When should your morning digest arrive?</p>
+    <label for="tz">Timezone</label>
+    <select id="tz"></select>
+    <label for="send-time">Send time</label>
+    <input type="time" id="send-time" value="07:45">
+    <button class="btn full" id="prefs-btn">Finish setup</button>
+    <div class="error-box" id="prefs-error"></div>
+  </div>
+
+  </div>
 </div>
 """
 
@@ -335,17 +449,25 @@ for (const z of list) {
   tzSel.appendChild(o);
 }
 
+const PANELS = ['panel-connect','panel-sync','panel-prefs'];
+
 function showPanel(id) {
   let changed = false;
-  for (const p of ['panel-connect','panel-sync','panel-prefs']) {
+  for (const p of PANELS) {
     const el = document.getElementById(p);
     const show = p === id;
     if (show && el.style.display === 'none') changed = true;
     el.style.display = show ? 'block' : 'none';
   }
   if (changed) riseIn(document.getElementById(id));
-  document.getElementById('s2').classList.toggle('done', id !== 'panel-connect');
-  document.getElementById('s3').classList.toggle('done', id === 'panel-prefs');
+  const current = PANELS.indexOf(id) + 1;
+  for (let n = 1; n <= 3; n++) {
+    const step = document.getElementById('step-' + n);
+    step.classList.toggle('active', n === current);
+    step.classList.toggle('done', n < current);
+    const marker = step.querySelector('.n');
+    marker.textContent = n < current ? '\\u2713' : String(n);
+  }
 }
 
 function showError(id, msg) {
@@ -618,6 +740,7 @@ def login_page(supabase_url: str, anon_key: str) -> str:
         supabase_url=supabase_url,
         anon_key=anon_key,
         extra_js=_LOGIN_JS,
+        chrome=False,
     )
 
 
@@ -628,6 +751,7 @@ def onboarding_page(supabase_url: str, anon_key: str) -> str:
         supabase_url=supabase_url,
         anon_key=anon_key,
         extra_js=_ONBOARDING_JS,
+        wrap_class="app-wrap ob-wrap",
     )
 
 
