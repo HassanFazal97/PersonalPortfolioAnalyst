@@ -76,10 +76,11 @@ nav {
 /* hero */
 .hero { padding: clamp(4rem, 9vw, 6.5rem) 0 1rem; text-align: center; }
 .badge {
-  display: inline-block; font-size: 0.8rem; font-weight: 600;
-  padding: 0.32rem 0.85rem; border-radius: 999px; margin-bottom: 1.5rem;
+  display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; font-weight: 600;
+  padding: 0.32rem 0.9rem; border-radius: 999px; margin-bottom: 1.5rem;
   background: var(--surface-1); border: 1px solid var(--line); color: var(--ink-3);
 }
+.badge-dot { width: 7px; height: 7px; border-radius: 999px; background: var(--accent-text); }
 h1 {
   font-size: clamp(2.4rem, 6vw, 4rem); font-weight: 800; letter-spacing: -0.03em;
   line-height: 1.06; max-width: 15em; margin: 0 auto;
@@ -89,15 +90,42 @@ h1 {
   max-width: 36em; margin: 1.4rem auto 0;
 }
 .cta-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.8rem; margin-top: 2rem; }
-/* hero product mock */
-.mock { position: relative; max-width: 620px; margin: clamp(3rem, 6vw, 4.5rem) auto 0; text-align: left; }
+/* hero product stage: central digest panel + floating satellite cards */
+.stage {
+  position: relative; max-width: 920px; margin: clamp(3rem, 6vw, 4.5rem) auto 0;
+  padding: 1.5rem 0 2.5rem; text-align: left;
+}
 .mock-glow {
-  position: absolute; inset: -14% -20%; pointer-events: none;
-  background: radial-gradient(closest-side, oklch(48% 0.18 295 / 0.13), transparent 72%);
+  position: absolute; inset: -10% -12%; pointer-events: none;
+  background: radial-gradient(closest-side, oklch(48% 0.18 295 / 0.16), transparent 72%);
 }
 .mock-panel {
-  position: relative; background: var(--surface-1); border: 1px solid var(--line);
+  position: relative; max-width: 560px; margin: 0 auto;
+  background: var(--surface-1); border: 1px solid var(--line);
   border-radius: var(--r-l); padding: 1.25rem 1.4rem 1.4rem;
+}
+.float-card {
+  position: absolute; z-index: 2; background: var(--surface-2);
+  border: 1px solid var(--line-strong); border-radius: var(--r-m);
+  padding: 0.85rem 1.05rem; font-size: 0.88rem;
+  box-shadow: 0 18px 44px oklch(0% 0 0 / 0.38);
+  animation: floaty 7s ease-in-out infinite alternate;
+}
+.fc-total { left: 1%; top: 10%; width: 190px; }
+.fc-alert { right: 0.5%; top: 26%; width: 280px; animation-delay: -2.5s; }
+.fc-chat { left: 4%; bottom: -3%; width: 290px; animation-delay: -4.5s; }
+@keyframes floaty { from { transform: translateY(-5px); } to { transform: translateY(7px); } }
+.fc-k { display: block; font-size: 0.74rem; font-weight: 600; color: var(--ink-3); }
+.fc-v { display: block; font-size: 1.35rem; font-weight: 800; color: var(--ink);
+  letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+.fc-d { font-size: 0.82rem; font-weight: 600; }
+.fc-q { font-weight: 600; color: var(--ink); margin-bottom: 0.3rem; }
+.fc-a { color: var(--ink-2); }
+@media (max-width: 920px) {
+  .stage { padding: 0; }
+  .float-card { position: static; width: min(100%, 430px); margin: 0.8rem auto 0;
+    animation: none; box-shadow: none; }
+  .fc-total { display: none; }
 }
 .mock-top {
   display: flex; align-items: center; gap: 0.55rem; font-size: 0.82rem; font-weight: 600;
@@ -114,13 +142,20 @@ h1 {
 .mock-row .chg { font-weight: 600; font-variant-numeric: tabular-nums; }
 .gain { color: var(--gain); } .loss { color: var(--loss); }
 .mock-sum { font-size: 0.92rem; color: var(--ink-2); padding-top: 0.9rem; }
-.mock-alert {
-  position: relative; width: min(88%, 420px); margin: -0.8rem 0 0 auto;
-  background: var(--surface-2); border: 1px solid var(--line-strong);
-  border-radius: var(--r-m); padding: 0.85rem 1.05rem; font-size: 0.88rem;
-}
 .mock-alert-k { display: block; font-size: 0.74rem; font-weight: 700; color: var(--warn); margin-bottom: 0.2rem; }
-.mock-alert p { color: var(--ink-2); }
+/* showcase (chat + alert demo) */
+.show-grid { display: grid; grid-template-columns: 1.25fr 1fr; gap: 1.25rem;
+  margin-top: 2.4rem; align-items: start; }
+@media (max-width: 780px) { .show-grid { grid-template-columns: 1fr; } }
+.show-panel { background: var(--surface-1); border: 1px solid var(--line);
+  border-radius: var(--r-l); padding: 1.3rem 1.4rem 1.5rem; }
+.bubble { padding: 0.65rem 0.95rem; border-radius: var(--r-m); margin-top: 0.7rem;
+  font-size: 0.92rem; line-height: 1.55; max-width: 92%; width: fit-content; }
+.bubble.user { background: var(--surface-3); color: var(--ink); margin-left: auto; }
+.bubble.bot { background: oklch(30% 0.1 295 / 0.4); color: var(--ink-2); }
+.alert-demo .head-line { color: var(--ink); font-weight: 650; margin-top: 0.2rem; }
+.alert-demo p { color: var(--ink-2); font-size: 0.92rem; margin-top: 0.4rem; }
+.show-note { color: var(--ink-3); font-size: 0.92rem; margin-top: 1rem; max-width: 34em; }
 /* sections */
 section { padding-top: clamp(4rem, 9vw, 6.5rem); }
 h2 { font-size: clamp(1.6rem, 3.4vw, 2.2rem); font-weight: 700; letter-spacing: -0.022em; }
@@ -337,7 +372,7 @@ def _layout(title: str, description: str, body: str, active: str = "") -> str:
 
 _HOME_BODY = """
 <section class="hero">
-  <span class="badge" data-hero>Early access · Built in Canada</span>
+  <span class="badge" data-hero><span class="badge-dot"></span>Early access · Built in Canada</span>
   <h1 data-hero>Know what matters to your portfolio before the market opens.</h1>
   <p class="lead" data-hero>Cirvia is an AI analyst that knows your actual holdings.
   Connect your brokerage and get a weekday morning digest, macro alerts when
@@ -346,7 +381,7 @@ _HOME_BODY = """
     <a class="btn" href="/app">Get started free</a>
     <a class="btn ghost" href="#how">See how it works</a>
   </div>
-  <div class="mock" data-hero aria-hidden="true">
+  <div class="stage" data-hero aria-hidden="true">
     <div class="mock-glow"></div>
     <div class="mock-panel">
       <div class="mock-top"><span class="mock-dot"></span>Morning digest
@@ -364,10 +399,20 @@ _HOME_BODY = """
       Energy trades soft ahead of OPEC output talks, which touches your ENB
       position. Nothing in your book reports earnings today.</p>
     </div>
-    <div class="mock-alert">
+    <div class="float-card fc-total">
+      <span class="fc-k">Portfolio value</span>
+      <span class="fc-v">$48,214</span>
+      <span class="fc-d gain">+1.2% today</span>
+    </div>
+    <div class="float-card fc-alert">
       <span class="mock-alert-k">Macro alert</span>
-      <p>OPEC+ signals a supply increase for August. Crude is down 3% pre-market;
-      relevant to ENB and SU in your portfolio.</p>
+      <p class="fc-a">OPEC+ signals a supply increase for August. Crude is down 3%
+      pre-market; relevant to ENB and SU in your portfolio.</p>
+    </div>
+    <div class="float-card fc-chat">
+      <p class="fc-q">&ldquo;Why is ENB down today?&rdquo;</p>
+      <p class="fc-a">Crude fell 3% after OPEC+ signalled higher output. ENB is your
+      third-largest holding&hellip;</p>
     </div>
   </div>
 </section>
@@ -398,6 +443,35 @@ _HOME_BODY = """
       <p>Your TFSA, RRSP, and taxable accounts stay current through a secure,
       read-only brokerage connection.</p>
       <span class="meta">Continuous</span>
+    </div>
+  </div>
+</section>
+
+<section id="showcase">
+  <h2 data-reveal>Ask about your book. Get grounded answers.</h2>
+  <p class="sect-lead" data-reveal>Not generic market takes. Every answer starts
+  from the positions you actually hold.</p>
+  <div class="show-grid" data-reveal-group>
+    <div class="show-panel" data-reveal-item aria-hidden="true">
+      <div class="mock-top"><span class="mock-dot"></span>Chat</div>
+      <div class="bubble user">Why is ENB down today?</div>
+      <div class="bubble bot">Crude fell 3% after OPEC+ signalled higher August
+      output. ENB is your third-largest holding; pipelines are less exposed to
+      crude prices than producers, but sentiment is dragging the whole sector.</div>
+      <div class="bubble user">Anything to watch in my book this week?</div>
+      <div class="bubble bot">Two things: NVDA reports earnings Wednesday after
+      close, and the Bank of Canada rate decision lands Thursday morning, which
+      touches your rate-sensitive holdings.</div>
+    </div>
+    <div data-reveal-item>
+      <div class="show-panel alert-demo" aria-hidden="true">
+        <span class="mock-alert-k">Macro alert · High</span>
+        <p class="head-line">Fed holds rates, signals one cut this year.</p>
+        <p>Rate-sensitive names in your book: T.TO, BCE.TO. Bond-proxy sectors
+        typically firm on this news.</p>
+      </div>
+      <p class="show-note">Alerts arrive only when an event plausibly touches your
+      holdings. No noise, no spam, no generic headlines.</p>
     </div>
   </div>
 </section>
