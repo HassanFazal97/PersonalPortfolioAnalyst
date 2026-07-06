@@ -37,7 +37,16 @@ _CSS = """
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html { scroll-behavior: smooth; }
 body {
-  font-family: var(--font); background: var(--bg); color: var(--ink-2);
+  font-family: var(--font);
+  /* atmospheric violet aurora at the top, fading into the near-black canvas */
+  background:
+    radial-gradient(1200px 600px at 50% -120px, oklch(44% 0.15 295 / 0.55), transparent 70%),
+    radial-gradient(800px 480px at 16% -60px, oklch(38% 0.12 265 / 0.35), transparent 70%),
+    radial-gradient(900px 500px at 84% -80px, oklch(36% 0.13 315 / 0.3), transparent 70%),
+    radial-gradient(1800px 950px at 50% -220px, oklch(27% 0.08 300 / 0.75), transparent 80%),
+    var(--bg);
+  background-repeat: no-repeat;
+  color: var(--ink-2);
   line-height: 1.65; min-height: 100vh; -webkit-font-smoothing: antialiased;
 }
 h1, h2, h3 { color: var(--ink); text-wrap: balance; }
@@ -204,8 +213,11 @@ h3 { font-size: 1.05rem; font-weight: 650; margin-bottom: 0.3rem; }
 .faq details p { color: var(--ink-2); padding: 0 0 1.25rem; max-width: 60ch; text-wrap: pretty; }
 /* cta band */
 .cta-band {
-  margin-top: clamp(4rem, 9vw, 6.5rem); background: var(--surface-1);
-  border: 1px solid var(--line); border-radius: var(--r-l);
+  margin-top: clamp(4rem, 9vw, 6.5rem);
+  background:
+    radial-gradient(640px 320px at 50% -80px, oklch(38% 0.13 295 / 0.45), transparent 75%),
+    var(--surface-1);
+  border: 1px solid var(--line-strong); border-radius: var(--r-l);
   padding: clamp(2.25rem, 5vw, 3.5rem); text-align: center;
 }
 .cta-band h2 { margin-bottom: 0.5rem; }
