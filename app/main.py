@@ -9,15 +9,18 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import logging
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, time
+from pathlib import Path
 from urllib.parse import parse_qsl
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from app.agent.budget import Budget
@@ -363,6 +366,12 @@ async def _enforce_usage_limits(repo: Repo, user_id: uuid.UUID, settings) -> Non
         )
 
 
+# Funnel visibility (PRODUCT.md: visitor -> signup -> connected portfolio).
+# One structured log line per page render; no cookies, no client-side JS.
+_funnel_logger = logging.getLogger("cirvia.funnel")
+_FUNNEL_PATHS = frozenset({"/", "/pricing", "/app", "/app/onboarding", "/app/dashboard"})
+
+
 def create_app() -> FastAPI:
     app = FastAPI(
         title="Cirvia",
@@ -370,6 +379,23 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
         dependencies=[Depends(require_auth)],
     )
+
+    app.mount(
+        "/static",
+        StaticFiles(directory=Path(__file__).parent / "static"),
+        name="static",
+    )
+
+    @app.middleware("http")
+    async def funnel_page_views(request: Request, call_next):
+        response = await call_next(request)
+        if (
+            request.method == "GET"
+            and request.url.path in _FUNNEL_PATHS
+            and response.status_code == 200
+        ):
+            _funnel_logger.info("funnel.page_view path=%s", request.url.path)
+        return response
 
     @app.get("/", response_class=HTMLResponse)
     async def landing() -> HTMLResponse:

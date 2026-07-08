@@ -10,9 +10,16 @@ from __future__ import annotations
 
 import json
 
-from app.landing import _CSS, _FONT_LINKS, CONTACT_EMAIL, MOTION_CDN
+from app.landing import _CSS, _FONT_LINKS, CONTACT_EMAIL, ICON_LINKS, MOTION_CDN
 
 _APP_CSS = """
+/* app footer: hairline, quiet, single row (wraps on narrow screens) */
+.app-foot { border-top: 1px solid var(--line); margin-top: 2rem;
+  padding: 1rem 1.5rem 1.25rem; display: flex; flex-wrap: wrap;
+  justify-content: center; gap: 0.4rem 1.4rem;
+  font-size: 0.8rem; color: var(--ink-3); }
+.app-foot a { color: var(--ink-3); text-decoration: none; }
+.app-foot a:hover { color: var(--ink); }
 /* app register: fixed rem type scale, quieter headings, denser rhythm */
 /* app nav is always opaque (the marketing nav is transparent until scroll) */
 nav {
@@ -310,7 +317,13 @@ def _page(
 </div></nav>
 <main class="{wrap_class}">
 {body}
-</main>"""
+</main>
+<footer class="app-foot">
+<a href="/privacy">Privacy</a>
+<a href="/terms">Terms</a>
+<a href="/contact">Contact</a>
+<span>Not financial advice.</span>
+</footer>"""
     else:
         shell = body
     return f"""<!DOCTYPE html>
@@ -320,7 +333,7 @@ def _page(
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{title}</title>
 <meta name="robots" content="noindex">
-{_FONT_LINKS}<style>{_CSS}{_APP_CSS}</style>
+{ICON_LINKS}{_FONT_LINKS}<style>{_CSS}{_APP_CSS}</style>
 </head>
 <body>
 {shell}
@@ -1736,7 +1749,7 @@ def settings_page(supabase_url: str, anon_key: str) -> str:
 
 NOT_CONFIGURED_HTML = f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><title>Cirvia</title>
-{_FONT_LINKS}<style>{_CSS}</style></head><body>
+{ICON_LINKS}{_FONT_LINKS}<style>{_CSS}</style></head><body>
 <main class="wrap" style="text-align:center;padding-top:5rem;">
 <h1>App not available yet</h1>
 <p class="lead" style="margin:1rem auto;">Sign-in isn't configured on this deployment.
