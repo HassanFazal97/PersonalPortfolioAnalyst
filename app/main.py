@@ -32,7 +32,7 @@ from app.auth.context import set_current_user_id
 from app.auth.jwt import AuthError, jwks_url_for, verify_supabase_jwt
 from app.config import DEFAULT_USER_ID, get_settings, monthly_cost_cap
 from app.db.repo import Repo
-from app.delivery import twilio_inbound, verification
+from app.delivery import twilio_inbound, unsubscribe, verification
 from app.delivery.adapters import build_adapters
 from app.delivery.channels import mask_destination
 from app.delivery.dispatcher import Dispatcher
@@ -60,6 +60,7 @@ from app.webapp import (
     dashboard_page,
     login_page,
     onboarding_page,
+    reset_page,
     settings_page,
 )
 
@@ -106,6 +107,9 @@ async def lifespan(app: FastAPI):
                 repo,
                 app.state.delivery_adapters,
                 max_attempts=settings.delivery_max_attempts,
+                unsubscribe_url_for=lambda uid, ch: unsubscribe.unsubscribe_url(
+                    get_settings(), uid, ch
+                ),
             )
             delivery_scheduler = DeliveryScheduler(
                 dispatcher.tick,
@@ -172,9 +176,12 @@ _AUTH_EXEMPT_PATHS = {
     "/app/onboarding",
     "/app/dashboard",
     "/app/settings",
+    "/app/reset",
     # Twilio cannot attach our bearer token; the route validates
     # X-Twilio-Signature instead.
     "/webhooks/twilio/sms",
+    # Email unsubscribe links carry their own signed token.
+    "/unsubscribe",
 }
 
 _OWNER_USER_ID = uuid.UUID(DEFAULT_USER_ID)
@@ -445,6 +452,11 @@ def create_app() -> FastAPI:
     async def app_settings() -> HTMLResponse:
         """Account, brokerage connection, plan, and account deletion."""
         return _webapp_html(settings_page)
+
+    @app.get("/app/reset", response_class=HTMLResponse)
+    async def app_reset() -> HTMLResponse:
+        """Set a new password after a Supabase recovery-link redirect."""
+        return _webapp_html(reset_page)
 
     @app.get("/health")
     async def health() -> dict:
@@ -881,6 +893,34 @@ def create_app() -> FastAPI:
             repo, from_number=params.get("From", ""), body=params.get("Body", "")
         )
         return Response(content=twiml, media_type="application/xml")
+
+    async def _handle_unsubscribe(token: str) -> HTMLResponse:
+        """Verify a signed unsubscribe token and opt the channel out. Invalid
+        tokens get one generic page — no hint about what was wrong."""
+        settings = get_settings()
+        secret = unsubscribe.unsubscribe_secret(settings)
+        parsed = unsubscribe.verify_token(secret, token)
+        if parsed is None:
+            return HTMLResponse(unsubscribe.INVALID_LINK_HTML, status_code=400)
+        user_id, channel = parsed
+        repo = _require_repo(app)
+        row = await repo.get_notification_channel(user_id, channel)
+        if row is not None:
+            # Same repo path as the Twilio STOP webhook.
+            await repo.set_opt_out_by_destination(
+                channel=channel, destination=row.destination, opted_out=True
+            )
+        return HTMLResponse(unsubscribe.UNSUBSCRIBED_HTML)
+
+    @app.get("/unsubscribe", response_class=HTMLResponse)
+    async def unsubscribe_get(token: str = "") -> HTMLResponse:
+        """Email unsubscribe link (CASL). Bearer-exempt; the token is the auth."""
+        return await _handle_unsubscribe(token)
+
+    @app.post("/unsubscribe", response_class=HTMLResponse)
+    async def unsubscribe_post(token: str = "") -> HTMLResponse:
+        """RFC 8058 one-click unsubscribe (mail clients POST to the same URL)."""
+        return await _handle_unsubscribe(token)
 
     @app.get("/portfolio")
     async def portfolio_holdings(request: Request) -> dict:

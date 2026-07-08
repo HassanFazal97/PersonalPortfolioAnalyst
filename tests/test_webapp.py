@@ -25,7 +25,8 @@ def client(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "path", ["/app", "/app/onboarding", "/app/dashboard", "/app/settings"]
+    "path",
+    ["/app", "/app/onboarding", "/app/dashboard", "/app/settings", "/app/reset"],
 )
 def test_app_pages_render_without_token(client, path):
     resp = client.get(path)
@@ -64,13 +65,40 @@ def test_dashboard_nav_links_to_settings(client):
     assert 'href="/app/settings"' in resp.text
 
 
+def test_login_has_forgot_password_link(client):
+    resp = client.get("/app")
+    assert 'id="forgot-btn"' in resp.text
+    assert "resetPasswordForEmail" in resp.text
+    assert "/app/reset" in resp.text
+
+
+def test_reset_page_has_password_form(client):
+    resp = client.get("/app/reset")
+    assert resp.status_code == 200
+    assert 'id="reset-form"' in resp.text
+    assert 'id="new-password"' in resp.text
+    assert 'id="confirm-password"' in resp.text
+    assert "PASSWORD_RECOVERY" in resp.text
+    assert "updateUser" in resp.text
+
+
+def test_dashboard_has_connection_banner(client):
+    resp = client.get("/app/dashboard")
+    assert 'id="connection-banner"' in resp.text
+    assert 'id="reconnect-btn"' in resp.text
+    assert 'id="connection-banner-dismiss"' in resp.text
+    # Hidden until /portfolio/status says the connection is broken.
+    assert 'id="connection-banner" style="display:none;"' in resp.text
+
+
 def test_app_pages_noindex(client):
     resp = client.get("/app")
     assert '<meta name="robots" content="noindex">' in resp.text
 
 
 @pytest.mark.parametrize(
-    "path", ["/app", "/app/onboarding", "/app/dashboard", "/app/settings"]
+    "path",
+    ["/app", "/app/onboarding", "/app/dashboard", "/app/settings", "/app/reset"],
 )
 def test_app_pages_503_when_supabase_not_configured(monkeypatch, path):
     monkeypatch.setenv("API_TOKEN", "test-token")
