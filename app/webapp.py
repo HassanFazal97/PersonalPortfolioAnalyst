@@ -225,6 +225,14 @@ tr:last-child td { border-bottom: none; }
   background: oklch(30% 0.1 295 / 0.35); color: var(--ink); }
 .refresh-row { display: flex; align-items: center; gap: 0.75rem; }
 .updated-at { color: var(--ink-3); font-size: 0.82rem; }
+/* settings: single quiet column of cards */
+.settings-wrap { max-width: 640px; }
+.settings-wrap .dash-card { margin-top: 1rem; }
+.plan-limits { margin: 0.75rem 0 0; padding-left: 1.15rem; color: var(--ink-2);
+  font-size: 0.92rem; }
+.plan-limits li { margin: 0.3rem 0; }
+.danger-card { border-color: oklch(72% 0.14 25 / 0.45); }
+.danger-card h3 { color: var(--loss); }
 """
 
 _SHELL_JS = """
@@ -297,6 +305,7 @@ def _page(
         shell = f"""<nav><div class="nav-inner">
 <a class="logo" href="/">Cir<span>via</span></a>
 <div class="nav-links"><a class="keep" href="/app/dashboard">Dashboard</a>
+<a class="keep" href="/app/settings">Settings</a>
 <button class="link-btn" onclick="signOut()">Sign out</button></div>
 </div></nav>
 <main class="{wrap_class}">
@@ -1308,6 +1317,26 @@ async function sendChat() {
 sendBtn.addEventListener('click', sendChat);
 input.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendChat(); });
 
+async function loadChatHistory() {
+  log.innerHTML = '<div aria-hidden="true"><div class="skl"></div>' +
+    '<div class="skl short"></div></div>';
+  try {
+    const data = await (await api('/chat/history')).json();
+    log.innerHTML = '';
+    for (const t of data.turns || []) {
+      const div = document.createElement('div');
+      div.className = 'chat-msg ' + (t.role === 'user' ? 'user' : 'bot');
+      div.textContent = t.content;
+      log.appendChild(div);
+    }
+    log.scrollTop = log.scrollHeight;
+  } catch (e) {
+    log.innerHTML = ''; // empty log; sendChat still works
+  }
+}
+
+loadChatHistory();
+
 const CHANNEL_NAMES = { sms: 'Text message', email: 'Email', discord: 'Discord' };
 
 async function loadDelivery() {
@@ -1411,6 +1440,256 @@ loadMe().then(() => {
 """
 
 
+# --------------------------------------------------------------------------
+# /app/settings — account, brokerage connection, plan, danger zone
+# --------------------------------------------------------------------------
+
+_SETTINGS_BODY = """
+<div class="topbar">
+  <h1 style="font-size:1.5rem;">Settings</h1>
+  <span class="who" id="who"></span>
+</div>
+
+<div class="dash-card">
+  <h3>Account</h3>
+  <p class="muted-note" style="margin-top:0.5rem;">Signed in as
+    <strong id="account-email">&hellip;</strong></p>
+  <form id="pw-form">
+    <label for="new-password">New password</label>
+    <input type="password" id="new-password" autocomplete="new-password"
+      minlength="8" required>
+    <label for="confirm-password">Confirm new password</label>
+    <input type="password" id="confirm-password" autocomplete="new-password"
+      minlength="8" required>
+    <button class="btn" id="pw-btn" type="submit"
+      style="margin-top:1rem;">Change password</button>
+  </form>
+  <div class="error-box" id="pw-error"></div>
+  <div class="notice-box" id="pw-notice"></div>
+</div>
+
+<div class="dash-card">
+  <h3>Brokerage connection <span class="tag" id="conn-chip"></span></h3>
+  <div id="conn-summary"><div aria-hidden="true">
+    <div class="skl"></div><div class="skl short"></div>
+  </div></div>
+  <div id="conn-actions" style="display:none;">
+    <button class="btn ghost" id="disconnect-btn"
+      style="margin-top:0.75rem;">Disconnect brokerage</button>
+    <div id="disconnect-confirm" style="display:none;">
+      <p class="muted-note">Disconnect brokerage? Your holdings stop syncing.</p>
+      <button class="btn" id="disconnect-yes">Yes, disconnect</button>
+      <button class="link-btn" id="disconnect-no"
+        style="margin-left:0.75rem;">Cancel</button>
+    </div>
+  </div>
+  <div class="error-box" id="conn-error"></div>
+  <div class="notice-box" id="conn-notice"></div>
+</div>
+
+<div class="dash-card">
+  <h3>Plan <span class="tag" id="plan-chip"></span></h3>
+  <ul class="plan-limits" id="plan-limits"></ul>
+  <p class="muted-note" id="plan-note" style="display:none;">Pro billing is coming
+  soon. Until then every account stays on the Free plan.</p>
+</div>
+
+<div class="dash-card danger-card">
+  <h3>Danger zone</h3>
+  <p class="muted-note" style="margin-top:0.5rem;">Deleting your account removes
+  your holdings, digests, alerts, chat history, and notification settings from
+  Cirvia. This cannot be undone.</p>
+  <button class="btn ghost" id="delete-btn"
+    style="margin-top:0.75rem;">Delete account</button>
+  <div id="delete-confirm" style="display:none;">
+    <label for="delete-input">Type DELETE to confirm</label>
+    <input type="text" id="delete-input" autocomplete="off" placeholder="DELETE">
+    <button class="btn" id="delete-yes" disabled
+      style="margin-top:0.9rem;">Permanently delete my account</button>
+    <button class="link-btn" id="delete-no"
+      style="margin-left:0.75rem;">Cancel</button>
+  </div>
+  <div class="error-box" id="delete-error"></div>
+</div>
+"""
+
+_SETTINGS_JS = """
+requireSession();
+
+function setBox(id, msg) {
+  const box = document.getElementById(id);
+  if (msg) { box.textContent = msg; box.style.display = 'block'; }
+  else { box.style.display = 'none'; }
+}
+
+// ---- account + plan --------------------------------------------------------
+
+async function loadAccount() {
+  try {
+    const me = await (await api('/me')).json();
+    const plan = me.plan === 'pro' ? 'Pro' : 'Free';
+    document.getElementById('who').textContent = (me.email || '') + ' \\u00b7 ' + plan;
+    document.getElementById('account-email').textContent = me.email || 'unknown';
+    document.getElementById('plan-chip').textContent = plan;
+    const limits = document.getElementById('plan-limits');
+    const items = me.plan === 'pro'
+      ? ['Daily weekday digest across all your holdings',
+         'Macro alerts when the world moves',
+         'Unlimited chat questions',
+         'Unlimited connected accounts']
+      : ['Weekly digest (Mondays) on up to ' + (me.digest_tickers_limit || 3) +
+           ' holdings',
+         '5 chat questions per day',
+         '1 connected account'];
+    limits.innerHTML = items.map((t) => '<li>' + esc(t) + '</li>').join('');
+    if (me.plan !== 'pro') {
+      document.getElementById('plan-note').style.display = 'block';
+    }
+  } catch (e) { /* nav still works; cards degrade individually */ }
+}
+
+// ---- change password --------------------------------------------------------
+
+document.getElementById('pw-form').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  setBox('pw-error', null); setBox('pw-notice', null);
+  const pw = document.getElementById('new-password').value;
+  const confirm = document.getElementById('confirm-password').value;
+  if (pw !== confirm) { setBox('pw-error', 'Passwords do not match.'); return; }
+  const btn = document.getElementById('pw-btn');
+  btn.disabled = true;
+  try {
+    // Supabase may refuse without a recent sign-in; its message says so.
+    const { error } = await sb.auth.updateUser({ password: pw });
+    if (error) throw error;
+    document.getElementById('pw-form').reset();
+    setBox('pw-notice', 'Password updated.');
+  } catch (e) {
+    setBox('pw-error', e.message || 'Could not update the password. Try signing in again first.');
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+// ---- brokerage connection ---------------------------------------------------
+
+async function loadConnection() {
+  const summary = document.getElementById('conn-summary');
+  const chip = document.getElementById('conn-chip');
+  const actions = document.getElementById('conn-actions');
+  document.getElementById('disconnect-confirm').style.display = 'none';
+  document.getElementById('disconnect-btn').style.display = 'inline-block';
+  try {
+    const s = await (await api('/portfolio/status')).json();
+    if (s.connected) {
+      chip.innerHTML = '<span class="chip-ok">\\u2713 connected</span>';
+      const synced = s.last_sync_at
+        ? 'Last synced ' + new Date(s.last_sync_at).toLocaleString() + '.'
+        : 'Not synced yet.';
+      summary.innerHTML = '<p class="muted-note" style="margin-top:0.5rem;">' +
+        'Wealthsimple, linked read-only through SnapTrade. ' + esc(synced) + '</p>';
+      actions.style.display = 'block';
+    } else if (s.registered) {
+      chip.innerHTML = '<span class="chip-warn">not connected</span>';
+      summary.innerHTML = '<p class="muted-note" style="margin-top:0.5rem;">' +
+        'Registered with SnapTrade but no brokerage is linked. ' +
+        '<a href="/app/onboarding">Finish connecting</a> or disconnect to clear it.</p>';
+      actions.style.display = 'block';
+    } else {
+      chip.innerHTML = '<span class="chip-warn">not connected</span>';
+      summary.innerHTML = '<p class="muted-note" style="margin-top:0.5rem;">' +
+        'No brokerage linked. <a href="/app/onboarding">Connect your brokerage</a> ' +
+        'to sync your holdings.</p>';
+      actions.style.display = 'none';
+    }
+  } catch (e) {
+    summary.innerHTML = '<p class="muted-note">Could not load connection status.</p>';
+  }
+}
+
+document.getElementById('disconnect-btn').addEventListener('click', () => {
+  setBox('conn-error', null); setBox('conn-notice', null);
+  document.getElementById('disconnect-btn').style.display = 'none';
+  const confirmBox = document.getElementById('disconnect-confirm');
+  confirmBox.style.display = 'block';
+  riseIn(confirmBox);
+});
+
+document.getElementById('disconnect-no').addEventListener('click', () => {
+  document.getElementById('disconnect-confirm').style.display = 'none';
+  document.getElementById('disconnect-btn').style.display = 'inline-block';
+});
+
+document.getElementById('disconnect-yes').addEventListener('click', async () => {
+  const btn = document.getElementById('disconnect-yes');
+  btn.disabled = true;
+  setBox('conn-error', null);
+  try {
+    const resp = await api('/connection', { method: 'DELETE' });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.detail || 'Could not disconnect');
+    setBox('conn-notice', data.remote_deleted
+      ? 'Disconnected. Your SnapTrade link was deleted and holdings stop syncing. ' +
+        'Reconnect anytime from onboarding.'
+      : 'Disconnected on Cirvia and holdings stop syncing. We could not confirm ' +
+        'deletion on SnapTrade\\u2019s side; contact support if you want it purged there too.');
+    await loadConnection();
+  } catch (e) {
+    setBox('conn-error', e.message);
+    document.getElementById('disconnect-confirm').style.display = 'none';
+    document.getElementById('disconnect-btn').style.display = 'inline-block';
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+// ---- delete account ---------------------------------------------------------
+
+document.getElementById('delete-btn').addEventListener('click', () => {
+  setBox('delete-error', null);
+  document.getElementById('delete-btn').style.display = 'none';
+  const confirmBox = document.getElementById('delete-confirm');
+  confirmBox.style.display = 'block';
+  riseIn(confirmBox);
+  document.getElementById('delete-input').focus();
+});
+
+document.getElementById('delete-no').addEventListener('click', () => {
+  document.getElementById('delete-confirm').style.display = 'none';
+  document.getElementById('delete-btn').style.display = 'inline-block';
+  document.getElementById('delete-input').value = '';
+  document.getElementById('delete-yes').disabled = true;
+});
+
+document.getElementById('delete-input').addEventListener('input', (ev) => {
+  document.getElementById('delete-yes').disabled = ev.target.value !== 'DELETE';
+});
+
+document.getElementById('delete-yes').addEventListener('click', async () => {
+  const btn = document.getElementById('delete-yes');
+  btn.disabled = true;
+  setBox('delete-error', null);
+  try {
+    const resp = await api('/me', { method: 'DELETE' });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.detail || 'Could not delete the account');
+    await sb.auth.signOut();
+    window.location.href = '/';
+  } catch (e) {
+    setBox('delete-error', e.message);
+    btn.disabled = false;
+  }
+});
+
+function esc(s) {
+  const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML;
+}
+
+loadAccount();
+loadConnection();
+"""
+
+
 def login_page(supabase_url: str, anon_key: str) -> str:
     return _page(
         "Sign in — Cirvia",
@@ -1441,6 +1720,17 @@ def dashboard_page(supabase_url: str, anon_key: str) -> str:
         anon_key=anon_key,
         extra_js=_DELIVERY_JS + _DASHBOARD_JS,
         wrap_class="app-wrap dash-wrap",
+    )
+
+
+def settings_page(supabase_url: str, anon_key: str) -> str:
+    return _page(
+        "Settings — Cirvia",
+        _SETTINGS_BODY,
+        supabase_url=supabase_url,
+        anon_key=anon_key,
+        extra_js=_SETTINGS_JS,
+        wrap_class="app-wrap settings-wrap",
     )
 
 

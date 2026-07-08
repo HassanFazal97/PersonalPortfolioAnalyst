@@ -12,7 +12,7 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import event, func, select, text
+from sqlalchemy import delete, event, func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -35,6 +35,7 @@ from app.db.models import (
     Position,
     SnaptradeCredentials,
     ToolCall,
+    Transaction,
     User,
     VerificationCode,
 )
@@ -218,6 +219,41 @@ class Repo:
             )
             return int(result.scalar_one() or 0)
 
+    async def delete_user_data(self, user_id: uuid.UUID) -> None:
+        """Delete everything this user owns, then the user row itself.
+
+        Ordered children-first so plain (non-CASCADE) FKs never block:
+        model/tool calls hang off agent_runs; digests, alerts, and news_items
+        reference agent_runs via run_id so they go before the runs."""
+        async with self._session() as s:
+            run_ids = select(AgentRun.id).where(AgentRun.user_id == user_id)
+            await s.execute(delete(ModelCall).where(ModelCall.run_id.in_(run_ids)))
+            await s.execute(delete(ToolCall).where(ToolCall.run_id.in_(run_ids)))
+            await s.execute(delete(Digest).where(Digest.user_id == user_id))
+            await s.execute(delete(Alert).where(Alert.user_id == user_id))
+            await s.execute(delete(NewsItem).where(NewsItem.user_id == user_id))
+            await s.execute(delete(AgentRun).where(AgentRun.user_id == user_id))
+            await s.execute(
+                delete(OutboundMessage).where(OutboundMessage.user_id == user_id)
+            )
+            await s.execute(
+                delete(NotificationChannel).where(
+                    NotificationChannel.user_id == user_id
+                )
+            )
+            await s.execute(
+                delete(VerificationCode).where(VerificationCode.user_id == user_id)
+            )
+            await s.execute(delete(Position).where(Position.user_id == user_id))
+            await s.execute(delete(Transaction).where(Transaction.user_id == user_id))
+            await s.execute(
+                delete(SnaptradeCredentials).where(
+                    SnaptradeCredentials.user_id == user_id
+                )
+            )
+            await s.execute(delete(User).where(User.id == user_id))
+            await s.commit()
+
     # ---- snaptrade credentials -------------------------------------------
 
     async def get_snaptrade_credentials(
@@ -247,6 +283,16 @@ class Repo:
                 row.snaptrade_user_id = snaptrade_user_id
                 row.user_secret_enc = user_secret_enc
             await s.commit()
+
+    async def delete_snaptrade_credentials(self, user_id: uuid.UUID) -> bool:
+        """Remove the stored SnapTrade identity. Returns False if none existed."""
+        async with self._session() as s:
+            row = await s.get(SnaptradeCredentials, user_id)
+            if row is None:
+                return False
+            await s.delete(row)
+            await s.commit()
+            return True
 
     async def update_snaptrade_status(
         self,
@@ -460,6 +506,19 @@ class Repo:
                 .all()
             )
             return run, model_calls, tool_calls
+
+    async def list_chat_runs(
+        self, user_id: uuid.UUID, *, limit: int = 10
+    ) -> list[AgentRun]:
+        """This user's most recent chat runs, newest first (chat history)."""
+        async with self._session() as s:
+            result = await s.execute(
+                select(AgentRun)
+                .where(AgentRun.user_id == user_id, AgentRun.trigger == "chat")
+                .order_by(AgentRun.created_at.desc())
+                .limit(limit)
+            )
+            return list(result.scalars().all())
 
     async def list_runs(
         self, *, trigger: str | None = None, limit: int = 50

@@ -24,7 +24,9 @@ def client(monkeypatch):
     get_settings.cache_clear()
 
 
-@pytest.mark.parametrize("path", ["/app", "/app/onboarding", "/app/dashboard"])
+@pytest.mark.parametrize(
+    "path", ["/app", "/app/onboarding", "/app/dashboard", "/app/settings"]
+)
 def test_app_pages_render_without_token(client, path):
     resp = client.get(path)
     assert resp.status_code == 200
@@ -48,12 +50,28 @@ def test_onboarding_has_watchlist_panel(client):
     assert 'id="panel-watchlist"' in resp.text
 
 
+def test_settings_has_account_sections(client):
+    resp = client.get("/app/settings")
+    assert resp.status_code == 200
+    assert 'id="pw-form"' in resp.text
+    assert 'id="disconnect-btn"' in resp.text
+    assert 'id="plan-limits"' in resp.text
+    assert 'id="delete-confirm"' in resp.text
+
+
+def test_dashboard_nav_links_to_settings(client):
+    resp = client.get("/app/dashboard")
+    assert 'href="/app/settings"' in resp.text
+
+
 def test_app_pages_noindex(client):
     resp = client.get("/app")
     assert '<meta name="robots" content="noindex">' in resp.text
 
 
-@pytest.mark.parametrize("path", ["/app", "/app/onboarding", "/app/dashboard"])
+@pytest.mark.parametrize(
+    "path", ["/app", "/app/onboarding", "/app/dashboard", "/app/settings"]
+)
 def test_app_pages_503_when_supabase_not_configured(monkeypatch, path):
     monkeypatch.setenv("API_TOKEN", "test-token")
     monkeypatch.setenv("DATABASE_URL", "")
