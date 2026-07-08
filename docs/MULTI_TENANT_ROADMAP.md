@@ -196,12 +196,19 @@ See the deep dive above.
 - **Deployable end state:** each user gets a digest at *their* 7:45am, resilient
   to restarts.
 
-### Phase 5 — SMS delivery via Twilio (~3–5 days; needs 10DLC approved)
-- [ ] Twilio send in a `delivery` worker (separate job from generation)
-- [ ] STOP/HELP inbound webhook → toggle `digest_enabled` / consent flags
-- [ ] Opt-in capture wired into onboarding
-- [ ] Retire the iMessage Mac-worker path
-- **Deployable end state:** users receive real texts, compliantly.
+### Phase 5 — Multi-channel delivery (SMS/Email/Discord) — DONE (July 2026)
+Built broader than originally scoped: users pick one preferred channel (SMS via
+Twilio, email via Resend, or a Discord webhook), verify the destination with a
+one-time code, and an in-process dispatcher drains `outbound_messages` with
+per-channel adapters and retry backoff. Migrations `007_notifications.sql` +
+`008_retire_imessage.sql`; code under `app/delivery/`.
+- [x] Twilio send in a delivery dispatcher (separate from generation)
+- [x] STOP/HELP/START inbound webhook → `opted_out_at` on the sms registration
+- [x] Opt-in capture wired into onboarding (consent checkbox, timestamped)
+- [x] Retire the iMessage Mac-worker path
+- [ ] Ops: buy Twilio number, point webhook, toll-free/10DLC paperwork
+- **Deployable end state:** users receive real texts/emails/Discord messages,
+  compliantly.
 
 ### Phase 6 — Billing & cost control (~3–5 days)
 - [ ] Stripe subscriptions + webhooks (active/canceled → `digest_enabled`)

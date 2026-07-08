@@ -40,7 +40,10 @@ cp .env.example .env
 | `MAX_TOOL_OUTPUT_TOKENS` | Per-tool output cap (~6000) |
 | `DIGEST_CRON` | Cron for the morning digest (`45 7 * * 1-5`) |
 | `TZ` | `America/Toronto` |
-| `IMESSAGE_RECIPIENT` | Phase B only: your own number, on the Mac |
+| `DELIVERY_INTERVAL_SECONDS` | Outbound dispatcher poll interval (0 disables) |
+| `PUBLIC_BASE_URL` | Public origin, e.g. `https://app.example.com` (Twilio webhook signatures) |
+| `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` / `TWILIO_FROM_NUMBER` | SMS channel (all three required) |
+| `RESEND_API_KEY` / `EMAIL_FROM` | Email channel (both required) |
 | `SNAPTRADE_CLIENT_ID` / `SNAPTRADE_CONSUMER_KEY` | SnapTrade API keys (Wealthsimple sync) |
 | `SNAPTRADE_USER_ID` / `SNAPTRADE_USER_SECRET` | Commercial keys only — leave empty for Personal dashboard keys |
 | `SNAPTRADE_AUTH_MODE` | `auto` (default), `personal`, or `commercial` |
@@ -204,10 +207,50 @@ GitHub Actions scheduled workflow) that `POST`s `/digest/run` at 07:45 Toronto.
 `/digest/latest` keys on the Toronto date and the digest is idempotent per day,
 so a redundant trigger is harmless.
 
-## Delivery — Phase A: iPhone Shortcut (pull)
+## Delivery — notification channels
 
-Deliver the digest to yourself with an iPhone Shortcuts personal automation
-(no Mac required):
+Users pick one preferred channel — **SMS (Twilio)**, **Email (Resend)**, or
+**Discord (webhook)** — during onboarding (or later from the dashboard's
+Delivery card), verify it with a one-time 6-digit code, and the in-process
+dispatcher delivers digests and macro alerts there.
+
+How it works:
+
+- `send_digest` and the macro orchestrator enqueue to `outbound_messages`;
+  the queue resolves the user's preferred channel at enqueue time (no verified
+  channel → the row is recorded as `skipped` and the digest stays
+  dashboard-only).
+- The dispatcher (`app/delivery/dispatcher.py`) drains the queue every
+  `DELIVERY_INTERVAL_SECONDS`, routing rows to provider adapters
+  (`app/delivery/adapters/`). Transient failures back off (1m/5m/30m/2h, max
+  `DELIVERY_MAX_ATTEMPTS`); permanent ones (bad number, deleted webhook) fail
+  immediately with the reason in `last_error`.
+- A channel only appears in the UI when its provider creds are configured.
+  Discord needs no global creds — users paste their own webhook URL.
+
+### SMS setup (Twilio)
+
+1. Buy a number in the Twilio console and set `TWILIO_ACCOUNT_SID`,
+   `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER`.
+2. Point the number's inbound SMS webhook at
+   `$PUBLIC_BASE_URL/webhooks/twilio/sms` (handles STOP/START/HELP; requests
+   are verified via `X-Twilio-Signature`, and STOP flips the user's
+   registration to opted-out so the queue skips them).
+3. Compliance is on you operationally: Canadian toll-free verification or US
+   A2P 10DLC brand/campaign registration if texting US numbers. Consent is
+   captured in-product (required checkbox, timestamped in
+   `notification_channels.consent_at`).
+
+### Email setup (Resend)
+
+Set `RESEND_API_KEY` and `EMAIL_FROM` (verify your sending domain in Resend
+first; the sandbox `onboarding@resend.dev` works for testing to your own
+address).
+
+## Delivery — iPhone Shortcut (pull fallback)
+
+`GET /digest/latest` remains available if you'd rather pull the digest with an
+iPhone Shortcuts personal automation:
 
 1. **Shortcuts app → Automation → New (＋) → Personal Automation → Time of Day.**
 2. Set **08:05**, **Daily**, and turn **Run Immediately** on (disable "Ask
@@ -224,39 +267,8 @@ Deliver the digest to yourself with an iPhone Shortcuts personal automation
 If no digest exists yet the endpoint returns 404; the Shortcut simply sends
 nothing that morning. The scheduled 07:45 generation runs before the 08:05 pull.
 
-## Delivery — Phase B: Mac worker push
-
-A small launchd job on your Mac drains the API outbox and sends each message as
-an iMessage to yourself. Two-way ready: a stubbed `POST /inbound` runs a chat
-agent and enqueues the reply (reading incoming messages from `chat.db` is out of
-scope here).
-
-When `IMESSAGE_RECIPIENT` is set on the API side, `send_digest` (and the digest
-fallback) enqueue to `outbound_messages`. The worker then:
-
-`GET /outbox/pending` → `osascript send.applescript "<body>" "<recipient>"` →
-`POST /outbox/{id}/ack {status}`. A failed send is retried; after 3 attempts the
-message is marked `failed`.
-
-### Install
-
-1. Edit `macworker/com.portfolioagent.macworker.plist`:
-   - the `worker.py` path (replace `CHANGE_ME`),
-   - `PA_API_BASE`, `PA_API_TOKEN`, and `PA_IMESSAGE_RECIPIENT` (your number).
-2. Copy and load it:
-   ```bash
-   cp macworker/com.portfolioagent.macworker.plist ~/Library/LaunchAgents/
-   launchctl load ~/Library/LaunchAgents/com.portfolioagent.macworker.plist
-   ```
-3. Grant Terminal/`osascript` permission to control Messages when macOS prompts
-   (System Settings → Privacy & Security → Automation).
-4. Logs: `/tmp/portfolioagent.macworker.{out,err}.log`. Test one cycle manually:
-   ```bash
-   PA_API_TOKEN=... PA_IMESSAGE_RECIPIENT=+1... python3 macworker/worker.py
-   ```
-
-Unload with
-`launchctl unload ~/Library/LaunchAgents/com.portfolioagent.macworker.plist`.
+> The original Mac-worker iMessage push (Phase B) was retired in favor of the
+> multi-channel dispatcher above (migration `008_retire_imessage.sql`).
 
 ## Observability & replay
 

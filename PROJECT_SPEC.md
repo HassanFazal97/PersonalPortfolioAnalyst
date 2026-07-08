@@ -254,12 +254,24 @@ If the whole pipeline fails, send a fallback message through the delivery channe
 
 ## 9. Delivery
 
-**Phase A — Shortcuts pull (ship first).**
-`GET /digest/latest` → `{date, body, generated_at}` of today's digest, 404 if none yet. The user configures an iPhone Shortcuts personal automation (08:05 daily → Get Contents of URL with bearer token header → Send Message to self). Document the exact Shortcut steps in README.
+> **Superseded (July 2026):** the original Phase A (Shortcuts pull) / Phase B
+> (Mac iMessage worker) design below has been replaced by production
+> multi-channel delivery. Users register one preferred channel — **SMS
+> (Twilio)**, **Email (Resend)**, or **Discord (user webhook)** — verify the
+> destination with a one-time 6-digit code, and an in-process dispatcher
+> drains `outbound_messages` through per-channel adapters
+> (`app/delivery/adapters/`) with retry backoff. Channel resolution happens at
+> enqueue time; users without a verified channel get `skipped` rows and see
+> the digest on the dashboard. A signature-validated
+> `POST /webhooks/twilio/sms` handles STOP/START/HELP. `GET /digest/latest`
+> remains as a pull fallback. See migrations `007_notifications.sql` /
+> `008_retire_imessage.sql` and README "Delivery — notification channels".
 
-**Phase B — Mac worker push (two-way ready).**
-`macworker/worker.py`: a ~100-line poller that runs on the user's Mac via launchd. Every 60s: `GET /outbox/pending` → for each message, `osascript send.applescript "<body>"` → `POST /outbox/{id}/ack`. Three failed attempts → `status='failed'`. Include the launchd plist in the repo. The AppleScript targets the user's own number from `.env` on the Mac side.
-Incoming-message reading (chat.db) is explicitly **out of scope** for this handover; leave a stubbed `POST /inbound` endpoint that runs a chat agent and enqueues the reply, so the worker can be extended later.
+**Phase A — Shortcuts pull (historical).**
+`GET /digest/latest` → `{date, body, generated_at}` of today's digest, 404 if none yet. The user configures an iPhone Shortcuts personal automation (08:05 daily → Get Contents of URL with bearer token header → Send Message to self).
+
+**Phase B — Mac worker push (retired).**
+A launchd poller on the user's Mac drained `/outbox/pending` and sent iMessages via AppleScript. Removed in migration 008 along with the `/outbox/*` and `/inbound` endpoints.
 
 ---
 

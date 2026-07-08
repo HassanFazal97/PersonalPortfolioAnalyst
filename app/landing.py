@@ -36,6 +36,7 @@ _CSS = """
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html { scroll-behavior: smooth; }
+html, body { overflow-x: clip; }
 body {
   font-family: var(--font);
   /* atmospheric violet aurora at the top, fading into the near-black canvas */
@@ -56,14 +57,19 @@ a:focus-visible, button:focus-visible, summary:focus-visible {
   outline: 2px solid var(--accent-text); outline-offset: 2px; border-radius: 4px;
 }
 .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 1.5rem 5.5rem; }
-/* nav */
+/* nav: transparent over the hero, gains surface + hairline once scrolled */
 nav {
   position: sticky; top: 0; z-index: 10;
+  background: transparent; border-bottom: 1px solid transparent;
+  transition: background 0.3s var(--ease), border-color 0.3s var(--ease);
+}
+nav.scrolled {
   background: oklch(13% 0.014 300 / 0.82); backdrop-filter: blur(12px);
-  border-bottom: 1px solid var(--line);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom-color: var(--line);
 }
 .nav-inner {
-  max-width: var(--maxw); margin: 0 auto; padding: 0.85rem 1.5rem;
+  max-width: var(--maxw); margin: 0 auto; padding: 0.8rem 1.5rem;
   display: flex; align-items: center; justify-content: space-between; gap: 1rem;
 }
 .logo { font-size: 1.3rem; font-weight: 800; letter-spacing: -0.03em; color: var(--ink); }
@@ -82,91 +88,128 @@ nav {
 .btn:hover { background: var(--accent-hover); text-decoration: none; transform: translateY(-1px); }
 .btn.ghost { background: transparent; border-color: var(--line-strong); color: var(--ink); }
 .btn.ghost:hover { background: var(--surface-2); }
-/* hero */
-.hero { padding: clamp(4rem, 9vw, 6.5rem) 0 1rem; text-align: center; }
-.badge {
-  display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; font-weight: 600;
-  padding: 0.32rem 0.9rem; border-radius: 999px; margin-bottom: 1.5rem;
-  background: var(--surface-1); border: 1px solid var(--line); color: var(--ink-3);
+.btn.lg { font-size: 1rem; padding: 0.8rem 1.7rem; }
+.quiet {
+  color: var(--ink-2); font-weight: 600; font-size: 0.95rem;
+  padding: 0.8rem 0.4rem; transition: color 0.12s var(--ease);
 }
-.badge-dot { width: 7px; height: 7px; border-radius: 999px; background: var(--accent-text); }
+.quiet:hover { color: var(--ink); text-decoration: none; }
+/* hero — minimal copy + aurora scene */
+.hero { padding: clamp(3.5rem, 8vw, 6rem) 0 0; text-align: center; }
+.hero-copy { max-width: 52rem; margin: 0 auto; }
 h1 {
-  font-size: clamp(2.4rem, 6vw, 4rem); font-weight: 800; letter-spacing: -0.03em;
-  line-height: 1.06; max-width: 15em; margin: 0 auto;
+  font-size: clamp(2.5rem, 6vw, 4.4rem); font-weight: 800; letter-spacing: -0.035em;
+  line-height: 1.06; max-width: 25ch; margin: 0 auto;
 }
+.hl { display: block; overflow: hidden; }
+.hl-in { display: block; }
 .lead {
-  font-size: clamp(1.05rem, 2vw, 1.2rem); color: var(--ink-2);
-  max-width: 36em; margin: 1.4rem auto 0;
+  font-size: clamp(1.02rem, 1.8vw, 1.18rem); color: var(--ink-3);
+  max-width: 30em; margin: 1.2rem auto 0;
 }
-.cta-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.8rem; margin-top: 2rem; }
-/* hero product stage: central digest panel + floating satellite cards.
-   The panel is 540px centered; cards live in the side gutters and never
-   cover the panel. Below 1100px the gutters vanish, so cards stack. */
-.stage {
-  position: relative; max-width: 1060px; margin: clamp(3rem, 6vw, 4.5rem) auto 0;
-  padding: 1rem 0 1.5rem; text-align: left;
+.cta-row {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: center;
+  gap: 1.1rem; margin-top: 1.9rem;
 }
-.mock-glow {
-  position: absolute; inset: -10% -12%; pointer-events: none;
-  background: radial-gradient(closest-side, oklch(48% 0.18 295 / 0.16), transparent 72%);
+/* hero scene: WebGL aurora silk over a CSS-gradient base, satellite cards on top */
+.hero-scene {
+  position: relative; max-width: 1100px; margin: clamp(1rem, 2.6vw, 1.75rem) auto 0;
+  min-height: clamp(420px, 46vw, 560px); overflow: visible;
 }
-.mock-panel {
-  position: relative; max-width: 540px; margin: 0 auto;
-  background: var(--surface-1); border: 1px solid var(--line);
-  border-radius: var(--r-l); padding: 1.25rem 1.4rem 1.4rem;
+.hero-stars {
+  position: absolute; inset: 0; pointer-events: none; opacity: 0.45;
+  background-image:
+    radial-gradient(1px 1px at 12% 22%, oklch(88% 0.02 300 / 0.5), transparent),
+    radial-gradient(1px 1px at 78% 14%, oklch(88% 0.02 300 / 0.35), transparent),
+    radial-gradient(1.5px 1.5px at 44% 8%, oklch(90% 0.02 300 / 0.4), transparent),
+    radial-gradient(1px 1px at 91% 38%, oklch(88% 0.02 300 / 0.3), transparent),
+    radial-gradient(1px 1px at 6% 58%, oklch(88% 0.02 300 / 0.35), transparent),
+    radial-gradient(1px 1px at 62% 72%, oklch(88% 0.02 300 / 0.25), transparent);
 }
+.hero-orb {
+  position: absolute; left: 50%; bottom: -10%; width: min(880px, 96vw);
+  height: min(480px, 52vh); transform: translateX(-50%); pointer-events: none;
+  background:
+    radial-gradient(ellipse 55% 48% at 50% 58%, oklch(52% 0.2 295 / 0.8), transparent 72%),
+    radial-gradient(ellipse 70% 55% at 42% 62%, oklch(38% 0.14 275 / 0.5), transparent 68%),
+    radial-gradient(ellipse 45% 40% at 58% 48%, oklch(45% 0.16 310 / 0.4), transparent 70%);
+  filter: blur(30px);
+  animation: orb-breathe 9s ease-in-out infinite alternate;
+}
+@keyframes orb-breathe {
+  from { transform: translateX(-50%) scale(1) translateY(0); }
+  to { transform: translateX(-50%) scale(1.05) translateY(-14px); }
+}
+#aurora {
+  position: absolute; left: 50%; bottom: -14%; transform: translateX(-50%);
+  width: min(1240px, 100vw); height: 118%; pointer-events: none; z-index: 1;
+  opacity: 0; transition: opacity 1.4s var(--ease);
+}
+#aurora.on { opacity: 1; }
 .float-card {
-  position: absolute; z-index: 2; background: var(--surface-2);
-  border: 1px solid var(--line-strong); border-radius: var(--r-m);
-  padding: 0.85rem 1.05rem; font-size: 0.88rem;
-  box-shadow: 0 18px 44px oklch(0% 0 0 / 0.38);
+  position: absolute; z-index: 2;
+  background: var(--surface-1);
+  border: 1px solid oklch(42% 0.05 295 / 0.5); border-radius: var(--r-m);
+  padding: 0.95rem 1.1rem; font-size: 0.88rem; text-align: left;
+  box-shadow: 0 30px 70px oklch(0% 0 0 / 0.5), 0 4px 16px oklch(0% 0 0 / 0.3);
   animation: floaty 7s ease-in-out infinite alternate;
 }
-.fc-total { left: 0; top: 6%; width: 220px; }
-.fc-alert { right: 0; top: 28%; width: 240px; animation-delay: -2.5s; }
-.fc-chat { left: 0; bottom: 4%; width: 240px; animation-delay: -4.5s; }
-@keyframes floaty { from { transform: translateY(-5px); } to { transform: translateY(7px); } }
-.fc-k { display: block; font-size: 0.74rem; font-weight: 600; color: var(--ink-3); }
-.fc-v { display: block; font-size: 1.35rem; font-weight: 800; color: var(--ink);
-  letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
-.fc-d { font-size: 0.82rem; font-weight: 600; }
-.fc-q { font-weight: 600; color: var(--ink); margin-bottom: 0.3rem; }
-.fc-a { color: var(--ink-2); }
-@media (max-width: 1100px) {
-  .stage { padding: 0; }
-  .float-card { position: static; width: min(100%, 430px); margin: 0.8rem auto 0;
-    animation: none; box-shadow: none; }
-  .fc-total { display: none; }
+.fc-digest { left: 50%; top: 17%; width: min(330px, 80vw); z-index: 3;
+  transform: translate(-50%, 0); animation: floaty-center 8s ease-in-out infinite alternate; }
+.fc-alert { right: 3%; top: 2%; width: 244px; animation-delay: -2.5s; }
+.fc-chat { left: 3%; bottom: 26%; width: 254px; animation-delay: -4.5s; }
+@keyframes floaty { from { transform: translateY(-6px); } to { transform: translateY(8px); } }
+@keyframes floaty-center {
+  from { transform: translate(-50%, -6px); } to { transform: translate(-50%, 8px); }
 }
+.fc-q { font-weight: 600; color: var(--ink); margin-bottom: 0.3rem; font-size: 0.86rem; }
+.fc-a { color: var(--ink-2); font-size: 0.84rem; line-height: 1.5; }
 .mock-top {
-  display: flex; align-items: center; gap: 0.55rem; font-size: 0.82rem; font-weight: 600;
-  color: var(--ink-3); padding-bottom: 0.85rem; border-bottom: 1px solid var(--line);
+  display: flex; align-items: center; gap: 0.55rem; font-size: 0.78rem; font-weight: 600;
+  color: var(--ink-3); padding-bottom: 0.7rem; border-bottom: 1px solid var(--line);
 }
-.mock-dot { width: 8px; height: 8px; border-radius: 999px; background: var(--accent-text); }
+.mock-dot { width: 7px; height: 7px; border-radius: 999px; background: var(--accent-text); }
 .mock-date { margin-left: auto; font-weight: 500; font-variant-numeric: tabular-nums; }
+.mock-val { display: flex; align-items: baseline; gap: 0.6rem; padding: 0.7rem 0 0.35rem; }
+.mock-val .v { font-size: 1.35rem; font-weight: 800; color: var(--ink);
+  letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+.mock-val .d { font-size: 0.82rem; font-weight: 600; }
 .mock-row {
-  display: grid; grid-template-columns: 4.2rem 1fr auto; gap: 0.8rem; align-items: baseline;
-  padding: 0.62rem 0; border-bottom: 1px solid var(--line); font-size: 0.92rem;
+  display: grid; grid-template-columns: 3.5rem 1fr auto; gap: 0.6rem; align-items: baseline;
+  padding: 0.5rem 0; border-bottom: 1px solid var(--line); font-size: 0.86rem;
 }
+.mock-row:last-of-type { border-bottom: none; }
 .mock-row .t { font-weight: 700; color: var(--ink); }
 .mock-row .n { color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.mock-row .chg { font-weight: 600; font-variant-numeric: tabular-nums; }
+.mock-row .chg { font-weight: 600; font-variant-numeric: tabular-nums; font-size: 0.84rem; }
 .gain { color: var(--gain); } .loss { color: var(--loss); }
-.mock-sum { font-size: 0.92rem; color: var(--ink-2); padding-top: 0.9rem; }
-.mock-alert-k { display: block; font-size: 0.74rem; font-weight: 700; color: var(--warn); margin-bottom: 0.2rem; }
-/* showcase (chat + alert demo) */
-.show-grid { display: grid; grid-template-columns: 1.25fr 1fr; gap: 1.25rem;
-  margin-top: 2.4rem; align-items: start; }
-@media (max-width: 780px) { .show-grid { grid-template-columns: 1fr; } }
+.mock-alert-k { display: block; font-size: 0.72rem; font-weight: 700; color: var(--warn); margin-bottom: 0.25rem; }
+@media (max-width: 900px) {
+  .hero-scene { min-height: auto; padding: clamp(11rem, 52vw, 15rem) 0 1rem; }
+  .hero-orb { bottom: auto; top: -2%; height: 340px; opacity: 0.85; }
+  #aurora { bottom: auto; top: -6%; height: clamp(300px, 60vw, 420px); }
+  .float-card { position: relative; width: min(100%, 420px); margin: 0.85rem auto 0;
+    left: auto !important; right: auto !important; top: auto !important; bottom: auto !important;
+    transform: none !important; animation: none; box-shadow: 0 12px 32px oklch(0% 0 0 / 0.3); }
+  .fc-chat { display: none; }
+  .hero-stars { display: none; }
+}
+/* showcase (chat demo) */
 .show-panel { background: var(--surface-1); border: 1px solid var(--line);
   border-radius: var(--r-l); padding: 1.3rem 1.4rem 1.5rem; }
+.chat-demo { position: relative; max-width: 640px; margin-top: 2.2rem; }
 .bubble { padding: 0.65rem 0.95rem; border-radius: var(--r-m); margin-top: 0.7rem;
   font-size: 0.92rem; line-height: 1.55; max-width: 92%; width: fit-content; }
 .bubble.user { background: var(--surface-3); color: var(--ink); margin-left: auto; }
 .bubble.bot { background: oklch(30% 0.1 295 / 0.4); color: var(--ink-2); }
-.alert-demo .head-line { color: var(--ink); font-weight: 650; margin-top: 0.2rem; }
-.alert-demo p { color: var(--ink-2); font-size: 0.92rem; margin-top: 0.4rem; }
-.show-note { color: var(--ink-3); font-size: 0.92rem; margin-top: 1rem; max-width: 34em; }
+.bubble.typing { position: absolute; display: inline-flex; gap: 5px; align-items: center;
+  padding: 0.85rem 0.95rem; margin: 0; }
+.bubble.typing i { width: 6px; height: 6px; border-radius: 50%; background: var(--ink-3);
+  animation: tdot 0.9s ease-in-out infinite; }
+.bubble.typing i:nth-child(2) { animation-delay: 0.15s; }
+.bubble.typing i:nth-child(3) { animation-delay: 0.3s; }
+@keyframes tdot { 0%, 100% { opacity: 0.35; transform: translateY(0); }
+  50% { opacity: 1; transform: translateY(-3px); } }
 /* sections */
 section { padding-top: clamp(4rem, 9vw, 6.5rem); }
 h2 { font-size: clamp(1.6rem, 3.4vw, 2.2rem); font-weight: 700; letter-spacing: -0.022em; }
@@ -213,24 +256,31 @@ h3 { font-size: 1.05rem; font-weight: 650; margin-bottom: 0.3rem; }
 .faq summary::after { content: "+"; color: var(--ink-3); font-size: 1.25rem; flex: 0 0 auto; transition: transform 0.2s var(--ease); }
 .faq details[open] summary::after { transform: rotate(45deg); }
 .faq details p { color: var(--ink-2); padding: 0 0 1.25rem; max-width: 60ch; text-wrap: pretty; }
-/* cta band */
-.cta-band {
-  margin-top: clamp(4rem, 9vw, 6.5rem);
+/* cta finale: full-bleed aurora band above the footer */
+.cta-final {
+  margin: clamp(4.5rem, 10vw, 7.5rem) calc(50% - 50vw) -5.5rem;
+  padding: clamp(4rem, 9vw, 6.5rem) 1.5rem clamp(4.5rem, 10vw, 7rem);
+  text-align: center; border-top: 1px solid var(--line);
   background:
-    radial-gradient(640px 320px at 50% -80px, oklch(38% 0.13 295 / 0.45), transparent 75%),
-    var(--surface-1);
-  border: 1px solid var(--line-strong); border-radius: var(--r-l);
-  padding: clamp(2.25rem, 5vw, 3.5rem); text-align: center;
+    radial-gradient(1000px 460px at 50% 118%, oklch(46% 0.17 295 / 0.55), transparent 72%),
+    radial-gradient(620px 300px at 32% 125%, oklch(38% 0.13 270 / 0.4), transparent 70%),
+    radial-gradient(620px 300px at 68% 125%, oklch(40% 0.14 315 / 0.35), transparent 70%);
 }
-.cta-band h2 { margin-bottom: 0.5rem; }
-.cta-band p { color: var(--ink-3); margin-bottom: 1.5rem; }
+.cta-final h2 { font-size: clamp(1.9rem, 4.2vw, 2.7rem); letter-spacing: -0.025em; }
+.cta-final p { color: var(--ink-3); margin: 0.65rem 0 1.8rem; }
 /* plans (pricing) */
 .plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 1.25rem; margin-top: 2.4rem; max-width: 780px; }
 .plan {
   background: var(--surface-1); border: 1px solid var(--line); border-radius: var(--r-l);
   padding: 1.9rem 1.8rem; display: flex; flex-direction: column;
 }
-.plan.featured { border-color: var(--accent-hover); }
+.plan.featured {
+  border-color: oklch(48% 0.18 295 / 0.65);
+  background:
+    radial-gradient(420px 190px at 50% -60px, oklch(48% 0.18 295 / 0.14), transparent 75%),
+    var(--surface-1);
+  box-shadow: 0 20px 50px oklch(0% 0 0 / 0.35);
+}
 .plan-tag { font-size: 0.8rem; font-weight: 700; color: var(--ink-3); }
 .plan.featured .plan-tag { color: var(--accent-text); }
 .price { font-size: 2.4rem; font-weight: 800; letter-spacing: -0.02em; color: var(--ink); margin: 0.3rem 0 0.1rem; font-variant-numeric: tabular-nums; }
@@ -284,21 +334,191 @@ _FONT_LINKS = (
 
 MOTION_CDN = "https://cdn.jsdelivr.net/npm/motion@12/dist/motion.js"
 
-# Reveal choreography: content is fully visible without JS; the script hides
-# elements immediately before animating them in, so no-JS/headless renders and
-# reduced-motion users always get the complete page.
+# Hero aurora: a single-quad WebGL fragment shader (domain-warped fbm noise in
+# the brand violets). Pure progressive enhancement over the CSS .hero-orb base
+# layer: no WebGL, no JS, or reduced motion all fall back to the gradient orb.
+_SCENE_JS = """
+(function () {
+  var c = document.getElementById('aurora');
+  if (!c || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  var gl = c.getContext('webgl', { alpha: true, antialias: false, premultipliedAlpha: true });
+  if (!gl) return;
+  var VS = 'attribute vec2 a;void main(){gl_Position=vec4(a,0.,1.);}';
+  var FS = [
+    'precision highp float;',
+    'uniform vec2 u_res; uniform float u_time;',
+    'float hs(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}',
+    'float n2(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);',
+    ' float a=hs(i),b=hs(i+vec2(1.,0.)),c2=hs(i+vec2(0.,1.)),d=hs(i+vec2(1.,1.));',
+    ' return mix(mix(a,b,f.x),mix(c2,d,f.x),f.y);}',
+    'float fbm(vec2 p){float v=0.,a=.5;',
+    ' for(int i=0;i<4;i++){v+=a*n2(p);p=p*2.03+vec2(11.3,7.7);a*=.5;}return v;}',
+    'void main(){',
+    ' vec2 uv=gl_FragCoord.xy/u_res;',
+    ' float ar=u_res.x/u_res.y;',
+    ' float x=uv.x*ar;',
+    ' float dx=x-.5*ar;',
+    ' float t=u_time*.06;',
+    ' float hill=exp(-dx*dx*1.15);',
+    ' vec3 col=vec3(0.);',
+    ' float a=0.;',
+    ' for(int i=0;i<4;i++){',
+    '  float fi=float(i);',
+    '  float ph=fbm(vec2(x*1.1+fi*7.3+t*.4,fi*3.1+t*.15));',
+    '  float y=.1+hill*(.16+fi*.1)+(ph-.5)*.12*hill+.02*sin(x*2.+fi*2.3+t);',
+    '  float d=uv.y-y;',
+    '  float w=(.014+.011*fi)*(.4+hill);',
+    '  float core=exp(-d*d/(w*w));',
+    '  float glow=exp(-d*d/(w*w*18.));',
+    '  float sh=.5+.5*sin(x*(2.6-fi*.3)+fi*1.9-t*1.2+ph*4.);',
+    '  float k=core*(.55+.45*sh)*(.25+.75*hill);',
+    '  vec3 rc=mix(vec3(.28,.17,.55),vec3(.66,.52,1.),k);',
+    '  col+=rc*(k*.95+glow*.22*hill);',
+    '  a+=k*.85+glow*.2*hill;',
+    ' }',
+    ' float base=exp(-dx*dx*1.4)*exp(-(uv.y-.16)*(uv.y-.16)*30.);',
+    ' col+=vec3(.34,.2,.62)*base*.5;',
+    ' a+=base*.4;',
+    ' float ex=smoothstep(0.,.16,uv.x)*smoothstep(1.,.84,uv.x);',
+    ' float ey=smoothstep(0.,.06,uv.y)*smoothstep(1.,.7,uv.y);',
+    ' a=clamp(a,0.,1.)*ex*ey*.92;',
+    ' col=min(col,vec3(1.));',
+    ' gl_FragColor=vec4(col*a,a);',
+    '}'].join('\\n');
+  function sh(t, s) {
+    var o = gl.createShader(t); gl.shaderSource(o, s); gl.compileShader(o);
+    return gl.getShaderParameter(o, gl.COMPILE_STATUS) ? o : null;
+  }
+  var v = sh(gl.VERTEX_SHADER, VS), f = sh(gl.FRAGMENT_SHADER, FS);
+  if (!v || !f) return;
+  var p = gl.createProgram();
+  gl.attachShader(p, v); gl.attachShader(p, f); gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) return;
+  gl.useProgram(p);
+  gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+  var loc = gl.getAttribLocation(p, 'a');
+  gl.enableVertexAttribArray(loc);
+  gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+  var uR = gl.getUniformLocation(p, 'u_res'), uT = gl.getUniformLocation(p, 'u_time');
+  function resize() {
+    /* soft render scale: the silk is blurry by design, so render at ~60% and
+       let the browser upscale; caps fill-rate cost on hidpi screens */
+    var s = Math.min(1.5, window.devicePixelRatio || 1) * 0.6;
+    var W = Math.max(1, Math.round(c.clientWidth * s));
+    var H = Math.max(1, Math.round(c.clientHeight * s));
+    if (c.width !== W || c.height !== H) { c.width = W; c.height = H; gl.viewport(0, 0, W, H); }
+  }
+  var running = false, seen = true, t0 = performance.now();
+  function frame(now) {
+    if (!running) return;
+    resize();
+    gl.uniform2f(uR, c.width, c.height);
+    gl.uniform1f(uT, (now - t0) / 1000);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    requestAnimationFrame(frame);
+  }
+  function play() {
+    var want = seen && !document.hidden;
+    if (want && !running) { running = true; requestAnimationFrame(frame); }
+    else if (!want) running = false;
+  }
+  new IntersectionObserver(function (en) { seen = en[0].isIntersecting; play(); }).observe(c);
+  document.addEventListener('visibilitychange', play);
+  window.addEventListener('resize', resize);
+  c.classList.add('on');
+  play();
+})();
+"""
+
+# Motion choreography. Content is fully visible without JS; the script hides
+# elements immediately before animating them in. Gates: reduced motion and
+# headless/automated browsers (navigator.webdriver) get the complete static
+# page, and beforeprint force-reveals everything, so nothing can ship blank.
 _REVEAL_JS = """
 document.addEventListener('DOMContentLoaded', function () {
-  if (!window.Motion || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  var nav = document.querySelector('nav');
+  function onScroll() { if (nav) nav.classList.toggle('scrolled', window.scrollY > 24); }
+  window.addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
+
+  if (!window.Motion || navigator.webdriver
+      || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
   var animate = Motion.animate, inView = Motion.inView, stagger = Motion.stagger;
   var EASE = [0.22, 1, 0.36, 1];
-  var hero = document.querySelectorAll('[data-hero]');
-  if (hero.length) {
-    hero.forEach(function (el) { el.style.opacity = '0'; el.style.transform = 'translateY(16px)'; });
-    animate(hero, { opacity: 1, transform: 'translateY(0px)' }, { duration: 0.7, delay: stagger(0.09), ease: EASE });
+  var concealed = [];
+  function conceal(el, y) {
+    el.style.opacity = '0';
+    if (y) el.style.transform = 'translateY(' + y + 'px)';
+    concealed.push(el);
   }
+  function revealAll() {
+    concealed.forEach(function (el) { el.style.opacity = ''; el.style.transform = ''; });
+    concealed.length = 0;
+  }
+  window.addEventListener('beforeprint', revealAll);
+  window.addEventListener('pagehide', revealAll);
+  setTimeout(revealAll, 3000);
+
+  /* hero headline: split into lines, rise line by line, then restore markup.
+     Waits for the webfont (600ms cap) so line measurement is correct. */
+  var h1 = document.querySelector('.hero h1[data-hero]');
+  if (h1) {
+    conceal(h1);
+    var fontsReady = (document.fonts && document.fonts.ready)
+      ? Promise.race([document.fonts.ready,
+          new Promise(function (res) { setTimeout(res, 600); })])
+      : Promise.resolve();
+    fontsReady.then(function () {
+      var orig = h1.innerHTML;
+      var words = h1.textContent.trim().split(/\\s+/);
+      h1.innerHTML = words.map(function (w) { return '<span class="w">' + w + '</span>'; }).join(' ');
+      var lines = [], lastTop = null;
+      h1.querySelectorAll('.w').forEach(function (w) {
+        if (w.offsetTop !== lastTop) { lines.push([]); lastTop = w.offsetTop; }
+        lines[lines.length - 1].push(w.textContent);
+      });
+      h1.innerHTML = lines.map(function (ws) {
+        return '<span class="hl"><span class="hl-in">' + ws.join(' ') + '</span></span>';
+      }).join('');
+      var parts = h1.querySelectorAll('.hl-in');
+      parts.forEach(function (el) { el.style.transform = 'translateY(108%)'; });
+      h1.style.opacity = '';
+      animate(parts, { transform: 'translateY(0%)' },
+        { duration: 0.85, delay: stagger(0.1), ease: EASE });
+      setTimeout(function () { h1.innerHTML = orig; }, 1600);
+    });
+  }
+  var heroRest = document.querySelectorAll('[data-hero]:not(h1)');
+  if (heroRest.length) {
+    heroRest.forEach(function (el) { conceal(el, 14); });
+    animate(heroRest, { opacity: 1, transform: 'translateY(0px)' },
+      { duration: 0.7, delay: stagger(0.09, { startDelay: 0.4 }), ease: EASE });
+  }
+
+  /* satellite cards fade in after the copy */
+  var floats = document.querySelectorAll('[data-float]');
+  if (floats.length) {
+    floats.forEach(function (el) { conceal(el); });
+    animate(floats, { opacity: 1 },
+      { duration: 0.9, delay: stagger(0.12, { startDelay: 0.65 }), ease: EASE });
+  }
+
+  /* digest value ticks up once */
+  var tick = document.querySelector('[data-tick]');
+  if (tick) {
+    var target = parseFloat(tick.textContent.replace(/[^0-9.]/g, ''));
+    if (target > 0) {
+      animate(target * 0.985, target, {
+        duration: 1.2, delay: 1, ease: EASE,
+        onUpdate: function (v) { tick.textContent = '$' + Math.round(v).toLocaleString('en-CA'); }
+      });
+    }
+  }
+
+  /* scroll reveals: below-fold only, so nothing above the fold ever hides */
   document.querySelectorAll('[data-reveal]').forEach(function (el) {
-    el.style.opacity = '0'; el.style.transform = 'translateY(18px)';
+    if (el.getBoundingClientRect().top > window.innerHeight * 0.9) conceal(el, 18);
     inView(el, function () {
       animate(el, { opacity: 1, transform: 'translateY(0px)' }, { duration: 0.6, ease: EASE });
     }, { amount: 0.3 });
@@ -306,11 +526,73 @@ document.addEventListener('DOMContentLoaded', function () {
   document.querySelectorAll('[data-reveal-group]').forEach(function (group) {
     var items = group.querySelectorAll('[data-reveal-item]');
     if (!items.length) return;
-    items.forEach(function (el) { el.style.opacity = '0'; el.style.transform = 'translateY(14px)'; });
+    /* data-stagger opts a group into a slower, one-by-one sequence */
+    var gap = parseFloat(group.getAttribute('data-stagger') || '0.08');
+    if (group.getBoundingClientRect().top > window.innerHeight * 0.9) {
+      items.forEach(function (el) { conceal(el, 14); });
+    }
     inView(group, function () {
-      animate(items, { opacity: 1, transform: 'translateY(0px)' }, { duration: 0.55, delay: stagger(0.08), ease: EASE });
-    }, { amount: 0.15 });
+      animate(items, { opacity: 1, transform: 'translateY(0px)' },
+        { duration: gap > 0.2 ? 0.65 : 0.55, delay: stagger(gap), ease: EASE });
+    }, { amount: gap > 0.2 ? 0.35 : 0.15 });
   });
+
+  /* chat demo: conversation plays out on first view */
+  var chat = document.querySelector('[data-chat]');
+  if (chat) {
+    var bubbles = chat.querySelectorAll('.bubble');
+    bubbles.forEach(function (b) { conceal(b, 10); });
+    var played = false;
+    inView(chat, function () {
+      if (played) return; played = true;
+      var i = 0;
+      function next() {
+        if (i >= bubbles.length) return;
+        var b = bubbles[i++];
+        function show() {
+          animate(b, { opacity: 1, transform: 'translateY(0px)' }, { duration: 0.45, ease: EASE });
+          setTimeout(next, b.classList.contains('bot') ? 650 : 450);
+        }
+        if (b.classList.contains('bot')) {
+          var t = document.createElement('div');
+          t.className = 'bubble bot typing';
+          t.innerHTML = '<i></i><i></i><i></i>';
+          t.style.left = b.offsetLeft + 'px';
+          t.style.top = b.offsetTop + 'px';
+          chat.appendChild(t);
+          setTimeout(function () { t.remove(); show(); }, 750);
+        } else show();
+      }
+      next();
+    }, { amount: 0.45 });
+  }
+
+  /* card parallax: pointer only, composes with the float keyframes via
+     the separate `translate` property */
+  if (matchMedia('(pointer: fine)').matches) {
+    var scene = document.querySelector('.hero-scene');
+    if (scene) {
+      var cards = scene.querySelectorAll('.float-card');
+      var tx = 0, ty = 0, cx = 0, cy = 0, raf = 0;
+      function step() {
+        raf = 0;
+        cx += (tx - cx) * 0.08; cy += (ty - cy) * 0.08;
+        cards.forEach(function (el, i) {
+          var d = 7 + i * 4;
+          el.style.translate = (-cx * d) + 'px ' + (-cy * d) + 'px';
+        });
+        if (Math.abs(tx - cx) > 0.002 || Math.abs(ty - cy) > 0.002) {
+          raf = requestAnimationFrame(step);
+        }
+      }
+      scene.addEventListener('pointermove', function (e) {
+        var r = scene.getBoundingClientRect();
+        tx = (e.clientX - r.left) / r.width - 0.5;
+        ty = (e.clientY - r.top) / r.height - 0.5;
+        if (!raf) raf = requestAnimationFrame(step);
+      });
+    }
+  }
 });
 """
 
@@ -376,6 +658,9 @@ def _layout(title: str, description: str, body: str, active: str = "") -> str:
         + "<script>"
         + _REVEAL_JS
         + "</script>\n"
+        + "<script>"
+        + _SCENE_JS
+        + "</script>\n"
         + "</body>\n</html>"
     )
 
@@ -386,121 +671,98 @@ def _layout(title: str, description: str, body: str, active: str = "") -> str:
 
 _HOME_BODY = """
 <section class="hero">
-  <span class="badge" data-hero><span class="badge-dot"></span>Early access · Built in Canada</span>
-  <h1 data-hero>Know what matters to your portfolio before the market opens.</h1>
-  <p class="lead" data-hero>Cirvia is an AI analyst that knows your actual holdings.
-  Connect your brokerage and get a weekday morning digest, macro alerts when
-  the world moves, and clear answers about your positions whenever you ask.</p>
-  <div class="cta-row" data-hero>
-    <a class="btn" href="/app">Get started free</a>
-    <a class="btn ghost" href="#how">See how it works</a>
+  <div class="hero-copy">
+    <h1 data-hero>Know what matters before the market opens.</h1>
+    <p class="lead" data-hero>Your holdings. Your brief. Every morning.</p>
+    <div class="cta-row" data-hero>
+      <a class="btn lg" href="/app">Get started free</a>
+      <a class="quiet" href="#how">See how it works</a>
+    </div>
   </div>
-  <div class="stage" data-hero aria-hidden="true">
-    <div class="mock-glow"></div>
-    <div class="mock-panel">
+  <div class="hero-scene">
+    <div class="hero-stars" aria-hidden="true"></div>
+    <div class="hero-orb" aria-hidden="true"></div>
+    <canvas id="aurora" aria-hidden="true"></canvas>
+    <div class="float-card fc-chat" data-float aria-hidden="true">
+      <p class="fc-q">&ldquo;Why is ENB down today?&rdquo;</p>
+      <p class="fc-a">Crude fell after OPEC+ output news. ENB is your third-largest holding.</p>
+    </div>
+    <div class="float-card fc-digest" data-float aria-hidden="true">
       <div class="mock-top"><span class="mock-dot"></span>Morning digest
-        <span class="mock-date">Tue, Jul 7 · 7:45</span></div>
+        <span class="mock-date">7:45 AM</span></div>
+      <div class="mock-val"><span class="v" data-tick>$48,214</span>
+        <span class="d gain">+1.2% today</span></div>
       <div class="mock-row"><span class="t">VFV</span>
-        <span class="n">Vanguard S&amp;P 500 Index ETF</span>
+        <span class="n">S&amp;P 500 ETF</span>
         <span class="chg gain">+0.8%</span></div>
       <div class="mock-row"><span class="t">NVDA</span>
-        <span class="n">NVIDIA Corporation</span>
+        <span class="n">NVIDIA</span>
         <span class="chg gain">+2.1%</span></div>
       <div class="mock-row"><span class="t">ENB</span>
-        <span class="n">Enbridge Inc.</span>
+        <span class="n">Enbridge</span>
         <span class="chg loss">&minus;1.2%</span></div>
-      <p class="mock-sum">Futures point higher after the Fed held rates steady.
-      Energy trades soft ahead of OPEC output talks, which touches your ENB
-      position. Nothing in your book reports earnings today.</p>
     </div>
-    <div class="float-card fc-total">
-      <span class="fc-k">Portfolio value</span>
-      <span class="fc-v">$48,214</span>
-      <span class="fc-d gain">+1.2% today</span>
-    </div>
-    <div class="float-card fc-alert">
+    <div class="float-card fc-alert" data-float aria-hidden="true">
       <span class="mock-alert-k">Macro alert</span>
-      <p class="fc-a">OPEC+ signals a supply increase for August. Crude is down 3%
-      pre-market; relevant to ENB and SU in your portfolio.</p>
-    </div>
-    <div class="float-card fc-chat">
-      <p class="fc-q">&ldquo;Why is ENB down today?&rdquo;</p>
-      <p class="fc-a">Crude fell 3% after OPEC+ signalled higher output. ENB is your
-      third-largest holding&hellip;</p>
+      <p class="fc-a">OPEC+ signals higher output. Crude down 3%; touches ENB and SU.</p>
     </div>
   </div>
 </section>
 
 <section id="features">
-  <h2 data-reveal>Signal, not noise, mapped to what you own.</h2>
-  <div class="ledger" data-reveal-group>
+  <h2 data-reveal>Signal, not noise.</h2>
+  <div class="ledger" data-reveal-group data-stagger="0.45">
     <div class="ledger-row" data-reveal-item>
       <h3>Morning digest</h3>
-      <p>A weekday brief tailored to your tickers: overnight moves, what changed,
-      and what to watch, written in plain language.</p>
+      <p>Overnight moves, what changed, and what to watch, written for your tickers.</p>
       <span class="meta">Weekdays, your time</span>
     </div>
     <div class="ledger-row" data-reveal-item>
       <h3>Macro alerts</h3>
-      <p>Fed decisions, energy shocks, geopolitics, and regulation, surfaced only
-      when they plausibly touch your holdings.</p>
+      <p>Fed decisions, energy shocks, geopolitics. Only when they touch your holdings.</p>
       <span class="meta">As it happens</span>
     </div>
     <div class="ledger-row" data-reveal-item>
       <h3>On-demand answers</h3>
-      <p>Ask anything about your book: news, performance, drawdowns, context.
-      Every answer is grounded in your actual positions.</p>
+      <p>News, performance, drawdowns. Every answer grounded in your actual positions.</p>
       <span class="meta">Any time</span>
     </div>
     <div class="ledger-row" data-reveal-item>
       <h3>Automatic sync</h3>
-      <p>Your TFSA, RRSP, and taxable accounts stay current through a secure,
-      read-only brokerage connection.</p>
+      <p>TFSA, RRSP, and taxable accounts stay current over a read-only connection.</p>
       <span class="meta">Continuous</span>
     </div>
   </div>
 </section>
 
 <section id="showcase">
-  <h2 data-reveal>Ask about your book. Get grounded answers.</h2>
-  <p class="sect-lead" data-reveal>Not generic market takes. Every answer starts
-  from the positions you actually hold.</p>
-  <div class="show-grid" data-reveal-group>
-    <div class="show-panel" data-reveal-item aria-hidden="true">
-      <div class="mock-top"><span class="mock-dot"></span>Chat</div>
-      <div class="bubble user">Why is ENB down today?</div>
-      <div class="bubble bot">Crude fell 3% after OPEC+ signalled higher August
-      output. ENB is your third-largest holding; pipelines are less exposed to
-      crude prices than producers, but sentiment is dragging the whole sector.</div>
-      <div class="bubble user">Anything to watch in my book this week?</div>
-      <div class="bubble bot">Two things: NVDA reports earnings Wednesday after
-      close, and the Bank of Canada rate decision lands Thursday morning, which
-      touches your rate-sensitive holdings.</div>
-    </div>
-    <div data-reveal-item>
-      <div class="show-panel alert-demo" aria-hidden="true">
-        <span class="mock-alert-k">Macro alert · High</span>
-        <p class="head-line">Fed holds rates, signals one cut this year.</p>
-        <p>Rate-sensitive names in your book: T.TO, BCE.TO. Bond-proxy sectors
-        typically firm on this news.</p>
-      </div>
-      <p class="show-note">Alerts arrive only when an event plausibly touches your
-      holdings. No noise, no spam, no generic headlines.</p>
-    </div>
+  <h2 data-reveal>Ask about your book.</h2>
+  <p class="sect-lead" data-reveal>Every answer starts from the positions you
+  actually hold.</p>
+  <div class="show-panel chat-demo" data-chat aria-hidden="true">
+    <div class="mock-top"><span class="mock-dot"></span>Chat</div>
+    <div class="bubble user">Why is ENB down today?</div>
+    <div class="bubble bot">Crude fell 3% after OPEC+ signalled higher August
+    output. ENB is your third-largest holding; pipelines are less exposed than
+    producers, but sentiment is dragging the sector.</div>
+    <div class="bubble user">Anything to watch this week?</div>
+    <div class="bubble bot">Two things: NVDA reports earnings Wednesday after
+    close, and the Bank of Canada rate decision lands Thursday morning.</div>
   </div>
 </section>
 
 <section id="how">
-  <h2 data-reveal>Three steps. Your brokerage password never leaves your bank.</h2>
+  <h2 data-reveal>Connected in three minutes.</h2>
   <div class="steps" data-reveal-group>
-    <div class="step" data-reveal-item><div class="num"></div><div><h3>Connect Wealthsimple</h3>
-    <p>Link your account through SnapTrade's secure Connection Portal. Cirvia never sees
-    or stores your brokerage login.</p></div></div>
+    <div class="step" data-reveal-item><div class="num"></div><div><h3>Connect your brokerage</h3>
+    <p>Link through SnapTrade's secure portal. Cirvia never sees or stores your
+    brokerage login.</p></div></div>
     <div class="step" data-reveal-item><div class="num"></div><div><h3>We read your holdings</h3>
-    <p>Read-only access syncs your positions and balances. Cirvia can never place a trade
+    <p>Read-only access syncs positions and balances. Cirvia can never place a trade
     or move money.</p></div></div>
     <div class="step" data-reveal-item><div class="num"></div><div><h3>Get informed, daily</h3>
-    <p>Receive your morning digest and macro alerts, and ask questions whenever you like.</p></div></div>
+    <p>Your digest each weekday morning, alerts when the world moves, answers when
+    you ask.</p></div></div>
   </div>
 </section>
 
@@ -539,13 +801,11 @@ _HOME_BODY = """
   </div>
 </section>
 
-<section>
-  <div class="cta-band" data-reveal>
-    <h2>Know your portfolio by 7:45.</h2>
-    <p>Start free. Connect Wealthsimple in under three minutes.</p>
-    <a class="btn" href="/app">Get started free</a>
-  </div>
-</section>
+<div class="cta-final" data-reveal>
+  <h2>Know your portfolio by 7:45.</h2>
+  <p>Start free. Connected in under three minutes.</p>
+  <a class="btn lg" href="/app">Get started free</a>
+</div>
 """
 
 # --------------------------------------------------------------------------
@@ -554,9 +814,11 @@ _HOME_BODY = """
 
 _CONTACT_BODY = f"""
 <section class="hero" style="padding-bottom:0;">
-  <h1 data-hero>Get in touch</h1>
-  <p class="lead" data-hero>Questions, support, privacy inquiries, or partnerships.
-  We read everything.</p>
+  <div class="hero-copy">
+    <h1 data-hero>Get in touch</h1>
+    <p class="lead" data-hero>Questions, support, privacy inquiries, or partnerships.
+    We read everything.</p>
+  </div>
 </section>
 
 <div class="contact-card" data-hero>
@@ -874,9 +1136,11 @@ _TERMS_BODY = f"""
 
 _PRICING_BODY = f"""
 <section class="hero" style="padding-bottom:0;">
-  <h1 data-hero>Start free. Go Pro when you're ready.</h1>
-  <p class="lead" data-hero>Read-only, informational, and built for individual investors.
-  Your brokerage password never leaves your bank, on any plan.</p>
+  <div class="hero-copy">
+    <h1 data-hero>Start free. Go Pro when you're ready.</h1>
+    <p class="lead" data-hero>Read-only on every plan. Your brokerage password
+    never leaves your bank.</p>
+  </div>
 </section>
 
 <section style="padding-top:0;">
@@ -925,13 +1189,11 @@ _PRICING_BODY = f"""
   </div>
 </section>
 
-<section>
-  <div class="cta-band" data-reveal>
-    <h2>Ready when you are.</h2>
-    <p>Connect Wealthsimple in under three minutes. Start free, upgrade any time.</p>
-    <a class="btn" href="/app">Get started free</a>
-  </div>
-</section>
+<div class="cta-final" data-reveal>
+  <h2>Ready when you are.</h2>
+  <p>Start free. Upgrade any time.</p>
+  <a class="btn lg" href="/app">Get started free</a>
+</div>
 """
 
 

@@ -54,9 +54,17 @@ def _as_decimal(value: Any) -> Decimal | None:
     return qty
 
 
+# Unified-positions instrument kinds our ticker-based schema can't represent.
+UNSUPPORTED_KINDS = frozenset({"option", "future", "cfd"})
+
+
 def extract_yahoo_ticker(position: dict[str, Any]) -> str | None:
     """Extract the Yahoo-format ticker from a SnapTrade position payload."""
-    ticker = _dig(position, "symbol", "symbol", "symbol")
+    # Unified positions endpoint: {"instrument": {"symbol": "NVDA", ...}}
+    ticker = _dig(position, "instrument", "symbol")
+    # Legacy positions endpoint: nested symbol objects.
+    if not ticker:
+        ticker = _dig(position, "symbol", "symbol", "symbol")
     if not ticker:
         ticker = _dig(position, "symbol", "symbol")
     if not ticker:
@@ -69,7 +77,12 @@ def extract_yahoo_ticker(position: dict[str, Any]) -> str | None:
 
 
 def extract_currency(position: dict[str, Any]) -> str:
-    code = _dig(position, "currency", "code")
+    # Unified positions endpoint: flat currency code string.
+    code = position.get("currency")
+    if isinstance(code, dict):  # legacy: {"currency": {"code": "CAD"}}
+        code = code.get("code")
+    if not code:
+        code = _dig(position, "instrument", "currency")
     if not code:
         code = _dig(position, "symbol", "symbol", "currency", "code")
     return str(code or "CAD").upper()
@@ -80,6 +93,10 @@ def map_position(position: dict[str, Any], *, account: str) -> MappedPosition | 
     if account not in VALID_ACCOUNTS:
         return None
 
+    kind = _dig(position, "instrument", "kind")
+    if kind in UNSUPPORTED_KINDS:
+        return None
+
     ticker = extract_yahoo_ticker(position)
     if not ticker:
         return None
@@ -88,7 +105,11 @@ def map_position(position: dict[str, Any], *, account: str) -> MappedPosition | 
     if units is None or units == 0:
         return None
 
-    avg_cost = _as_decimal(position.get("average_purchase_price"))
+    # Unified endpoint reports per-unit cost as ``cost_basis``; the legacy
+    # endpoint called the same value ``average_purchase_price``.
+    avg_cost = _as_decimal(position.get("cost_basis"))
+    if avg_cost is None:
+        avg_cost = _as_decimal(position.get("average_purchase_price"))
     if avg_cost is None:
         # Fall back to market price so the row is still usable.
         avg_cost = _as_decimal(position.get("price"))

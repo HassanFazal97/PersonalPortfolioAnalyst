@@ -34,6 +34,20 @@ def test_app_pages_render_without_token(client, path):
     assert "supabase-js" in resp.text  # CDN script tag
 
 
+def test_dashboard_has_news_sections(client):
+    resp = client.get("/app/dashboard")
+    assert resp.status_code == 200
+    assert 'id="general-news"' in resp.text
+    assert 'id="holding-news"' in resp.text
+    assert 'id="watchlist-card"' in resp.text
+
+
+def test_onboarding_has_watchlist_panel(client):
+    resp = client.get("/app/onboarding")
+    assert resp.status_code == 200
+    assert 'id="panel-watchlist"' in resp.text
+
+
 def test_app_pages_noindex(client):
     resp = client.get("/app")
     assert '<meta name="robots" content="noindex">' in resp.text

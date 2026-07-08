@@ -1,5 +1,6 @@
 import uuid
 
+import pytest
 from fastapi.testclient import TestClient
 
 import app.main as main
@@ -72,3 +73,50 @@ def test_get_portfolio(monkeypatch):
     resp = _client(monkeypatch, FakeRepo()).get("/portfolio", headers=_AUTH)
     assert resp.status_code == 200
     assert resp.json()["positions"][0]["ticker"] == "NVDA"
+
+
+@pytest.mark.asyncio
+async def test_patch_digest_tickers_validates_count(monkeypatch):
+    uid = uuid.uuid4()
+    repo = FakeRepo()
+    repo.seed_user(uid, plan="free")
+    await repo.upsert_position(
+        ticker="A", quantity=1, avg_cost=1, currency="CAD", account="TFSA", user_id=uid
+    )
+    await repo.upsert_position(
+        ticker="B", quantity=1, avg_cost=1, currency="CAD", account="TFSA", user_id=uid
+    )
+    await repo.upsert_position(
+        ticker="C", quantity=1, avg_cost=1, currency="CAD", account="TFSA", user_id=uid
+    )
+    await repo.upsert_position(
+        ticker="D", quantity=1, avg_cost=1, currency="CAD", account="TFSA", user_id=uid
+    )
+    # Patch _user_id to return free user — use service token path won't work.
+    # Instead test validation via direct call pattern: owner is pro so clears tickers.
+    # Seed owner with free plan override for this test.
+    repo.seed_user(_OWNER, plan="free", digest_tickers=["A", "B"])
+    client = _client(monkeypatch, repo)
+    resp = client.patch(
+        "/me",
+        headers=_AUTH,
+        json={"digest_tickers": ["A", "B", "C", "D"]},
+    )
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_patch_digest_tickers_must_own(monkeypatch):
+    repo = FakeRepo()
+    repo.seed_user(_OWNER, plan="free")
+    await repo.upsert_position(
+        ticker="A", quantity=1, avg_cost=1, currency="CAD", account="TFSA", user_id=_OWNER
+    )
+    client = _client(monkeypatch, repo)
+    resp = client.patch(
+        "/me",
+        headers=_AUTH,
+        json={"digest_tickers": ["ZZZZ"]},
+    )
+    assert resp.status_code == 400
+

@@ -17,7 +17,32 @@ def _position(
     units: float = 10,
     avg_cost: float = 45.5,
     currency: str = "CAD",
+    kind: str = "stock",
 ) -> dict:
+    """Unified positions endpoint shape (GET /accounts/{id}/positions/all)."""
+    return {
+        "instrument": {
+            "kind": kind,
+            "symbol": ticker,
+            "raw_symbol": ticker,
+            "currency": currency,
+            "exchange": "XTSE",
+        },
+        "units": str(units),
+        "price": "50.00",
+        "cost_basis": str(avg_cost),
+        "currency": currency,
+    }
+
+
+def _legacy_position(
+    *,
+    ticker: str = "SHOP.TO",
+    units: float = 10,
+    avg_cost: float = 45.5,
+    currency: str = "CAD",
+) -> dict:
+    """Deprecated positions endpoint shape (GET /accounts/{id}/positions)."""
     return {
         "symbol": {
             "symbol": {
@@ -68,6 +93,30 @@ def test_map_position_maps_fields():
     assert row.avg_cost == Decimal("45.5")
     assert row.currency == "CAD"
     assert row.account == "TFSA"
+
+
+def test_map_position_legacy_shape():
+    row = map_position(_legacy_position(), account="TFSA")
+    assert row is not None
+    assert row.ticker == "SHOP.TO"
+    assert row.quantity == Decimal("10")
+    assert row.avg_cost == Decimal("45.5")
+    assert row.currency == "CAD"
+
+
+def test_map_position_skips_derivatives():
+    assert map_position(_position(kind="option"), account="TFSA") is None
+    assert map_position(_position(kind="future"), account="TFSA") is None
+    assert map_position(_position(kind="cfd"), account="TFSA") is None
+    assert map_position(_position(kind="crypto"), account="TFSA") is not None
+
+
+def test_map_position_falls_back_to_price_without_cost_basis():
+    pos = _position()
+    del pos["cost_basis"]
+    row = map_position(pos, account="TFSA")
+    assert row is not None
+    assert row.avg_cost == Decimal("50.00")
 
 
 def test_map_account_positions_batch():

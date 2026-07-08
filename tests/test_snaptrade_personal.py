@@ -40,6 +40,7 @@ def test_is_personal_key_mode_auto_without_secret():
         SNAPTRADE_CLIENT_ID="x",
         SNAPTRADE_CONSUMER_KEY="y",
         SNAPTRADE_USER_SECRET="",
+        SNAPTRADE_AUTH_MODE="auto",
     )
     assert is_personal_key_mode(settings) is True
 

@@ -59,7 +59,7 @@ newspaper-lineage grotesque; fits the "morning brief" brand without the
 saturated defaults (Inter / Space Grotesk / etc.). Weight contrast carries
 hierarchy. Numbers in data displays use `font-variant-numeric: tabular-nums`.
 
-- Marketing scale (fluid): h1 `clamp(2.4rem, 6vw, 4rem)` w800 ls-0.03em;
+- Marketing scale (fluid): h1 `clamp(2.5rem, 6vw, 4.4rem)` w800 ls-0.035em;
   h2 `clamp(1.6rem, 3.4vw, 2.2rem)` w700 ls-0.02em; lead 1.2rem; body 1rem.
 - App scale (fixed rem, ratio ≈1.2): h1 1.5rem w700; h2 1.25rem w650;
   h3 1.05rem w600; body 0.95rem; caption 0.8rem.
@@ -68,7 +68,10 @@ hierarchy. Numbers in data displays use `font-variant-numeric: tabular-nums`.
 ## Spacing / radius / z
 
 - Spacing: 4px base. Section padding `clamp(4rem, 9vw, 7rem)` on marketing;
-  1.5rem panel padding in app.
+  1.5rem panel padding in app (1.15-1.3rem on the denser dashboard).
+- Dashboard shell: 1400px wrap, `minmax(0,1fr) + 380px` grid; main work
+  column (holdings, news) + sticky utility rail (chat, watchlist, delivery);
+  collapses to one column under 1080px.
 - Radius: `--r-s: 8px`, `--r-m: 12px`, `--r-l: 18px`, pill `999px`.
 - Z scale: nav 10, dropdown 20, modal-backdrop 30, modal 40, toast 50.
 
@@ -76,15 +79,28 @@ hierarchy. Numbers in data displays use `font-variant-numeric: tabular-nums`.
 
 Engine: `motion` (framer-motion's vanilla build) from jsDelivr, global
 `Motion`. Ease: `[0.22, 1, 0.36, 1]` (ease-out-quint family). No bounce.
-All motion behind a `prefers-reduced-motion` check; content is visible by
-default and JS hides-then-reveals, so no-JS renders complete.
+Gates (all in `_REVEAL_JS`): `prefers-reduced-motion`, `navigator.webdriver`
+(headless/bots get the complete static page), and `beforeprint` force-reveals
+anything still concealed. Content is visible by default and JS hides only
+below-fold elements right before animating, so no-JS renders complete.
 
-- **Brand:** one hero entrance (staggered rise, 0.7s), `inView` scroll reveals
-  (0.6s rise) on section content, stagger (80ms) inside row/card groups,
-  120ms transform on CTA hover (CSS).
+- **Brand:** orchestrated hero entrance (headline rises per line inside
+  overflow-hidden spans after `document.fonts.ready`, then lead/CTA, then
+  satellite cards, ~1.2s total); digest value tick-up; `inView` scroll reveals
+  (0.6s rise) with 80ms stagger inside groups; chat demo bubbles play in
+  sequence with a typing indicator; pointer parallax on hero cards (via the
+  `translate` property so it composes with float keyframes); 120ms CTA hover.
+- **Hero aurora (`_SCENE_JS`):** raw WebGL1 fragment shader on `#aurora`,
+  four sine ribbons contouring a centered gaussian "silk hill" with fbm wobble
+  and sheen, premultiplied alpha over the CSS `.hero-orb` gradient (which is
+  the no-JS / no-WebGL / reduced-motion fallback). DPR capped 1.5, rendered at
+  0.6 scale, rAF paused when offscreen or tab hidden.
 - **Product:** 150–250ms state transitions only. Skeleton shimmer for loading,
   onboarding panel crossfade/slide 220ms, holdings row stagger 40ms on first
   load. No page-load choreography.
+
+Nav is transparent at top and gains blurred surface + hairline past 24px
+scroll (`nav.scrolled`, toggled by a passive scroll listener).
 
 ## Components
 

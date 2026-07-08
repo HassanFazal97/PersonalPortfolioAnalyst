@@ -134,7 +134,8 @@ class PersonalSnapTradeClient:
             raise
 
     def get_account_positions(self, account_id: str) -> list[dict[str, Any]]:
-        data = self._request("GET", f"/accounts/{account_id}/positions")
-        if not isinstance(data, list):
+        data = self._request("GET", f"/accounts/{account_id}/positions/all")
+        results = data.get("results") if isinstance(data, dict) else None
+        if results is None:
             raise PersonalSnapTradeError(f"Unexpected positions response: {data!r}")
-        return [p for p in data if isinstance(p, dict)]
+        return [p for p in results if isinstance(p, dict)]

@@ -28,10 +28,11 @@ async def test_sync_wealthsimple_positions_upserts_and_prunes(monkeypatch):
         "account_category": "INVESTMENT",
     }
     position = {
-        "symbol": {"symbol": {"symbol": "NVDA", "currency": {"code": "USD"}}},
-        "units": 5,
-        "average_purchase_price": 100,
-        "currency": {"code": "USD"},
+        "instrument": {"kind": "stock", "symbol": "NVDA", "currency": "USD"},
+        "units": "5",
+        "price": "110",
+        "cost_basis": "100",
+        "currency": "USD",
     }
 
     mock_service = MagicMock()

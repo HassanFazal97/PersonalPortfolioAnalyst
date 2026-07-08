@@ -108,8 +108,20 @@ class Settings(BaseSettings):
     digest_cron: str = Field(default="45 7 * * 1-5", alias="DIGEST_CRON")
     tz: str = Field(default="America/Toronto", alias="TZ")
 
-    # Phase B: the user's own number the Mac worker texts.
-    imessage_recipient: str = Field(default="", alias="IMESSAGE_RECIPIENT")
+    # ---- Multi-channel delivery (dispatcher + provider adapters) ----------
+    # How often the dispatcher drains the outbound queue. 0 disables it.
+    delivery_interval_seconds: int = Field(default=30, alias="DELIVERY_INTERVAL_SECONDS")
+    delivery_max_attempts: int = Field(default=5, alias="DELIVERY_MAX_ATTEMPTS")
+    # Public origin of this deployment (no trailing slash) — required for
+    # validating Twilio webhook signatures, e.g. https://app.example.com
+    public_base_url: str = Field(default="", alias="PUBLIC_BASE_URL")
+    # Twilio SMS. All three must be set for the sms channel to exist.
+    twilio_account_sid: str = Field(default="", alias="TWILIO_ACCOUNT_SID")
+    twilio_auth_token: str = Field(default="", alias="TWILIO_AUTH_TOKEN")
+    twilio_from_number: str = Field(default="", alias="TWILIO_FROM_NUMBER")
+    # Resend email. Both must be set for the email channel to exist.
+    resend_api_key: str = Field(default="", alias="RESEND_API_KEY")
+    email_from: str = Field(default="", alias="EMAIL_FROM")  # "Name <digest@domain>"
 
     # SnapTrade — Wealthsimple portfolio sync (https://snaptrade.com).
     snaptrade_client_id: str = Field(default="", alias="SNAPTRADE_CLIENT_ID")

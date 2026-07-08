@@ -166,7 +166,9 @@ async def test_free_plan_caps_holdings_in_market_context(monkeypatch):
     monkeypatch.setattr(dp.market, "get_price_history", AsyncMock(return_value={"period_return_pct": 1.0}))
 
     ctx = ToolContext(settings=get_settings(), repo=repo, user_id=uid)
-    raw = await dp.build_market_context(ctx, tz="America/Toronto", max_holdings=3)
+    raw = await dp.build_market_context(
+        ctx, tz="America/Toronto", plan="free", digest_tickers=[]
+    )
     import json
 
     data = json.loads(raw)

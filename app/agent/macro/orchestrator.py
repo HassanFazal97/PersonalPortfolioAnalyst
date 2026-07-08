@@ -292,7 +292,12 @@ async def _deliver_alerts(
         if alert_id is None:
             continue
         message = format_alert_message(alert)
-        await db.enqueue_outbound(message, user_id=user_id)
+        await db.enqueue_outbound(
+            message,
+            user_id=user_id,
+            kind="alert",
+            subject=f"Portfolio alert: {alert['headline'][:80]}",
+        )
         await db.mark_alert_delivered(alert_id)
         delivered.append({**alert, "id": str(alert_id)})
     return delivered

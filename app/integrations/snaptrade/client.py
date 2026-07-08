@@ -145,15 +145,16 @@ class _CommercialBackend:
             raise
 
     def get_account_positions(self, account_id: str) -> list[dict[str, Any]]:
-        response = self._client.account_information.get_user_account_positions(
+        response = self._client.account_information.get_all_account_positions(
             account_id=account_id,
             user_id=self.user_id,
             user_secret=self.user_secret,
         )
-        body = _require_ok(response, action="get_user_account_positions")
-        if not isinstance(body, list):
+        body = _require_ok(response, action="get_all_account_positions")
+        results = body.get("results") if isinstance(body, dict) else None
+        if results is None:
             raise SnapTradeError(f"Unexpected positions response: {body!r}")
-        return [p for p in body if isinstance(p, dict)]
+        return [p for p in results if isinstance(p, dict)]
 
 
 def is_personal_key_mode(settings: Settings) -> bool:

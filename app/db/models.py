@@ -68,6 +68,55 @@ class User(Base):
     digest_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("true")
     )
+    # 'sms' | 'email' | 'discord' | NULL = none chosen (delivery skipped).
+    preferred_channel: Mapped[str | None] = mapped_column(Text)
+    # Free-tier ordered watchlist for digest news coverage (max 3 tickers).
+    digest_tickers: Mapped[list] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'")
+    )
+    created_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class NotificationChannel(Base):
+    """A user's registered destination for one channel (migration 007)."""
+
+    __tablename__ = "notification_channels"
+    __table_args__ = (UniqueConstraint("user_id", "channel"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    user_id: Mapped[uuid.UUID] = _user_id_column()
+    channel: Mapped[str] = mapped_column(Text, nullable=False)
+    destination: Mapped[str] = mapped_column(Text, nullable=False)
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    consent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    opted_out_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class VerificationCode(Base):
+    """One-time destination-ownership code, hashed at rest (migration 007)."""
+
+    __tablename__ = "verification_codes"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    user_id: Mapped[uuid.UUID] = _user_id_column()
+    channel: Mapped[str] = mapped_column(Text, nullable=False)
+    destination: Mapped[str] = mapped_column(Text, nullable=False)
+    code_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -199,8 +248,18 @@ class OutboundMessage(Base):
     )
     user_id: Mapped[uuid.UUID] = _user_id_column()
     body: Mapped[str] = mapped_column(Text, nullable=False)
+    # queued | sent | failed | skipped (no verified channel at enqueue time)
     status: Mapped[str] = mapped_column(Text, nullable=False, default="queued")
     attempts: Mapped[int | None] = mapped_column(Integer, default=0)
+    # sms | email | discord; resolved at enqueue time (NULL on skipped rows).
+    channel: Mapped[str | None] = mapped_column(Text)
+    destination: Mapped[str | None] = mapped_column(Text)
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'"))
+    last_error: Mapped[str | None] = mapped_column(Text)
+    next_attempt_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    provider_message_id: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -242,6 +301,31 @@ class Alert(Base):
     fingerprint: Mapped[str] = mapped_column(Text, nullable=False)
     delivered: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class NewsItem(Base):
+    """Holding-specific news articles surfaced during digest runs."""
+
+    __tablename__ = "news_items"
+    __table_args__ = (UniqueConstraint("user_id", "fingerprint"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    user_id: Mapped[uuid.UUID] = _user_id_column()
+    ticker: Mapped[str] = mapped_column(Text, nullable=False)
+    headline: Mapped[str] = mapped_column(Text, nullable=False)
+    source: Mapped[str | None] = mapped_column(Text)
+    url: Mapped[str | None] = mapped_column(Text)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    summary: Mapped[str | None] = mapped_column(Text)
+    run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("agent_runs.id")
+    )
+    fingerprint: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

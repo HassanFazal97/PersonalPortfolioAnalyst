@@ -14,6 +14,11 @@ from app.landing import _CSS, _FONT_LINKS, CONTACT_EMAIL, MOTION_CDN
 
 _APP_CSS = """
 /* app register: fixed rem type scale, quieter headings, denser rhythm */
+/* app nav is always opaque (the marketing nav is transparent until scroll) */
+nav {
+  background: oklch(13% 0.014 300 / 0.9); backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px); border-bottom: 1px solid var(--line);
+}
 .app-wrap { max-width: 880px; margin: 0 auto; padding: 2.25rem 1.5rem 4rem; }
 .app-wrap h1 { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.015em;
   line-height: 1.25; max-width: none; margin: 0; }
@@ -60,7 +65,8 @@ _APP_CSS = """
 }
 label { display: block; font-size: 0.84rem; font-weight: 600; color: var(--ink-3);
   margin: 0.9rem 0 0.3rem; }
-input[type=email], input[type=password], input[type=time], select {
+input[type=email], input[type=password], input[type=time], input[type=tel],
+input[type=url], input[type=text], select {
   width: 100%; padding: 0.65rem 0.8rem; border-radius: var(--r-s);
   border: 1px solid var(--line); background: var(--surface-2); color: var(--ink);
   font-family: var(--font); font-size: 0.95rem; outline: none;
@@ -122,12 +128,21 @@ input:focus, select:focus { border-color: var(--accent-hover); }
 .skl.short { width: 55%; }
 @keyframes skl-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
 @media (prefers-reduced-motion: reduce) { .skl { animation: none; opacity: 0.7; } }
-/* dashboard */
-.dash-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
-@media (max-width: 700px) { .dash-grid { grid-template-columns: 1fr; } }
+/* dashboard: wide two-column shell, main work column + sticky utility rail */
+.dash-wrap { max-width: 1400px; padding-top: 1.5rem; }
+.dash-wrap .topbar { margin-bottom: 1.1rem; }
+.dash-layout { display: grid; grid-template-columns: minmax(0, 1fr) 380px;
+  gap: 1rem; align-items: start; }
+.dash-main { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
+.dash-rail { position: sticky; top: 4.4rem;
+  display: flex; flex-direction: column; gap: 1rem; }
+@media (max-width: 1080px) {
+  .dash-layout { grid-template-columns: 1fr; }
+  .dash-rail { position: static; }
+}
 .dash-card { background: var(--surface-1); border: 1px solid var(--line);
-  border-radius: var(--r-l); padding: 1.4rem 1.5rem; }
-.dash-card.wide { grid-column: 1 / -1; }
+  border-radius: var(--r-l); padding: 1.15rem 1.3rem 1.25rem; }
+.dash-rail .chat-log { max-height: min(48vh, 440px); }
 .dash-card h3 { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; }
 .dash-card h3 .tag { font-size: 0.8rem; font-weight: 600; color: var(--ink-3);
   font-variant-numeric: tabular-nums; }
@@ -165,6 +180,51 @@ tr:last-child td { border-bottom: none; }
   font-family: var(--font); font-size: 0.9rem; padding: 0; }
 .link-btn:hover { text-decoration: underline; }
 .muted-note { color: var(--ink-3); font-size: 0.88rem; margin-top: 0.75rem; }
+/* delivery channel picker (onboarding step 4 + dashboard card) */
+.channel-options { display: flex; gap: 0.5rem; margin-top: 0.35rem; flex-wrap: wrap; }
+.channel-opt { flex: 1; min-width: 108px; padding: 0.6rem 0.75rem; border-radius: var(--r-s);
+  border: 1px solid var(--line); background: var(--surface-2); cursor: pointer;
+  font-size: 0.9rem; font-weight: 600; color: var(--ink-2); text-align: center;
+  transition: border-color 0.15s var(--ease), background 0.15s var(--ease); }
+.channel-opt.selected { border-color: var(--accent); color: var(--ink);
+  background: oklch(30% 0.1 295 / 0.35); }
+.consent-row { display: flex; gap: 0.6rem; align-items: flex-start; margin-top: 1rem;
+  font-size: 0.82rem; color: var(--ink-3); font-weight: 500; cursor: pointer; }
+.consent-row input { margin-top: 0.2rem; }
+.chip-ok { color: var(--gain); font-size: 0.8rem; font-weight: 600; }
+.chip-warn { color: var(--warn); font-size: 0.8rem; font-weight: 600; }
+/* holdings + news dashboard */
+.holdings-row { cursor: pointer; transition: background 0.15s var(--ease); }
+.holdings-row:hover { background: var(--surface-2); }
+.holdings-row.selected { background: oklch(30% 0.1 295 / 0.35); }
+.watchlist-badge { font-size: 0.68rem; font-weight: 650; color: var(--accent-text);
+  border: 1px solid var(--accent); border-radius: 999px; padding: 0.1rem 0.45rem;
+  margin-left: 0.4rem; vertical-align: middle; }
+.filters-row { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 1rem 0 0.75rem;
+  align-items: center; }
+.filters-row label { margin: 0; font-size: 0.78rem; }
+.filters-row select { width: auto; min-width: 7rem; padding: 0.45rem 0.6rem;
+  font-size: 0.85rem; }
+.news-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+@media (max-width: 800px) { .news-grid { grid-template-columns: 1fr; } }
+.news-feed { max-height: 420px; overflow-y: auto; margin-top: 0.75rem; }
+.news-item { padding: 0.85rem 0; border-bottom: 1px solid var(--line); }
+.news-item:last-child { border-bottom: none; }
+.news-item .head { font-weight: 650; font-size: 0.95rem; color: var(--ink); line-height: 1.4; }
+.news-item .body { color: var(--ink-2); font-size: 0.88rem; margin-top: 0.35rem;
+  line-height: 1.55; white-space: pre-wrap; }
+.news-item .meta { color: var(--ink-3); font-size: 0.78rem; margin-top: 0.25rem; }
+.news-item a { color: var(--accent-text); }
+.watchlist-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 0.5rem; margin: 0.75rem 0; }
+.watchlist-opt { padding: 0.65rem 0.75rem; border-radius: var(--r-s);
+  border: 1px solid var(--line); background: var(--surface-2); cursor: pointer;
+  font-size: 0.9rem; font-weight: 600; text-align: center;
+  transition: border-color 0.15s var(--ease), background 0.15s var(--ease); }
+.watchlist-opt.selected { border-color: var(--accent);
+  background: oklch(30% 0.1 295 / 0.35); color: var(--ink); }
+.refresh-row { display: flex; align-items: center; gap: 0.75rem; }
+.updated-at { color: var(--ink-3); font-size: 0.82rem; }
 """
 
 _SHELL_JS = """
@@ -377,7 +437,187 @@ riseIn(document.querySelector('.auth-form'), 0.28);
 
 
 # --------------------------------------------------------------------------
-# /app/onboarding — connect brokerage -> sync -> preferences
+# Shared delivery-channel picker (onboarding step 4 + dashboard settings card)
+# --------------------------------------------------------------------------
+
+_DELIVERY_PICKER_HTML = """
+<div id="delivery-picker">
+  <label>Notification method</label>
+  <div class="channel-options" id="channel-options"></div>
+  <div id="dest-block" style="display:none;">
+    <label id="dest-label" for="dest-input">Destination</label>
+    <input id="dest-input" type="text">
+    <p class="muted-note" id="dest-help" style="margin-top:0.4rem;"></p>
+    <label class="consent-row" id="consent-row" style="display:none;">
+      <input type="checkbox" id="consent-check">
+      <span>I agree to receive automated daily texts from Cirvia at this number.
+      Msg &amp; data rates may apply. Reply STOP to cancel, HELP for help.</span>
+    </label>
+    <button class="btn full" id="send-code-btn">Send verification code</button>
+  </div>
+  <div id="code-block" style="display:none;">
+    <label for="code-input">Enter the 6-digit code we sent you</label>
+    <input id="code-input" type="text" inputmode="numeric" maxlength="6"
+      autocomplete="one-time-code" placeholder="123456">
+    <button class="btn full" id="verify-btn">Verify</button>
+    <p class="muted-note"><button class="link-btn" id="resend-btn">Resend code</button></p>
+  </div>
+  <div class="error-box" id="delivery-error"></div>
+</div>
+"""
+
+_DELIVERY_JS = """
+// Shared by onboarding (prefs step) and the dashboard schedule editor.
+const COMMON_TZS = ['America/Toronto','America/Vancouver','America/Edmonton',
+  'America/Winnipeg','America/Halifax','America/St_Johns','America/New_York',
+  'America/Chicago','America/Denver','America/Los_Angeles','Europe/London',
+  'Europe/Paris'];
+
+function fillTzSelect(sel, current) {
+  const guess = current || Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const list = COMMON_TZS.includes(guess) ? COMMON_TZS : [guess, ...COMMON_TZS];
+  sel.innerHTML = '';
+  for (const z of list) {
+    const o = document.createElement('option');
+    o.value = z; o.textContent = z; if (z === guess) o.selected = true;
+    sel.appendChild(o);
+  }
+}
+
+const CHANNEL_META = {
+  sms: { label: 'Text message', type: 'tel', destLabel: 'Phone number',
+    placeholder: '+14165550123',
+    help: 'Use full international format, e.g. +14165550123. Reply STOP anytime to unsubscribe.' },
+  email: { label: 'Email', type: 'email', destLabel: 'Email address',
+    placeholder: 'you@example.com', help: '' },
+  discord: { label: 'Discord', type: 'url', destLabel: 'Discord webhook URL',
+    placeholder: 'https://discord.com/api/webhooks/…',
+    help: 'In Discord: Server Settings \\u2192 Integrations \\u2192 Webhooks \\u2192 New Webhook, then copy the URL. A free personal server works.' },
+};
+
+let dpChannel = null;
+let dpOnVerified = null;
+let dpBound = false;
+
+function dpError(msg) {
+  const box = document.getElementById('delivery-error');
+  if (msg) { box.textContent = msg; box.style.display = 'block'; }
+  else { box.style.display = 'none'; }
+}
+
+function dpSelect(ch, el, existing) {
+  if (dpChannel !== ch) document.getElementById('dest-input').value = '';
+  dpChannel = ch;
+  document.querySelectorAll('.channel-opt').forEach(
+    (o) => o.classList.toggle('selected', o === el));
+  const meta = CHANNEL_META[ch];
+  document.getElementById('dest-block').style.display = 'block';
+  document.getElementById('code-block').style.display = 'none';
+  dpError(null);
+  const input = document.getElementById('dest-input');
+  input.type = meta.type; input.placeholder = meta.placeholder;
+  document.getElementById('dest-label').textContent = meta.destLabel;
+  let help = meta.help;
+  if (existing && existing.destination_masked) {
+    help = 'Currently ' + existing.destination_masked +
+      (existing.verified ? ' (verified). Enter a new destination to change it.'
+                         : ' (unverified).') + (help ? ' ' + help : '');
+  }
+  document.getElementById('dest-help').textContent = help;
+  document.getElementById('consent-row').style.display = ch === 'sms' ? 'flex' : 'none';
+}
+
+function dpReset() {
+  dpChannel = null;
+  document.getElementById('dest-block').style.display = 'none';
+  document.getElementById('code-block').style.display = 'none';
+  document.getElementById('dest-input').value = '';
+  document.getElementById('code-input').value = '';
+  document.getElementById('consent-check').checked = false;
+  dpError(null);
+}
+
+async function dpSendCode() {
+  const btn = document.getElementById('send-code-btn');
+  const destination = document.getElementById('dest-input').value.trim();
+  const consent = document.getElementById('consent-check').checked;
+  if (!dpChannel || !destination) { dpError('Pick a method and enter a destination.'); return; }
+  if (dpChannel === 'sms' && !consent) { dpError('Please check the consent box to receive texts.'); return; }
+  btn.disabled = true; dpError(null);
+  try {
+    const resp = await api('/me/notifications/channel', {
+      method: 'POST',
+      body: JSON.stringify({ channel: dpChannel, destination, consent }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || 'Could not send the code');
+    }
+    document.getElementById('code-block').style.display = 'block';
+    riseIn(document.getElementById('code-block'));
+    document.getElementById('code-input').focus();
+  } catch (e) { dpError(e.message); }
+  finally { btn.disabled = false; }
+}
+
+async function dpVerify() {
+  const btn = document.getElementById('verify-btn');
+  const code = document.getElementById('code-input').value.trim();
+  if (!code) return;
+  btn.disabled = true; dpError(null);
+  try {
+    const resp = await api('/me/notifications/verify', {
+      method: 'POST',
+      body: JSON.stringify({ channel: dpChannel, code }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.detail || 'Verification failed');
+    if (dpOnVerified) dpOnVerified(data);
+  } catch (e) { dpError(e.message); }
+  finally { btn.disabled = false; }
+}
+
+async function initDeliveryPicker(onVerified) {
+  dpOnVerified = onVerified;
+  if (!dpBound) {
+    dpBound = true;
+    document.getElementById('send-code-btn').addEventListener('click', dpSendCode);
+    document.getElementById('resend-btn').addEventListener('click', dpSendCode);
+    document.getElementById('verify-btn').addEventListener('click', dpVerify);
+    document.getElementById('code-input').addEventListener('keydown',
+      (e) => { if (e.key === 'Enter') dpVerify(); });
+  }
+  dpReset();
+  try {
+    const info = await (await api('/me/notifications')).json();
+    const registered = {};
+    for (const c of info.channels || []) registered[c.channel] = c;
+    const opts = document.getElementById('channel-options');
+    const optEls = {};
+    opts.innerHTML = '';
+    for (const ch of info.available_channels) {
+      const meta = CHANNEL_META[ch];
+      if (!meta) continue;
+      const el = document.createElement('div');
+      el.className = 'channel-opt';
+      el.textContent = meta.label;
+      el.addEventListener('click', () => dpSelect(ch, el, registered[ch]));
+      opts.appendChild(el);
+      optEls[ch] = el;
+    }
+    // Start from the user's current channel, or the only one available.
+    const shown = Object.keys(optEls);
+    const pre = optEls[info.preferred_channel] ? info.preferred_channel
+      : (shown.length === 1 ? shown[0] : null);
+    if (pre) dpSelect(pre, optEls[pre], registered[pre]);
+    return info;
+  } catch (e) { return null; }
+}
+"""
+
+
+# --------------------------------------------------------------------------
+# /app/onboarding — connect brokerage -> sync -> preferences -> delivery
 # --------------------------------------------------------------------------
 
 _ONBOARDING_BODY = """
@@ -393,8 +633,16 @@ _ONBOARDING_BODY = """
       <span class="d">Cirvia pulls your positions, read-only.</span>
     </div>
     <div class="ob-step" id="step-3">
-      <span class="n">3</span><span class="t">Digest preferences</span>
+      <span class="n">3</span><span class="t">Choose holdings</span>
+      <span class="d">Pick which positions get news on Free.</span>
+    </div>
+    <div class="ob-step" id="step-4">
+      <span class="n">4</span><span class="t">Digest preferences</span>
       <span class="d">Pick when your morning brief arrives.</span>
+    </div>
+    <div class="ob-step" id="step-5">
+      <span class="n">5</span><span class="t">Delivery</span>
+      <span class="d">Get it by text, email, or Discord.</span>
     </div>
   </div>
   <div class="ob-content">
@@ -419,6 +667,16 @@ _ONBOARDING_BODY = """
     <div class="error-box" id="sync-error"></div>
   </div>
 
+  <div class="step-panel" id="panel-watchlist" style="display:none;">
+    <h2>Choose holdings to follow</h2>
+    <p>On the Free plan, Cirvia tracks news for up to <strong id="wl-limit">3</strong>
+    holdings. Your largest positions are pre-selected — adjust to taste.</p>
+    <div class="watchlist-grid" id="watchlist-grid"></div>
+    <p class="muted-note" id="wl-hint"></p>
+    <button class="btn full" id="watchlist-btn">Continue</button>
+    <div class="error-box" id="watchlist-error"></div>
+  </div>
+
   <div class="step-panel" id="panel-prefs" style="display:none;">
     <h2>Digest preferences</h2>
     <p>When should your morning digest arrive?</p>
@@ -426,8 +684,17 @@ _ONBOARDING_BODY = """
     <select id="tz"></select>
     <label for="send-time">Send time</label>
     <input type="time" id="send-time" value="07:45">
-    <button class="btn full" id="prefs-btn">Finish setup</button>
+    <button class="btn full" id="prefs-btn">Continue</button>
     <div class="error-box" id="prefs-error"></div>
+  </div>
+
+  <div class="step-panel" id="panel-delivery" style="display:none;">
+    <h2>How should we reach you?</h2>
+    <p>Your morning digest and alerts, delivered where you'll actually see them.
+    We send a one-time code to confirm it works.</p>
+""" + _DELIVERY_PICKER_HTML + """
+    <p class="muted-note" style="text-align:center;"><a href="/app/dashboard">Skip for
+    now</a> — you can set this up anytime from the dashboard.</p>
   </div>
 
   </div>
@@ -437,19 +704,11 @@ _ONBOARDING_BODY = """
 _ONBOARDING_JS = """
 requireSession();
 
-const TZS = ['America/Toronto','America/Vancouver','America/Edmonton','America/Winnipeg',
-  'America/Halifax','America/St_Johns','America/New_York','America/Chicago',
-  'America/Denver','America/Los_Angeles','Europe/London','Europe/Paris'];
 const tzSel = document.getElementById('tz');
-const guess = Intl.DateTimeFormat().resolvedOptions().timeZone;
-const list = TZS.includes(guess) ? TZS : [guess, ...TZS];
-for (const z of list) {
-  const o = document.createElement('option');
-  o.value = z; o.textContent = z; if (z === guess) o.selected = true;
-  tzSel.appendChild(o);
-}
+fillTzSelect(tzSel);
 
-const PANELS = ['panel-connect','panel-sync','panel-prefs'];
+const PANELS = ['panel-connect','panel-sync','panel-watchlist','panel-prefs','panel-delivery'];
+const STEP_IDS = ['step-1','step-2','step-3','step-4','step-5'];
 
 function showPanel(id) {
   let changed = false;
@@ -461,7 +720,7 @@ function showPanel(id) {
   }
   if (changed) riseIn(document.getElementById(id));
   const current = PANELS.indexOf(id) + 1;
-  for (let n = 1; n <= 3; n++) {
+  for (let n = 1; n <= 5; n++) {
     const step = document.getElementById('step-' + n);
     step.classList.toggle('active', n === current);
     step.classList.toggle('done', n < current);
@@ -488,19 +747,115 @@ async function pollStatus() {
   } catch (e) { /* keep polling */ }
 }
 
-async function runSync() {
+async function afterSync() {
+  try {
+    const me = await (await api('/me')).json();
+    const pf = await (await api('/portfolio')).json();
+    // Largest positions first, matching the digest's own fallback ordering.
+    const byValue = [...(pf.positions || [])].sort(
+      (a, b) => (b.market_value ?? -1) - (a.market_value ?? -1));
+    const tickers = [...new Set(byValue.map((p) => p.ticker))];
+    const limit = me.digest_tickers_limit || 3;
+    if (me.plan === 'pro' || tickers.length <= limit) {
+      if (tickers.length) {
+        await api('/me', {
+          method: 'PATCH',
+          body: JSON.stringify({ digest_tickers: tickers.slice(0, limit) }),
+        });
+      }
+      showPanel('panel-prefs');
+      return;
+    }
+    document.getElementById('wl-limit').textContent = String(limit);
+    buildWatchlistPicker(tickers, limit);
+    showPanel('panel-watchlist');
+  } catch (e) {
+    showPanel('panel-prefs');
+  }
+}
+
+const wlSelected = new Set();
+let wlLimit = 3;
+
+function wlHint() {
+  document.getElementById('wl-hint').textContent =
+    wlSelected.size + ' of up to ' + wlLimit + ' selected';
+}
+
+function buildWatchlistPicker(tickers, limit) {
+  wlSelected.clear();
+  wlLimit = limit;
+  const grid = document.getElementById('watchlist-grid');
+  grid.innerHTML = '';
+  for (const t of tickers) {
+    const el = document.createElement('div');
+    el.className = 'watchlist-opt';
+    el.textContent = t;
+    el.dataset.ticker = t;
+    if (wlSelected.size < limit) {
+      wlSelected.add(t);
+      el.classList.add('selected');
+    }
+    el.addEventListener('click', () => {
+      if (wlSelected.has(t)) {
+        wlSelected.delete(t);
+        el.classList.remove('selected');
+      } else if (wlSelected.size < limit) {
+        wlSelected.add(t);
+        el.classList.add('selected');
+      }
+      wlHint();
+    });
+    grid.appendChild(el);
+  }
+  wlHint();
+}
+
+document.getElementById('watchlist-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('watchlist-btn');
+  btn.disabled = true;
+  document.getElementById('watchlist-error').style.display = 'none';
+  try {
+    if (wlSelected.size === 0) {
+      throw new Error('Select at least one holding.');
+    }
+    const resp = await api('/me', {
+      method: 'PATCH',
+      body: JSON.stringify({ digest_tickers: [...wlSelected] }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || 'Could not save watchlist');
+    }
+    showPanel('panel-prefs');
+  } catch (e) {
+    showError('watchlist-error', e.message);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+async function runSync(attempt = 0) {
   showPanel('panel-sync');
   try {
     const resp = await api('/portfolio/sync', { method: 'POST' });
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({}));
-      throw new Error(err.detail || 'Sync failed');
+      const detail = err.detail || 'Sync failed';
+      // Right after connecting, SnapTrade needs ~30-60s to import accounts.
+      if (detail.startsWith('No investment accounts found') && attempt < 8) {
+        document.getElementById('sync-status-text').textContent =
+          'Waiting for your brokerage to finish importing accounts…';
+        setTimeout(() => runSync(attempt + 1), 8000);
+        return;
+      }
+      throw new Error(detail);
     }
     const result = await resp.json();
     document.getElementById('sync-status-text').textContent =
       'Synced ' + result.positions_upserted + ' positions across ' +
       result.accounts_synced + ' accounts.';
-    setTimeout(() => showPanel('panel-prefs'), 900);
+    setTimeout(afterSync, 900);
   } catch (e) {
     showError('sync-error', e.message);
   }
@@ -511,7 +866,11 @@ document.getElementById('connect-btn').addEventListener('click', async () => {
   btn.disabled = true;
   document.getElementById('connect-error').style.display = 'none';
   try {
-    await api('/portfolio/snaptrade/register', { method: 'POST' });
+    const regResp = await api('/portfolio/snaptrade/register', { method: 'POST' });
+    if (!regResp.ok) {
+      const err = await regResp.json().catch(() => ({}));
+      throw new Error(err.detail || 'Brokerage registration failed');
+    }
     const resp = await api('/portfolio/connect-url');
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({}));
@@ -547,9 +906,11 @@ document.getElementById('prefs-btn').addEventListener('click', async () => {
       const err = await resp.json().catch(() => ({}));
       throw new Error(err.detail || 'Could not save preferences');
     }
-    window.location.href = '/app/dashboard';
+    showPanel('panel-delivery');
+    initDeliveryPicker(() => { window.location.href = '/app/dashboard'; });
   } catch (e) {
     showError('prefs-error', e.message);
+  } finally {
     btn.disabled = false;
   }
 });
@@ -571,26 +932,75 @@ _DASHBOARD_BODY = """
   <h1 style="font-size:1.5rem;">Dashboard</h1>
   <span class="who" id="who"></span>
 </div>
-<div class="dash-grid">
-  <div class="dash-card wide">
-    <h3>Holdings <span class="tag" id="totals"></span></h3>
+<div class="dash-layout">
+<div class="dash-main">
+  <div class="dash-card">
+    <div class="filters-row" id="news-filters">
+      <label>Period
+        <select id="filter-period">
+          <option value="7">Last 7 days</option>
+          <option value="30">Last 30 days</option>
+          <option value="all" selected>All time</option>
+        </select>
+      </label>
+      <label>Kind
+        <select id="filter-kind">
+          <option value="all">All</option>
+          <option value="digest">Digests</option>
+          <option value="alert">Alerts</option>
+          <option value="holding">Holding news</option>
+        </select>
+      </label>
+      <label>Severity
+        <select id="filter-severity">
+          <option value="">Any</option>
+          <option value="high">High</option>
+          <option value="medium">Medium</option>
+          <option value="low">Low</option>
+        </select>
+      </label>
+      <label>Category
+        <select id="filter-category">
+          <option value="">Any</option>
+          <option value="geopolitical">Geopolitical</option>
+          <option value="monetary">Monetary</option>
+          <option value="energy">Energy</option>
+          <option value="regulatory_climate">Regulatory</option>
+        </select>
+      </label>
+    </div>
+    <div class="news-grid">
+      <div class="dash-card" style="padding:0;border:none;background:transparent;">
+        <h3>General news</h3>
+        <div class="news-feed" id="general-news"><div aria-hidden="true">
+          <div class="skl"></div><div class="skl short"></div>
+        </div></div>
+      </div>
+      <div class="dash-card" style="padding:0;border:none;background:transparent;">
+        <h3>Holding news <span class="tag" id="holding-news-label">Select a holding</span></h3>
+        <div class="news-feed" id="holding-news">
+          <p class="muted-note">Click a row in your holdings table to see news Cirvia has surfaced for that ticker.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="dash-card">
+    <h3>Holdings
+      <span class="refresh-row">
+        <span class="updated-at" id="holdings-updated"></span>
+        <button class="link-btn" id="refresh-holdings-btn">Refresh</button>
+        <span class="tag" id="totals"></span>
+      </span>
+    </h3>
     <div id="holdings"><div aria-hidden="true">
       <div class="skl"></div><div class="skl"></div><div class="skl short"></div>
     </div></div>
   </div>
+</div>
+
+<aside class="dash-rail">
   <div class="dash-card">
-    <h3>Today's digest</h3>
-    <div id="digest"><div aria-hidden="true">
-      <div class="skl"></div><div class="skl"></div><div class="skl short"></div>
-    </div></div>
-  </div>
-  <div class="dash-card">
-    <h3>Recent alerts</h3>
-    <div id="alerts"><div aria-hidden="true">
-      <div class="skl"></div><div class="skl short"></div>
-    </div></div>
-  </div>
-  <div class="dash-card wide">
     <h3>Ask Cirvia</h3>
     <div class="chat-log" id="chat-log"></div>
     <div class="chat-row">
@@ -599,11 +1009,46 @@ _DASHBOARD_BODY = """
     </div>
     <p class="muted-note">Informational only. Cirvia never gives buy or sell advice.</p>
   </div>
+
+  <div class="dash-card" id="watchlist-card" style="display:none;">
+    <h3>Digest watchlist <span class="tag" id="watchlist-limit-tag"></span></h3>
+    <p class="muted-note" style="margin-top:0.5rem;">Free plan: choose which holdings get news in your digest.</p>
+    <div class="watchlist-grid" id="dash-watchlist-grid"></div>
+    <button class="btn" id="save-watchlist-btn" style="margin-top:0.75rem;">Save watchlist</button>
+    <div class="error-box" id="watchlist-save-error"></div>
+  </div>
+
+  <div class="dash-card">
+    <h3>Delivery <button class="link-btn" id="delivery-change-btn"
+      style="display:none;">Change</button></h3>
+    <div id="delivery-summary"><div aria-hidden="true">
+      <div class="skl"></div><div class="skl short"></div>
+    </div></div>
+    <p id="schedule-row" style="display:none;"><span id="schedule-text"></span>
+      <button class="link-btn" id="schedule-edit-btn">Edit schedule</button></p>
+    <div id="schedule-editor" style="display:none;">
+      <label for="dash-tz">Timezone</label>
+      <select id="dash-tz"></select>
+      <label for="dash-send-time">Send time</label>
+      <input type="time" id="dash-send-time">
+      <button class="btn" id="save-schedule-btn" style="margin-top:0.9rem;">Save schedule</button>
+      <div class="error-box" id="schedule-error"></div>
+    </div>
+    <div id="delivery-editor" style="display:none;">
+""" + _DELIVERY_PICKER_HTML + """
+    </div>
+  </div>
+</aside>
 </div>
 """
 
 _DASHBOARD_JS = """
 requireSession();
+
+let meProfile = null;
+let selectedTicker = null;
+let portfolioTickers = [];
+const dashWlSelected = new Set();
 
 function esc(s) {
   const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML;
@@ -617,11 +1062,101 @@ function pctCell(v) {
   return `<td class="${cls}">${v >= 0 ? '+' : ''}${v.toFixed(2)}%</td>`;
 }
 
+function filterSince() {
+  const p = document.getElementById('filter-period').value;
+  if (p === 'all') return null;
+  const d = new Date();
+  d.setDate(d.getDate() - parseInt(p, 10));
+  return d.toISOString().slice(0, 10);
+}
+
+function newsQuery(extra) {
+  const params = new URLSearchParams();
+  const since = filterSince();
+  if (since) params.set('since', since);
+  const kind = document.getElementById('filter-kind').value;
+  if (kind && kind !== 'all') params.set('kind', kind);
+  const sev = document.getElementById('filter-severity').value;
+  if (sev) params.set('severity', sev);
+  const cat = document.getElementById('filter-category').value;
+  if (cat) params.set('category', cat);
+  if (extra) {
+    for (const [k, v] of Object.entries(extra)) {
+      if (v != null && v !== '') params.set(k, v);
+    }
+  }
+  return params.toString();
+}
+
+function renderNewsItems(el, items, emptyMsg) {
+  if (!items || items.length === 0) {
+    el.innerHTML = '<p class="muted-note">' + esc(emptyMsg) + '</p>';
+    return;
+  }
+  el.innerHTML = items.map((item) => {
+    const meta = [];
+    if (item.kind) meta.push(item.kind);
+    if (item.severity) meta.push(item.severity);
+    if (item.category) meta.push(item.category);
+    if (item.source) meta.push(item.source);
+    if (item.created_at) meta.push(new Date(item.created_at).toLocaleDateString());
+    const link = item.url
+      ? ' <a href="' + esc(item.url) + '" target="_blank" rel="noopener">Read</a>' : '';
+    return '<div class="news-item">' +
+      '<div class="head">' + esc(item.headline) + link + '</div>' +
+      (item.body ? '<div class="body">' + esc(item.body) + '</div>' : '') +
+      '<div class="meta">' + esc(meta.join(' · ')) + '</div></div>';
+  }).join('');
+  staggerIn(el.querySelectorAll('.news-item'));
+}
+
+async function loadGeneralNews() {
+  const el = document.getElementById('general-news');
+  try {
+    const qs = newsQuery({ kind: 'digest,alert' });
+    const data = await (await api('/news?' + qs)).json();
+    renderNewsItems(el, data.items,
+      'No general news yet. Digests and macro alerts appear here once Cirvia sends them.');
+  } catch (e) {
+    el.innerHTML = '<p class="muted-note">Could not load general news.</p>';
+  }
+}
+
+async function loadHoldingNews() {
+  const el = document.getElementById('holding-news');
+  const label = document.getElementById('holding-news-label');
+  if (!selectedTicker) {
+    label.textContent = 'Select a holding';
+    el.innerHTML = '<p class="muted-note">Click a row in your holdings table to see news ' +
+      'Cirvia has surfaced for that ticker.</p>';
+    return;
+  }
+  label.textContent = selectedTicker;
+  try {
+    const qs = newsQuery({ ticker: selectedTicker, kind: 'holding,alert' });
+    const data = await (await api('/news?' + qs)).json();
+    renderNewsItems(el, data.items,
+      'No news stored for ' + selectedTicker + ' yet. Your next digest may surface articles here.');
+  } catch (e) {
+    el.innerHTML = '<p class="muted-note">Could not load holding news.</p>';
+  }
+}
+
+function reloadNewsFeeds() {
+  loadGeneralNews();
+  loadHoldingNews();
+}
+
 async function loadMe() {
   try {
-    const me = await (await api('/me')).json();
+    meProfile = await (await api('/me')).json();
     document.getElementById('who').textContent =
-      (me.email || '') + ' · ' + (me.plan === 'pro' ? 'Pro' : 'Free');
+      (meProfile.email || '') + ' · ' + (meProfile.plan === 'pro' ? 'Pro' : 'Free');
+    if (meProfile.digest_tickers_editable) {
+      document.getElementById('watchlist-card').style.display = 'block';
+      document.getElementById('watchlist-limit-tag').textContent =
+        'up to ' + (meProfile.digest_tickers_limit || 3);
+    }
   } catch (e) {}
 }
 
@@ -629,11 +1164,15 @@ async function loadHoldings() {
   const el = document.getElementById('holdings');
   try {
     const pf = await (await api('/portfolio')).json();
+    document.getElementById('holdings-updated').textContent =
+      'Updated ' + new Date().toLocaleTimeString();
     if (!pf.positions || pf.positions.length === 0) {
       el.innerHTML = '<p class="muted-note">No holdings yet. ' +
         '<a href="/app/onboarding">Connect your brokerage</a> to sync your portfolio.</p>';
       return;
     }
+    portfolioTickers = [...new Set(pf.positions.map((p) => p.ticker))];
+    const watchlist = new Set(meProfile && meProfile.digest_tickers ? meProfile.digest_tickers : []);
     const totals = pf.totals || {};
     if (totals.total_market_value_cad != null) {
       document.getElementById('totals').textContent =
@@ -645,51 +1184,91 @@ async function loadHoldings() {
     }
     let rows = '';
     for (const p of pf.positions) {
-      rows += `<tr><td><strong>${esc(p.ticker)}</strong></td>` +
+      const sel = p.ticker === selectedTicker ? ' selected' : '';
+      const badge = watchlist.has(p.ticker) ? '<span class="watchlist-badge">watchlist</span>' : '';
+      rows += `<tr class="holdings-row${sel}" data-ticker="${esc(p.ticker)}">` +
+        `<td><strong>${esc(p.ticker)}</strong>${badge}</td>` +
         `<td>${p.quantity}</td><td>${fmtMoney(p.market_value)}</td>` +
         pctCell(p.day_change_pct) + pctCell(p.unrealized_pnl_pct) + '</tr>';
     }
     el.innerHTML = '<table><thead><tr><th>Ticker</th><th>Qty</th><th>Value</th>' +
       '<th>Day</th><th>Total</th></tr></thead><tbody>' + rows + '</tbody></table>';
+    el.querySelectorAll('.holdings-row').forEach((row) => {
+      row.addEventListener('click', () => {
+        selectedTicker = row.dataset.ticker;
+        el.querySelectorAll('.holdings-row').forEach((r) =>
+          r.classList.toggle('selected', r.dataset.ticker === selectedTicker));
+        loadHoldingNews();
+      });
+    });
+    if (!selectedTicker && portfolioTickers.length) {
+      selectedTicker = portfolioTickers[0];
+      const first = el.querySelector('.holdings-row');
+      if (first) first.classList.add('selected');
+      loadHoldingNews();
+    }
     staggerIn(el.querySelectorAll('tbody tr'));
+    buildDashWatchlist();
   } catch (e) {
     el.innerHTML = '<p class="muted-note">Could not load holdings.</p>';
   }
 }
 
-async function loadDigest() {
-  const el = document.getElementById('digest');
-  try {
-    const resp = await api('/digest/latest');
-    if (resp.status === 404) {
-      el.innerHTML = '<p class="muted-note">No digest yet today. Your next one arrives on your schedule.</p>';
-      return;
-    }
-    const d = await resp.json();
-    el.innerHTML = '<div class="digest-body">' + esc(d.body) + '</div>';
-  } catch (e) {
-    el.innerHTML = '<p class="muted-note">Could not load digest.</p>';
+function buildDashWatchlist() {
+  if (!meProfile || !meProfile.digest_tickers_editable) return;
+  dashWlSelected.clear();
+  const limit = meProfile.digest_tickers_limit || 3;
+  (meProfile.digest_tickers || []).forEach((t) => dashWlSelected.add(t));
+  const grid = document.getElementById('dash-watchlist-grid');
+  grid.innerHTML = '';
+  for (const t of portfolioTickers) {
+    const el = document.createElement('div');
+    el.className = 'watchlist-opt' + (dashWlSelected.has(t) ? ' selected' : '');
+    el.textContent = t;
+    el.addEventListener('click', () => {
+      if (dashWlSelected.has(t)) {
+        dashWlSelected.delete(t);
+        el.classList.remove('selected');
+      } else if (dashWlSelected.size < limit) {
+        dashWlSelected.add(t);
+        el.classList.add('selected');
+      }
+    });
+    grid.appendChild(el);
   }
 }
 
-async function loadAlerts() {
-  const el = document.getElementById('alerts');
+document.getElementById('save-watchlist-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('save-watchlist-btn');
+  const errBox = document.getElementById('watchlist-save-error');
+  errBox.style.display = 'none';
+  btn.disabled = true;
   try {
-    const data = await (await api('/alerts?limit=5')).json();
-    if (!data.alerts || data.alerts.length === 0) {
-      el.innerHTML = '<p class="muted-note">No alerts yet. Macro alerts appear when world events touch your holdings.</p>';
-      return;
+    if (dashWlSelected.size === 0) {
+      throw new Error('Select at least one holding.');
     }
-    el.innerHTML = data.alerts.map((a) =>
-      `<div class="alert-item"><div class="head">${esc(a.headline)}</div>` +
-      `<div class="meta"><span class="sev-${esc(a.severity)}">${esc(a.severity)}</span>` +
-      ` · ${esc(a.category)}${a.tickers && a.tickers.length ? ' · ' + a.tickers.map(esc).join(', ') : ''}</div></div>`
-    ).join('');
-    staggerIn(el.querySelectorAll('.alert-item'));
+    const resp = await api('/me', {
+      method: 'PATCH',
+      body: JSON.stringify({ digest_tickers: [...dashWlSelected] }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || 'Could not save watchlist');
+    }
+    meProfile = await resp.json();
+    await loadHoldings();
   } catch (e) {
-    el.innerHTML = '<p class="muted-note">Could not load alerts.</p>';
+    errBox.textContent = e.message;
+    errBox.style.display = 'block';
+  } finally {
+    btn.disabled = false;
   }
-}
+});
+
+document.getElementById('refresh-holdings-btn').addEventListener('click', () => loadHoldings());
+['filter-period','filter-kind','filter-severity','filter-category'].forEach((id) => {
+  document.getElementById(id).addEventListener('change', reloadNewsFeeds);
+});
 
 const log = document.getElementById('chat-log');
 const input = document.getElementById('chat-input');
@@ -729,7 +1308,106 @@ async function sendChat() {
 sendBtn.addEventListener('click', sendChat);
 input.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendChat(); });
 
-loadMe(); loadHoldings(); loadDigest(); loadAlerts();
+const CHANNEL_NAMES = { sms: 'Text message', email: 'Email', discord: 'Discord' };
+
+async function loadDelivery() {
+  const summary = document.getElementById('delivery-summary');
+  const changeBtn = document.getElementById('delivery-change-btn');
+  document.getElementById('delivery-editor').style.display = 'none';
+  try {
+    const info = await (await api('/me/notifications')).json();
+    const active = (info.channels || []).find(
+      (c) => c.channel === info.preferred_channel);
+    if (active && active.verified && !active.opted_out) {
+      summary.innerHTML =
+        '<p style="margin-top:0.75rem;">' +
+        '<strong>' + esc(CHANNEL_NAMES[active.channel] || active.channel) + '</strong>' +
+        ' · ' + esc(active.destination_masked) +
+        ' <span class="chip-ok">\\u2713 verified</span></p>' +
+        '<p class="muted-note">Your digest and alerts are delivered here.</p>';
+    } else if (active && active.opted_out) {
+      summary.innerHTML =
+        '<p class="muted-note"><span class="chip-warn">Delivery paused</span> — you ' +
+        'unsubscribed from ' + esc(CHANNEL_NAMES[active.channel] || active.channel) +
+        '. Set up a channel to resume delivery.</p>';
+    } else {
+      summary.innerHTML =
+        '<p class="muted-note"><span class="chip-warn">Not set up</span> — your digest ' +
+        'only appears on this dashboard. Add a channel to get it by text, email, or Discord.</p>';
+    }
+    changeBtn.style.display = 'inline';
+    changeBtn.textContent = active && active.verified ? 'Change' : 'Set up';
+    summary.style.display = 'block';
+  } catch (e) {
+    summary.innerHTML = '<p class="muted-note">Could not load delivery settings.</p>';
+  }
+}
+
+document.getElementById('delivery-change-btn').addEventListener('click', async () => {
+  const editor = document.getElementById('delivery-editor');
+  const open = editor.style.display !== 'none';
+  if (open) { editor.style.display = 'none'; return; }
+  document.getElementById('schedule-editor').style.display = 'none';
+  editor.style.display = 'block';
+  riseIn(editor);
+  await initDeliveryPicker(() => loadDelivery());
+});
+
+function renderSchedule() {
+  if (!meProfile) return;
+  const row = document.getElementById('schedule-row');
+  document.getElementById('schedule-text').textContent =
+    'Digest at ' + (meProfile.digest_send_time || '07:45') +
+    ' · ' + (meProfile.timezone || 'America/Toronto');
+  row.style.display = 'block';
+}
+
+document.getElementById('schedule-edit-btn').addEventListener('click', () => {
+  const editor = document.getElementById('schedule-editor');
+  const open = editor.style.display !== 'none';
+  if (open) { editor.style.display = 'none'; return; }
+  document.getElementById('delivery-editor').style.display = 'none';
+  fillTzSelect(document.getElementById('dash-tz'), meProfile && meProfile.timezone);
+  document.getElementById('dash-send-time').value =
+    (meProfile && meProfile.digest_send_time) || '07:45';
+  editor.style.display = 'block';
+  riseIn(editor);
+});
+
+document.getElementById('save-schedule-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('save-schedule-btn');
+  const errBox = document.getElementById('schedule-error');
+  errBox.style.display = 'none';
+  btn.disabled = true;
+  try {
+    const resp = await api('/me', {
+      method: 'PATCH',
+      body: JSON.stringify({
+        timezone: document.getElementById('dash-tz').value,
+        digest_send_time: document.getElementById('dash-send-time').value,
+      }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || 'Could not save schedule');
+    }
+    meProfile = await resp.json();
+    document.getElementById('schedule-editor').style.display = 'none';
+    renderSchedule();
+  } catch (e) {
+    errBox.textContent = e.message;
+    errBox.style.display = 'block';
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+loadMe().then(() => {
+  loadHoldings();
+  reloadNewsFeeds();
+  loadDelivery();
+  renderSchedule();
+});
 """
 
 
@@ -750,7 +1428,7 @@ def onboarding_page(supabase_url: str, anon_key: str) -> str:
         _ONBOARDING_BODY,
         supabase_url=supabase_url,
         anon_key=anon_key,
-        extra_js=_ONBOARDING_JS,
+        extra_js=_DELIVERY_JS + _ONBOARDING_JS,
         wrap_class="app-wrap ob-wrap",
     )
 
@@ -761,7 +1439,8 @@ def dashboard_page(supabase_url: str, anon_key: str) -> str:
         _DASHBOARD_BODY,
         supabase_url=supabase_url,
         anon_key=anon_key,
-        extra_js=_DASHBOARD_JS,
+        extra_js=_DELIVERY_JS + _DASHBOARD_JS,
+        wrap_class="app-wrap dash-wrap",
     )
 
 

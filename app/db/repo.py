@@ -6,8 +6,9 @@ functions. The agent loop, tools, and API routes depend only on this surface.
 
 from __future__ import annotations
 
+import hashlib
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -28,12 +29,16 @@ from app.db.models import (
     Alert,
     Digest,
     ModelCall,
+    NewsItem,
+    NotificationChannel,
     OutboundMessage,
     Position,
     SnaptradeCredentials,
     ToolCall,
     User,
+    VerificationCode,
 )
+from app.delivery.channels import CHANNELS
 
 # Owner (user #1) attribution until per-user auth lands. Every tenant-scoped
 # read/write defaults to this user; pass user_id to scope to another.
@@ -52,20 +57,6 @@ def _apply_rls_user(session: Session, transaction, connection) -> None:
     connection.exec_driver_sql(
         f"SELECT set_config('app.current_user_id', '{uid}', true)"
     )
-
-
-def resolve_ack_status(status: str, attempts: int, max_attempts: int) -> str:
-    """Decide an outbound message's status after a worker ack.
-
-    'sent' is terminal; 'failed' stays 'queued' for retry until attempts reach
-    ``max_attempts``, then becomes 'failed'. ``attempts`` is the post-increment
-    count (i.e. including this attempt).
-    """
-    if status == "sent":
-        return "sent"
-    if status == "failed":
-        return "failed" if attempts >= max_attempts else "queued"
-    return status
 
 
 class Repo:
@@ -109,6 +100,7 @@ class Repo:
         timezone: str | None = None,
         digest_send_time: Any = None,
         digest_enabled: bool | None = None,
+        digest_tickers: list[str] | None = None,
     ) -> None:
         """Update only the provided preference fields on the user's row."""
         async with self._session() as s:
@@ -121,6 +113,25 @@ class Repo:
                 user.digest_send_time = digest_send_time
             if digest_enabled is not None:
                 user.digest_enabled = digest_enabled
+            if digest_tickers is not None:
+                user.digest_tickers = digest_tickers
+            await s.commit()
+
+    async def get_digest_tickers(self, user_id: uuid.UUID) -> list[str]:
+        user = await self.get_user(user_id)
+        if user is None:
+            return []
+        raw = getattr(user, "digest_tickers", None) or []
+        return [str(t) for t in raw]
+
+    async def set_digest_tickers(
+        self, user_id: uuid.UUID, tickers: list[str]
+    ) -> None:
+        async with self._session() as s:
+            user = await s.get(User, user_id)
+            if user is None:
+                return
+            user.digest_tickers = tickers
             await s.commit()
 
     async def get_or_create_user(
@@ -555,6 +566,190 @@ class Repo:
             )
             return list(result.scalars().all())
 
+    async def list_recent_digests(
+        self,
+        *,
+        user_id: uuid.UUID | None = None,
+        since: datetime | None = None,
+        limit: int = 50,
+    ) -> list[Digest]:
+        uid = user_id or _OWNER_USER_ID
+        async with self._session() as s:
+            q = select(Digest).where(Digest.user_id == uid)
+            if since is not None:
+                q = q.where(Digest.created_at >= since)
+            result = await s.execute(
+                q.order_by(Digest.created_at.desc()).limit(limit)
+            )
+            return list(result.scalars().all())
+
+    @staticmethod
+    def news_fingerprint(url: str | None, headline: str) -> str:
+        key = f"{url or ''}|{headline}".encode()
+        return hashlib.sha256(key).hexdigest()
+
+    async def insert_news_items_if_new(
+        self,
+        user_id: uuid.UUID,
+        items: list[dict[str, Any]],
+        *,
+        run_id: uuid.UUID | None = None,
+    ) -> int:
+        """Insert holding news articles; skip duplicates via fingerprint."""
+        if not items:
+            return 0
+        uid = user_id or _OWNER_USER_ID
+        inserted = 0
+        async with self._session() as s:
+            for item in items:
+                fp = item.get("fingerprint") or self.news_fingerprint(
+                    item.get("url"), item["headline"]
+                )
+                existing = await s.execute(
+                    select(NewsItem.id).where(
+                        NewsItem.user_id == uid, NewsItem.fingerprint == fp
+                    )
+                )
+                if existing.scalar_one_or_none() is not None:
+                    continue
+                pub = item.get("published_at")
+                if isinstance(pub, str):
+                    pub = datetime.fromisoformat(pub.replace("Z", "+00:00"))
+                s.add(
+                    NewsItem(
+                        user_id=uid,
+                        ticker=item["ticker"],
+                        headline=item["headline"],
+                        source=item.get("source"),
+                        url=item.get("url"),
+                        published_at=pub,
+                        summary=item.get("summary"),
+                        run_id=run_id,
+                        fingerprint=fp,
+                    )
+                )
+                inserted += 1
+            await s.commit()
+        return inserted
+
+    async def list_news_items(
+        self,
+        *,
+        user_id: uuid.UUID | None = None,
+        ticker: str | None = None,
+        since: datetime | None = None,
+        limit: int = 50,
+    ) -> list[NewsItem]:
+        uid = user_id or _OWNER_USER_ID
+        async with self._session() as s:
+            q = select(NewsItem).where(NewsItem.user_id == uid)
+            if ticker is not None:
+                q = q.where(NewsItem.ticker == ticker)
+            if since is not None:
+                q = q.where(NewsItem.created_at >= since)
+            result = await s.execute(
+                q.order_by(NewsItem.created_at.desc()).limit(limit)
+            )
+            return list(result.scalars().all())
+
+    async def list_stored_news(
+        self,
+        user_id: uuid.UUID,
+        *,
+        ticker: str | None = None,
+        kind: str = "all",
+        since: datetime | None = None,
+        severity: str | None = None,
+        category: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """Merge digests, alerts, and news_items into a normalized feed."""
+        kinds = {k.strip() for k in kind.split(",") if k.strip()} or {"all"}
+        if "all" in kinds:
+            kinds = {"all"}
+        out: list[dict[str, Any]] = []
+        include_digest = ("all" in kinds or "digest" in kinds) and ticker is None
+        include_alert = "all" in kinds or "alert" in kinds
+        include_holding = "all" in kinds or "holding" in kinds
+
+        if include_digest:
+            for d in await self.list_recent_digests(
+                user_id=user_id, since=since, limit=limit
+            ):
+                created = d.created_at or datetime.now(timezone.utc)
+                out.append(
+                    {
+                        "id": str(d.id),
+                        "kind": "digest",
+                        "ticker": None,
+                        "tickers": [],
+                        "headline": f"Morning digest — {d.digest_date.isoformat()}",
+                        "body": d.body,
+                        "source": None,
+                        "url": None,
+                        "severity": None,
+                        "category": None,
+                        "published_at": None,
+                        "created_at": created.isoformat(),
+                    }
+                )
+
+        if include_alert:
+            alerts = await self.recent_alerts(limit=limit * 2, user_id=user_id)
+            for a in alerts:
+                if since is not None and a.created_at and a.created_at < since:
+                    continue
+                if severity and a.severity != severity:
+                    continue
+                if category and a.category != category:
+                    continue
+                tickers = a.tickers if isinstance(a.tickers, list) else []
+                if ticker is not None and ticker not in tickers:
+                    continue
+                created = a.created_at or datetime.now(timezone.utc)
+                out.append(
+                    {
+                        "id": str(a.id),
+                        "kind": "alert",
+                        "ticker": tickers[0] if len(tickers) == 1 else None,
+                        "tickers": tickers,
+                        "headline": a.headline,
+                        "body": a.body,
+                        "source": None,
+                        "url": None,
+                        "severity": a.severity,
+                        "category": a.category,
+                        "published_at": None,
+                        "created_at": created.isoformat(),
+                    }
+                )
+
+        if include_holding:
+            for n in await self.list_news_items(
+                user_id=user_id, ticker=ticker, since=since, limit=limit
+            ):
+                created = n.created_at or datetime.now(timezone.utc)
+                pub = n.published_at.isoformat() if n.published_at else None
+                out.append(
+                    {
+                        "id": str(n.id),
+                        "kind": "holding",
+                        "ticker": n.ticker,
+                        "tickers": [n.ticker],
+                        "headline": n.headline,
+                        "body": n.summary or "",
+                        "source": n.source,
+                        "url": n.url,
+                        "severity": None,
+                        "category": None,
+                        "published_at": pub,
+                        "created_at": created.isoformat(),
+                    }
+                )
+
+        out.sort(key=lambda x: x["created_at"], reverse=True)
+        return out[:limit]
+
     async def mark_alert_delivered(self, alert_id: uuid.UUID) -> None:
         async with self._session() as s:
             alert = await s.get(Alert, alert_id)
@@ -563,40 +758,319 @@ class Repo:
                 alert.delivered_at = datetime.now()
                 await s.commit()
 
-    # ---- outbound messages (Phase B) ------------------------------------
+    # ---- outbound messages (delivery queue) ------------------------------
 
     async def enqueue_outbound(
-        self, body: str, *, user_id: uuid.UUID | None = None
+        self,
+        body: str,
+        *,
+        user_id: uuid.UUID | None = None,
+        kind: str = "message",
+        subject: str | None = None,
     ) -> uuid.UUID:
+        """Queue a message for delivery, resolving the user's preferred channel
+        now (destination snapshot). No verified, opted-in channel -> the row is
+        written as 'skipped' with the reason in last_error, so generation always
+        succeeds and delivery state stays auditable."""
+        uid = user_id or _OWNER_USER_ID
+        payload: dict[str, Any] = {"kind": kind}
+        if subject:
+            payload["subject"] = subject
         async with self._session() as s:
-            msg = OutboundMessage(body=body, user_id=user_id or _OWNER_USER_ID)
+            user = await s.get(User, uid)
+            preferred = user.preferred_channel if user else None
+            msg = OutboundMessage(body=body, user_id=uid, payload=payload)
+            if preferred is None:
+                msg.status = "skipped"
+                msg.last_error = "no preferred notification channel"
+            else:
+                ch = await s.execute(
+                    select(NotificationChannel).where(
+                        NotificationChannel.user_id == uid,
+                        NotificationChannel.channel == preferred,
+                    )
+                )
+                row = ch.scalar_one_or_none()
+                if row is None or row.verified_at is None:
+                    msg.status = "skipped"
+                    msg.last_error = f"preferred channel '{preferred}' not verified"
+                elif row.opted_out_at is not None:
+                    msg.status = "skipped"
+                    msg.last_error = f"preferred channel '{preferred}' opted out"
+                else:
+                    msg.channel = preferred
+                    msg.destination = row.destination
             s.add(msg)
             await s.commit()
             return msg.id
 
-    async def pending_outbound(self, limit: int = 20) -> list[OutboundMessage]:
+    async def claim_due_outbound(
+        self, limit: int = 25, *, lease_seconds: int = 120
+    ) -> list[OutboundMessage]:
+        """Claim due queued rows for the dispatcher. FOR UPDATE SKIP LOCKED keeps
+        concurrent workers disjoint; pushing next_attempt_at out by
+        ``lease_seconds`` means a crash mid-send just retries after the lease."""
         async with self._session() as s:
             result = await s.execute(
                 select(OutboundMessage)
-                .where(OutboundMessage.status == "queued")
+                .where(
+                    OutboundMessage.status == "queued",
+                    OutboundMessage.channel.in_(CHANNELS),
+                    OutboundMessage.next_attempt_at <= func.now(),
+                )
                 .order_by(OutboundMessage.created_at)
                 .limit(limit)
+                .with_for_update(skip_locked=True)
             )
-            return list(result.scalars().all())
+            msgs = list(result.scalars().all())
+            lease = datetime.now(timezone.utc) + timedelta(seconds=lease_seconds)
+            for m in msgs:
+                m.next_attempt_at = lease
+            await s.commit()
+            return msgs
 
-    async def ack_outbound(
-        self, msg_id: uuid.UUID, *, status: str, max_attempts: int = 3
+    async def record_send_result(
+        self,
+        msg_id: uuid.UUID,
+        *,
+        ok: bool,
+        provider_message_id: str | None = None,
+        error: str | None = None,
+        permanent: bool = False,
+        max_attempts: int = 5,
+        retry_delay_seconds: int = 60,
     ) -> str | None:
-        """Record a worker ack. Returns the resulting message status, or None
-        if the message does not exist. A 'failed' ack stays 'queued' for retry
-        until ``max_attempts`` is reached, then becomes 'failed'."""
+        """Finalize a dispatcher send attempt. Transient failures requeue with
+        ``retry_delay_seconds`` backoff until ``max_attempts``; permanent ones
+        fail immediately. Returns the resulting status, or None if missing."""
         async with self._session() as s:
             msg = await s.get(OutboundMessage, msg_id)
             if msg is None:
                 return None
             msg.attempts = (msg.attempts or 0) + 1
-            msg.status = resolve_ack_status(status, msg.attempts, max_attempts)
-            if msg.status == "sent":
-                msg.sent_at = datetime.now()
+            if ok:
+                msg.status = "sent"
+                msg.sent_at = datetime.now(timezone.utc)
+                msg.provider_message_id = provider_message_id
+                msg.last_error = None
+            else:
+                msg.last_error = error
+                if permanent or msg.attempts >= max_attempts:
+                    msg.status = "failed"
+                else:
+                    msg.status = "queued"
+                    msg.next_attempt_at = datetime.now(timezone.utc) + timedelta(
+                        seconds=retry_delay_seconds
+                    )
             await s.commit()
             return msg.status
+
+    # ---- notification channels -------------------------------------------
+
+    async def get_notification_channels(
+        self, user_id: uuid.UUID
+    ) -> list[NotificationChannel]:
+        async with self._session() as s:
+            result = await s.execute(
+                select(NotificationChannel)
+                .where(NotificationChannel.user_id == user_id)
+                .order_by(NotificationChannel.channel)
+            )
+            return list(result.scalars().all())
+
+    async def get_notification_channel(
+        self, user_id: uuid.UUID, channel: str
+    ) -> NotificationChannel | None:
+        async with self._session() as s:
+            result = await s.execute(
+                select(NotificationChannel).where(
+                    NotificationChannel.user_id == user_id,
+                    NotificationChannel.channel == channel,
+                )
+            )
+            return result.scalar_one_or_none()
+
+    async def upsert_notification_channel(
+        self,
+        user_id: uuid.UUID,
+        *,
+        channel: str,
+        destination: str,
+        consent: bool = False,
+    ) -> NotificationChannel:
+        """Register (or re-register) a destination for a channel. A changed
+        destination resets verification; consent is timestamped when given."""
+        now = datetime.now(timezone.utc)
+        async with self._session() as s:
+            result = await s.execute(
+                select(NotificationChannel).where(
+                    NotificationChannel.user_id == user_id,
+                    NotificationChannel.channel == channel,
+                )
+            )
+            row = result.scalar_one_or_none()
+            if row is None:
+                row = NotificationChannel(
+                    user_id=user_id, channel=channel, destination=destination
+                )
+                s.add(row)
+            elif row.destination != destination:
+                row.destination = destination
+                row.verified_at = None
+                row.opted_out_at = None
+            if consent:
+                row.consent_at = now
+            row.updated_at = now
+            await s.commit()
+            return row
+
+    async def mark_channel_verified(self, user_id: uuid.UUID, channel: str) -> bool:
+        """Set verified_at and clear any opt-out. Returns False if unregistered."""
+        async with self._session() as s:
+            result = await s.execute(
+                select(NotificationChannel).where(
+                    NotificationChannel.user_id == user_id,
+                    NotificationChannel.channel == channel,
+                )
+            )
+            row = result.scalar_one_or_none()
+            if row is None:
+                return False
+            now = datetime.now(timezone.utc)
+            row.verified_at = now
+            row.opted_out_at = None
+            row.updated_at = now
+            await s.commit()
+            return True
+
+    async def set_preferred_channel(
+        self, user_id: uuid.UUID, channel: str | None
+    ) -> bool:
+        """Switch the user's preferred channel. Non-null channels must already
+        be verified and not opted out. Returns False if that doesn't hold."""
+        async with self._session() as s:
+            user = await s.get(User, user_id)
+            if user is None:
+                return False
+            if channel is not None:
+                result = await s.execute(
+                    select(NotificationChannel).where(
+                        NotificationChannel.user_id == user_id,
+                        NotificationChannel.channel == channel,
+                    )
+                )
+                row = result.scalar_one_or_none()
+                if row is None or row.verified_at is None or row.opted_out_at is not None:
+                    return False
+            user.preferred_channel = channel
+            await s.commit()
+            return True
+
+    async def set_opt_out_by_destination(
+        self, *, channel: str, destination: str, opted_out: bool
+    ) -> int:
+        """Set/clear opt-out for every registration of a destination (used by
+        the Twilio STOP/START webhook, where only the phone number is known).
+        Returns the number of rows updated."""
+        now = datetime.now(timezone.utc)
+        async with self._session() as s:
+            result = await s.execute(
+                select(NotificationChannel).where(
+                    NotificationChannel.channel == channel,
+                    NotificationChannel.destination == destination,
+                )
+            )
+            rows = list(result.scalars().all())
+            for row in rows:
+                row.opted_out_at = now if opted_out else None
+                row.updated_at = now
+            await s.commit()
+            return len(rows)
+
+    # ---- verification codes ----------------------------------------------
+
+    async def create_verification_code(
+        self,
+        user_id: uuid.UUID,
+        *,
+        channel: str,
+        destination: str,
+        code_hash: str,
+        ttl_seconds: int = 600,
+    ) -> uuid.UUID:
+        """Store a hashed one-time code, invalidating any live one for the same
+        channel so only the latest code checks out."""
+        now = datetime.now(timezone.utc)
+        async with self._session() as s:
+            result = await s.execute(
+                select(VerificationCode).where(
+                    VerificationCode.user_id == user_id,
+                    VerificationCode.channel == channel,
+                    VerificationCode.consumed_at.is_(None),
+                    VerificationCode.expires_at > now,
+                )
+            )
+            for stale in result.scalars().all():
+                stale.consumed_at = now
+            code = VerificationCode(
+                user_id=user_id,
+                channel=channel,
+                destination=destination,
+                code_hash=code_hash,
+                expires_at=now + timedelta(seconds=ttl_seconds),
+            )
+            s.add(code)
+            await s.commit()
+            return code.id
+
+    async def latest_verification_code(
+        self, user_id: uuid.UUID, channel: str
+    ) -> VerificationCode | None:
+        """The live (unconsumed, unexpired) code for a channel, if any."""
+        async with self._session() as s:
+            result = await s.execute(
+                select(VerificationCode)
+                .where(
+                    VerificationCode.user_id == user_id,
+                    VerificationCode.channel == channel,
+                    VerificationCode.consumed_at.is_(None),
+                    VerificationCode.expires_at > datetime.now(timezone.utc),
+                )
+                .order_by(VerificationCode.created_at.desc())
+                .limit(1)
+            )
+            return result.scalar_one_or_none()
+
+    async def record_code_attempt(self, code_id: uuid.UUID) -> int:
+        """Increment failed-check attempts; returns the new count."""
+        async with self._session() as s:
+            code = await s.get(VerificationCode, code_id)
+            if code is None:
+                return 0
+            code.attempts = (code.attempts or 0) + 1
+            await s.commit()
+            return code.attempts
+
+    async def consume_verification_code(self, code_id: uuid.UUID) -> None:
+        async with self._session() as s:
+            code = await s.get(VerificationCode, code_id)
+            if code is not None:
+                code.consumed_at = datetime.now(timezone.utc)
+                await s.commit()
+
+    async def count_verification_codes_since(
+        self,
+        since: datetime,
+        *,
+        destination: str | None = None,
+        user_id: uuid.UUID | None = None,
+    ) -> int:
+        """Issued-code count for rate limiting (per destination or per user)."""
+        async with self._session() as s:
+            query = select(func.count()).where(VerificationCode.created_at >= since)
+            if destination is not None:
+                query = query.where(VerificationCode.destination == destination)
+            if user_id is not None:
+                query = query.where(VerificationCode.user_id == user_id)
+            result = await s.execute(query)
+            return int(result.scalar_one() or 0)

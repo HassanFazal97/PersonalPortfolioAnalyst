@@ -68,18 +68,46 @@ def _trim_positions(
     return sorted(positions, key=_mv, reverse=True)[:cap]
 
 
+def resolve_digest_positions(
+    all_positions: list[dict[str, Any]],
+    *,
+    plan: str,
+    settings: Settings,
+    digest_tickers: list[str],
+) -> list[dict[str, Any]]:
+    """Pick which holdings feed the digest for this user/plan."""
+    cap = max_digest_holdings(plan, settings)
+    if cap is None:
+        return all_positions
+    if digest_tickers:
+        by_ticker = {p["ticker"]: p for p in all_positions}
+        picked = [by_ticker[t] for t in digest_tickers if t in by_ticker]
+        if picked:
+            return picked[:cap]
+    return _trim_positions(all_positions, cap)
+
+
 async def build_market_context(
     ctx: ToolContext,
     *,
     tz: str,
-    max_holdings: int | None = None,
+    plan: str,
+    digest_tickers: list[str],
 ) -> str:
     """Assemble positions + day/week moves + yesterday's digest + today's date."""
     today = datetime.now(ZoneInfo(tz)).date()
     yesterday = today - timedelta(days=1)
+    settings = ctx.settings
 
     pf = await portfolio.get_portfolio({}, ctx)
-    positions = _trim_positions(pf.get("positions", []), max_holdings)
+    all_positions = pf.get("positions", [])
+    positions = resolve_digest_positions(
+        all_positions,
+        plan=plan,
+        settings=settings,
+        digest_tickers=digest_tickers,
+    )
+    cap = max_digest_holdings(plan, settings)
 
     week_moves: dict[str, Any] = {}
     for pos in positions:
@@ -101,8 +129,8 @@ async def build_market_context(
         "week_return_pct_by_ticker": week_moves,
         "yesterday_digest": yesterday_digest.body if yesterday_digest else None,
     }
-    if max_holdings is not None and len(pf.get("positions", [])) > max_holdings:
-        context["holdings_capped"] = max_holdings
+    if cap is not None and len(all_positions) > cap:
+        context["holdings_capped"] = cap
     return json.dumps(context, default=str)
 
 
@@ -146,13 +174,11 @@ async def run_digest_pipeline(
 
     set_current_user_id(uid)
     client = _get_client(client)
-    holdings_cap = max_digest_holdings(plan, settings)
     ctx = ToolContext(
         settings=settings,
         repo=db,
         user_id=uid,
         timezone=tz,
-        enqueue_delivery=settings.imessage_recipient != "",
     )
 
     started = time.monotonic()
@@ -172,8 +198,9 @@ async def run_digest_pipeline(
     )
 
     try:
+        digest_tickers = await db.get_digest_tickers(uid)
         market_context = await build_market_context(
-            ctx, tz=tz, max_holdings=holdings_cap
+            ctx, tz=tz, plan=plan, digest_tickers=digest_tickers
         )
 
         investigations = await planner.plan(
@@ -188,6 +215,7 @@ async def run_digest_pipeline(
             p["ticker"] for p in json.loads(market_context).get("positions", [])
         ]
         await news.prefetch_news_for_tickers(tickers)
+        await _persist_prefetched_news(db, uid, anchor_run_id, tickers)
 
         results: list[dict[str, str]] = []
         for inv in investigations:
@@ -256,6 +284,23 @@ async def run_digest_pipeline(
         set_current_user_id(None)
 
 
+async def _persist_prefetched_news(
+    db: Repo,
+    user_id: uuid.UUID,
+    run_id: uuid.UUID,
+    tickers: list[str],
+    *,
+    max_per_ticker: int = 5,
+) -> None:
+    """Store top prefetched articles so the dashboard can show received news."""
+    items: list[dict[str, Any]] = []
+    for ticker in tickers:
+        for article in news.get_cached_news_for_ticker(ticker)[:max_per_ticker]:
+            items.append({**article, "ticker": ticker})
+    if items:
+        await db.insert_news_items_if_new(user_id, items, run_id=run_id)
+
+
 async def run_digests_for_all(db: Repo, *, client: Any = None) -> list[dict[str, Any]]:
     """Scheduled entry point: one digest per eligible user under cadence + caps."""
     recipients = await db.list_digest_recipients()
@@ -281,9 +326,11 @@ async def _deliver_fallback(
             digest_date=today,
             user_id=getattr(ctx, "user_id", None),
         )
-        if ctx.enqueue_delivery:
-            await db.enqueue_outbound(
-                FALLBACK_BODY, user_id=getattr(ctx, "user_id", None)
-            )
+        await db.enqueue_outbound(
+            FALLBACK_BODY,
+            user_id=getattr(ctx, "user_id", None),
+            kind="digest",
+            subject="Your morning digest",
+        )
     except Exception:  # noqa: BLE001 - fallback delivery is best-effort
         pass

@@ -7,8 +7,9 @@ is available, the same assertions can be re-run against the real Repo.
 
 from __future__ import annotations
 
+import hashlib
 import uuid
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Any
 
@@ -29,12 +30,18 @@ class FakeRepo:
         self._users_by_id: dict[uuid.UUID, Any] = {}
         self._cost_override: dict[uuid.UUID, float] = {}
         self._chats_override: dict[uuid.UUID, int] = {}
+        self._notification_channels: dict[tuple[Any, str], SimpleNamespace] = {}
+        self._verification_codes: dict[uuid.UUID, SimpleNamespace] = {}
+        self._news_items: list[SimpleNamespace] = []
+        self._news_fingerprints: set[tuple] = set()
 
-    def seed_user(self, user_id, *, plan="free", digest_enabled=True, email=None):
+    def seed_user(self, user_id, *, plan="free", digest_enabled=True, email=None,
+                  digest_tickers=None):
         self._users_by_id[user_id] = SimpleNamespace(
             id=user_id, auth_id=None, email=email, plan=plan,
             digest_enabled=digest_enabled, timezone="America/Toronto",
-            digest_send_time="07:45",
+            digest_send_time="07:45", preferred_channel=None,
+            digest_tickers=list(digest_tickers or []),
         )
 
     async def create_run(self, *, trigger, user_message, model, prompt_version,
@@ -57,6 +64,7 @@ class FakeRepo:
             self._users_by_id[uid] = SimpleNamespace(
                 id=uid, auth_id=auth_id, email=email, plan="free", digest_enabled=True,
                 timezone="America/Toronto", digest_send_time="07:45",
+                preferred_channel=None, digest_tickers=[],
             )
         return self._users_by_auth[auth_id]
 
@@ -64,7 +72,8 @@ class FakeRepo:
         return self._users_by_id.get(user_id)
 
     async def update_user_preferences(self, user_id, *, timezone=None,
-                                      digest_send_time=None, digest_enabled=None):
+                                      digest_send_time=None, digest_enabled=None,
+                                      digest_tickers=None):
         user = self._users_by_id.get(user_id)
         if user is None:
             return
@@ -74,6 +83,19 @@ class FakeRepo:
             user.digest_send_time = digest_send_time
         if digest_enabled is not None:
             user.digest_enabled = digest_enabled
+        if digest_tickers is not None:
+            user.digest_tickers = list(digest_tickers)
+
+    async def get_digest_tickers(self, user_id):
+        user = self._users_by_id.get(user_id)
+        if user is None:
+            return []
+        return list(getattr(user, "digest_tickers", []) or [])
+
+    async def set_digest_tickers(self, user_id, tickers):
+        user = self._users_by_id.get(user_id)
+        if user is not None:
+            user.digest_tickers = list(tickers)
 
     async def list_digest_recipients(self):
         from app.config import DEFAULT_USER_ID
@@ -176,11 +198,148 @@ class FakeRepo:
 
         uid = user_id or uuid.UUID(DEFAULT_USER_ID)
         row = SimpleNamespace(
-            run_id=run_id, body=body, digest_date=digest_date, created_at=None
+            id=uuid.uuid4(),
+            run_id=run_id, body=body, digest_date=digest_date,
+            created_at=datetime.now(timezone.utc),
         )
         self._digests_by_user[(uid, digest_date)] = row
         if uid == uuid.UUID(DEFAULT_USER_ID):
             self.digests[digest_date] = row
+
+    async def list_recent_digests(self, *, user_id=None, since=None, limit=50):
+        from app.config import DEFAULT_USER_ID
+
+        uid = user_id or uuid.UUID(DEFAULT_USER_ID)
+        rows = [
+            r for (u, _), r in self._digests_by_user.items() if u == uid
+        ]
+        if since is not None:
+            rows = [r for r in rows if r.created_at and r.created_at >= since]
+        rows.sort(key=lambda r: r.created_at or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+        return rows[:limit]
+
+    @staticmethod
+    def news_fingerprint(url, headline):
+        key = f"{url or ''}|{headline}".encode()
+        return hashlib.sha256(key).hexdigest()
+
+    async def insert_news_items_if_new(self, user_id, items, *, run_id=None):
+        from app.config import DEFAULT_USER_ID
+
+        uid = user_id or uuid.UUID(DEFAULT_USER_ID)
+        inserted = 0
+        for item in items:
+            fp = item.get("fingerprint") or self.news_fingerprint(
+                item.get("url"), item["headline"]
+            )
+            if (uid, fp) in self._news_fingerprints:
+                continue
+            self._news_fingerprints.add((uid, fp))
+            self._news_items.append(SimpleNamespace(
+                id=uuid.uuid4(),
+                user_id=uid,
+                ticker=item["ticker"],
+                headline=item["headline"],
+                source=item.get("source"),
+                url=item.get("url"),
+                published_at=item.get("published_at"),
+                summary=item.get("summary"),
+                run_id=run_id,
+                fingerprint=fp,
+                created_at=datetime.now(timezone.utc),
+            ))
+            inserted += 1
+        return inserted
+
+    async def list_news_items(self, *, user_id=None, ticker=None, since=None, limit=50):
+        from app.config import DEFAULT_USER_ID
+
+        uid = user_id or uuid.UUID(DEFAULT_USER_ID)
+        rows = [n for n in self._news_items if n.user_id == uid]
+        if ticker is not None:
+            rows = [n for n in rows if n.ticker == ticker]
+        if since is not None:
+            rows = [n for n in rows if n.created_at >= since]
+        rows.sort(key=lambda n: n.created_at, reverse=True)
+        return rows[:limit]
+
+    async def list_stored_news(
+        self, user_id, *, ticker=None, kind="all", since=None,
+        severity=None, category=None, limit=50,
+    ):
+        kinds = {k.strip() for k in kind.split(",") if k.strip()} or {"all"}
+        if "all" in kinds:
+            kinds = {"all"}
+        out = []
+        include_digest = ("all" in kinds or "digest" in kinds) and ticker is None
+        include_alert = "all" in kinds or "alert" in kinds
+        include_holding = "all" in kinds or "holding" in kinds
+
+        if include_digest:
+            for d in await self.list_recent_digests(user_id=user_id, since=since, limit=limit):
+                out.append({
+                    "id": str(d.id),
+                    "kind": "digest",
+                    "ticker": None,
+                    "tickers": [],
+                    "headline": f"Morning digest — {d.digest_date.isoformat()}",
+                    "body": d.body,
+                    "source": None,
+                    "url": None,
+                    "severity": None,
+                    "category": None,
+                    "published_at": None,
+                    "created_at": d.created_at.isoformat(),
+                })
+
+        if include_alert:
+            for a in await self.recent_alerts(limit=limit * 2, user_id=user_id):
+                if since and a.created_at and a.created_at < since:
+                    continue
+                if severity and a.severity != severity:
+                    continue
+                if category and a.category != category:
+                    continue
+                tickers = a.tickers if isinstance(a.tickers, list) else []
+                if ticker is not None and ticker not in tickers:
+                    continue
+                created = a.created_at or datetime.now(timezone.utc)
+                out.append({
+                    "id": str(a.id),
+                    "kind": "alert",
+                    "ticker": tickers[0] if len(tickers) == 1 else None,
+                    "tickers": tickers,
+                    "headline": a.headline,
+                    "body": a.body,
+                    "source": None,
+                    "url": None,
+                    "severity": a.severity,
+                    "category": a.category,
+                    "published_at": None,
+                    "created_at": created.isoformat(),
+                })
+
+        if include_holding:
+            for n in await self.list_news_items(
+                user_id=user_id, ticker=ticker, since=since, limit=limit
+            ):
+                out.append({
+                    "id": str(n.id),
+                    "kind": "holding",
+                    "ticker": n.ticker,
+                    "tickers": [n.ticker],
+                    "headline": n.headline,
+                    "body": n.summary or "",
+                    "source": n.source,
+                    "url": n.url,
+                    "severity": None,
+                    "category": None,
+                    "published_at": n.published_at.isoformat() if n.published_at else None,
+                    "created_at": n.created_at.isoformat(),
+                })
+
+        out.sort(key=lambda x: x["created_at"], reverse=True)
+        return out[:limit]
 
     async def get_digest(self, digest_date, *, user_id=None):
         from app.config import DEFAULT_USER_ID
@@ -239,26 +398,147 @@ class FakeRepo:
             if a.id == alert_id:
                 a.delivered = True
 
-    async def enqueue_outbound(self, body, *, user_id=None):
+    async def enqueue_outbound(self, body, *, user_id=None, kind="message", subject=None):
         msg_id = uuid.uuid4()
         self.outbound.append(body)
         self._outbox[msg_id] = SimpleNamespace(
-            id=msg_id, body=body, status="queued", attempts=0
+            id=msg_id,
+            body=body,
+            status="queued",
+            attempts=0,
+            channel=None,
+            destination=None,
+            payload={"kind": kind, **({"subject": subject} if subject else {})},
         )
         return msg_id
 
-    async def pending_outbound(self, limit=20):
-        return [m for m in self._outbox.values() if m.status == "queued"][:limit]
+    # ---- notification channels (mirrors app/db/repo.py) -----------------
 
-    async def ack_outbound(self, msg_id, *, status, max_attempts=3):
-        from app.db.repo import resolve_ack_status
+    async def get_notification_channels(self, user_id):
+        return sorted(
+            (
+                row
+                for (uid, _), row in self._notification_channels.items()
+                if uid == user_id
+            ),
+            key=lambda r: r.channel,
+        )
 
-        msg = self._outbox.get(msg_id)
-        if msg is None:
-            return None
-        msg.attempts += 1
-        msg.status = resolve_ack_status(status, msg.attempts, max_attempts)
-        return msg.status
+    async def upsert_notification_channel(
+        self, user_id, *, channel, destination, consent=False
+    ):
+        now = datetime.now(timezone.utc)
+        key = (user_id, channel)
+        row = self._notification_channels.get(key)
+        if row is None:
+            row = SimpleNamespace(
+                user_id=user_id,
+                channel=channel,
+                destination=destination,
+                verified_at=None,
+                opted_out_at=None,
+                consent_at=None,
+                updated_at=now,
+            )
+            self._notification_channels[key] = row
+        elif row.destination != destination:
+            row.destination = destination
+            row.verified_at = None
+            row.opted_out_at = None
+        if consent:
+            row.consent_at = now
+        row.updated_at = now
+        return row
+
+    async def mark_channel_verified(self, user_id, channel):
+        row = self._notification_channels.get((user_id, channel))
+        if row is None:
+            return False
+        now = datetime.now(timezone.utc)
+        row.verified_at = now
+        row.opted_out_at = None
+        row.updated_at = now
+        return True
+
+    async def set_preferred_channel(self, user_id, channel):
+        user = self._users_by_id.get(user_id)
+        if user is None:
+            return False
+        if channel is not None:
+            row = self._notification_channels.get((user_id, channel))
+            if row is None or row.verified_at is None or row.opted_out_at is not None:
+                return False
+        user.preferred_channel = channel
+        return True
+
+    async def count_verification_codes_since(
+        self, since, *, destination=None, user_id=None
+    ):
+        return sum(
+            1
+            for c in self._verification_codes.values()
+            if c.created_at >= since
+            and (destination is None or c.destination == destination)
+            and (user_id is None or c.user_id == user_id)
+        )
+
+    async def create_verification_code(
+        self, user_id, *, channel, destination, code_hash, ttl_seconds=600
+    ):
+        now = datetime.now(timezone.utc)
+        for c in self._verification_codes.values():
+            if (
+                c.user_id == user_id
+                and c.channel == channel
+                and c.consumed_at is None
+                and c.expires_at > now
+            ):
+                c.consumed_at = now
+        code_id = uuid.uuid4()
+        self._verification_codes[code_id] = SimpleNamespace(
+            id=code_id,
+            user_id=user_id,
+            channel=channel,
+            destination=destination,
+            code_hash=code_hash,
+            expires_at=now + timedelta(seconds=ttl_seconds),
+            attempts=0,
+            consumed_at=None,
+            created_at=now,
+        )
+        return code_id
+
+    async def latest_verification_code(self, user_id, channel):
+        now = datetime.now(timezone.utc)
+        live = [
+            c
+            for c in self._verification_codes.values()
+            if c.user_id == user_id
+            and c.channel == channel
+            and c.consumed_at is None
+            and c.expires_at > now
+        ]
+        return max(live, key=lambda c: c.created_at) if live else None
+
+    async def record_code_attempt(self, code_id):
+        self._verification_codes[code_id].attempts += 1
+        return self._verification_codes[code_id].attempts
+
+    async def consume_verification_code(self, code_id):
+        self._verification_codes[code_id].consumed_at = datetime.now(timezone.utc)
+
+    @staticmethod
+    def verification_code_from_sent(body: str) -> str:
+        """Extract the 6-digit code from a fake adapter send body."""
+        import re
+
+        match = re.search(r"\b(\d{6})\b", body)
+        assert match is not None, body
+        return match.group(1)
+
+    @staticmethod
+    def hash_verification_code(code: str) -> str:
+        return hashlib.sha256(code.encode()).hexdigest()
 
 
 class ScriptedAnthropic:

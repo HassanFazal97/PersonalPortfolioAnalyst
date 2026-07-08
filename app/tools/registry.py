@@ -23,8 +23,6 @@ class ToolContext:
     run_id: Any | None = None
     # The user this run acts for; tenant reads/writes scope to it (None = owner).
     user_id: Any | None = None
-    # Phase B: when true, send_digest also enqueues to outbound_messages.
-    enqueue_delivery: bool = False
     # IANA timezone for digest_date (defaults to settings.tz in send_digest).
     timezone: str | None = None
     # Anthropic client + live budget, threaded through so tools that make their

@@ -234,6 +234,20 @@ async def prefetch_news_for_tickers(
     await asyncio.gather(*(_warm(t) for t in tickers))
 
 
+def get_cached_news_for_ticker(
+    ticker: str, lookback_days: int = 3
+) -> list[dict[str, Any]]:
+    """Return normalized articles from the in-process cache for a ticker."""
+    key = _cache_key(ticker, lookback_days)
+    cached = _news_cache.get(key)
+    if not cached:
+        return []
+    if _clock() - cached[0] >= NEWS_TTL_SECONDS:
+        return []
+    items, _source = cached[1]
+    return list(items)
+
+
 # --------------------------------------------------------------------------
 # Tool entrypoint
 # --------------------------------------------------------------------------

@@ -2,8 +2,9 @@
 
 Exposed only to digest runs (never chat). Enforces the 900-char limit by
 returning an error tool_result on violation (the model must shorten and retry).
-On success it writes the ``digests`` row for today and, in Phase B, enqueues to
-``outbound_messages`` for the Mac worker to deliver.
+On success it writes the ``digests`` row for today and enqueues to
+``outbound_messages``; the queue resolves the user's preferred channel (or
+records a skip when none is verified), so enqueueing is unconditional.
 """
 
 from __future__ import annotations
@@ -61,9 +62,12 @@ async def send_digest(payload: dict[str, Any], ctx: Any = None) -> dict[str, Any
         run_id=run_id, body=body, digest_date=digest_date, user_id=user_id
     )
 
-    # Phase B: enqueue for the Mac worker. Harmless if no worker is running.
-    if getattr(ctx, "enqueue_delivery", False):
-        await ctx.repo.enqueue_outbound(body, user_id=user_id)
+    await ctx.repo.enqueue_outbound(
+        body,
+        user_id=user_id,
+        kind="digest",
+        subject=f"Your morning digest — {digest_date.strftime('%b %d')}",
+    )
 
     return {
         "status": "sent",
