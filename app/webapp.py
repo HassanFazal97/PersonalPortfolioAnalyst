@@ -209,6 +209,10 @@ tr:last-child td { border-bottom: none; }
   border-radius: var(--r-m); font-size: 0.9rem; color: var(--ink-2); }
 .warn-banner strong { color: var(--warn); font-weight: 650; }
 .warn-banner .actions { display: flex; align-items: center; gap: 0.9rem; }
+/* setup nudge variant: accent-tinted, for onboarding prompts, not errors */
+.warn-banner.setup { border-color: oklch(48% 0.18 295 / 0.45);
+  background: oklch(48% 0.18 295 / 0.12); }
+.warn-banner.setup strong { color: var(--accent-text); }
 /* holdings + news dashboard */
 .holdings-row { cursor: pointer; transition: background 0.15s var(--ease); }
 .holdings-row:hover { background: var(--surface-2); }
@@ -1097,6 +1101,14 @@ _DASHBOARD_BODY = """
 </div>
 <div class="dash-layout">
 <div class="dash-main">
+  <div class="warn-banner setup" id="delivery-banner" style="display:none;">
+    <span><strong>Get your digest delivered.</strong> Add text, email, or Discord
+    and your morning brief reaches you before the market opens.</span>
+    <span class="actions">
+      <a class="btn" href="/app/settings/delivery">Set up delivery</a>
+      <button class="link-btn" id="delivery-banner-dismiss">Dismiss</button>
+    </span>
+  </div>
   <div class="warn-banner" id="connection-banner" style="display:none;">
     <span id="connection-banner-msg"><strong>Your brokerage connection needs
     attention.</strong> Your digest may be out of date.</span>
@@ -1189,26 +1201,6 @@ _DASHBOARD_BODY = """
     <div class="error-box" id="watchlist-save-error"></div>
   </div>
 
-  <div class="dash-card">
-    <h3>Delivery <button class="link-btn" id="delivery-change-btn"
-      style="display:none;">Change</button></h3>
-    <div id="delivery-summary"><div aria-hidden="true">
-      <div class="skl"></div><div class="skl short"></div>
-    </div></div>
-    <p id="schedule-row" style="display:none;"><span id="schedule-text"></span>
-      <button class="link-btn" id="schedule-edit-btn">Edit schedule</button></p>
-    <div id="schedule-editor" style="display:none;">
-      <label for="dash-tz">Timezone</label>
-      <select id="dash-tz"></select>
-      <label for="dash-send-time">Send time</label>
-      <input type="time" id="dash-send-time">
-      <button class="btn" id="save-schedule-btn" style="margin-top:0.9rem;">Save schedule</button>
-      <div class="error-box" id="schedule-error"></div>
-    </div>
-    <div id="delivery-editor" style="display:none;">
-""" + _DELIVERY_PICKER_HTML + """
-    </div>
-  </div>
 </aside>
 </div>
 """
@@ -1499,98 +1491,32 @@ async function loadChatHistory() {
 
 loadChatHistory();
 
-const CHANNEL_NAMES = { sms: 'Text message', email: 'Email', discord: 'Discord' };
+// --- delivery-setup nudge ----------------------------------------------------
+// Shown when no verified, non-opted-out channel is active: the digest only
+// lands on this dashboard until the user adds text/email/Discord delivery.
+// Managed on /app/settings/delivery; this banner just points there.
+const DELIVERY_BANNER_KEY = 'cirvia-delivery-banner-dismissed';
 
-async function loadDelivery() {
-  const summary = document.getElementById('delivery-summary');
-  const changeBtn = document.getElementById('delivery-change-btn');
-  document.getElementById('delivery-editor').style.display = 'none';
+async function checkDeliverySetup() {
+  if (sessionStorage.getItem(DELIVERY_BANNER_KEY)) return;
+  // One nudge at a time: a broken connection is the more urgent problem.
+  const connBanner = document.getElementById('connection-banner');
+  if (connBanner && connBanner.style.display !== 'none') return;
   try {
     const info = await (await api('/me/notifications')).json();
     const active = (info.channels || []).find(
       (c) => c.channel === info.preferred_channel);
-    if (active && active.verified && !active.opted_out) {
-      summary.innerHTML =
-        '<p style="margin-top:0.75rem;">' +
-        '<strong>' + esc(CHANNEL_NAMES[active.channel] || active.channel) + '</strong>' +
-        ' · ' + esc(active.destination_masked) +
-        ' <span class="chip-ok">\\u2713 verified</span></p>' +
-        '<p class="muted-note">Your digest and alerts are delivered here.</p>';
-    } else if (active && active.opted_out) {
-      summary.innerHTML =
-        '<p class="muted-note"><span class="chip-warn">Delivery paused</span> — you ' +
-        'unsubscribed from ' + esc(CHANNEL_NAMES[active.channel] || active.channel) +
-        '. Set up a channel to resume delivery.</p>';
-    } else {
-      summary.innerHTML =
-        '<p class="muted-note"><span class="chip-warn">Not set up</span> — your digest ' +
-        'only appears on this dashboard. Add a channel to get it by text, email, or Discord.</p>';
+    if (!(active && active.verified && !active.opted_out)) {
+      const banner = document.getElementById('delivery-banner');
+      banner.style.display = 'flex';
+      riseIn(banner);
     }
-    changeBtn.style.display = 'inline';
-    changeBtn.textContent = active && active.verified ? 'Change' : 'Set up';
-    summary.style.display = 'block';
-  } catch (e) {
-    summary.innerHTML = '<p class="muted-note">Could not load delivery settings.</p>';
-  }
+  } catch (e) { /* advisory; never block the dashboard */ }
 }
 
-document.getElementById('delivery-change-btn').addEventListener('click', async () => {
-  const editor = document.getElementById('delivery-editor');
-  const open = editor.style.display !== 'none';
-  if (open) { editor.style.display = 'none'; return; }
-  document.getElementById('schedule-editor').style.display = 'none';
-  editor.style.display = 'block';
-  riseIn(editor);
-  await initDeliveryPicker(() => loadDelivery());
-});
-
-function renderSchedule() {
-  if (!meProfile) return;
-  const row = document.getElementById('schedule-row');
-  document.getElementById('schedule-text').textContent =
-    'Digest at ' + (meProfile.digest_send_time || '07:45') +
-    ' · ' + (meProfile.timezone || 'America/Toronto');
-  row.style.display = 'block';
-}
-
-document.getElementById('schedule-edit-btn').addEventListener('click', () => {
-  const editor = document.getElementById('schedule-editor');
-  const open = editor.style.display !== 'none';
-  if (open) { editor.style.display = 'none'; return; }
-  document.getElementById('delivery-editor').style.display = 'none';
-  fillTzSelect(document.getElementById('dash-tz'), meProfile && meProfile.timezone);
-  document.getElementById('dash-send-time').value =
-    (meProfile && meProfile.digest_send_time) || '07:45';
-  editor.style.display = 'block';
-  riseIn(editor);
-});
-
-document.getElementById('save-schedule-btn').addEventListener('click', async () => {
-  const btn = document.getElementById('save-schedule-btn');
-  const errBox = document.getElementById('schedule-error');
-  errBox.style.display = 'none';
-  btn.disabled = true;
-  try {
-    const resp = await api('/me', {
-      method: 'PATCH',
-      body: JSON.stringify({
-        timezone: document.getElementById('dash-tz').value,
-        digest_send_time: document.getElementById('dash-send-time').value,
-      }),
-    });
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => ({}));
-      throw new Error(err.detail || 'Could not save schedule');
-    }
-    meProfile = await resp.json();
-    document.getElementById('schedule-editor').style.display = 'none';
-    renderSchedule();
-  } catch (e) {
-    errBox.textContent = e.message;
-    errBox.style.display = 'block';
-  } finally {
-    btn.disabled = false;
-  }
+document.getElementById('delivery-banner-dismiss').addEventListener('click', () => {
+  sessionStorage.setItem(DELIVERY_BANNER_KEY, '1');
+  document.getElementById('delivery-banner').style.display = 'none';
 });
 
 // --- broken-connection banner ------------------------------------------------
@@ -1669,9 +1595,7 @@ document.getElementById('reconnect-btn').addEventListener('click', async () => {
 loadMe().then(() => {
   loadHoldings();
   reloadNewsFeeds();
-  loadDelivery();
-  renderSchedule();
-  checkConnection();
+  checkConnection().then(checkDeliverySetup);
 });
 """
 
@@ -1721,6 +1645,13 @@ _SETTINGS_BODY = """
   </div>
   <div class="error-box" id="conn-error"></div>
   <div class="notice-box" id="conn-notice"></div>
+</div>
+
+<div class="dash-card">
+  <h3>Delivery <a class="link-btn" href="/app/settings/delivery">Manage</a></h3>
+  <div id="delivery-overview"><div aria-hidden="true">
+    <div class="skl short"></div>
+  </div></div>
 </div>
 
 <div class="dash-card">
@@ -1921,8 +1852,32 @@ function esc(s) {
   const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML;
 }
 
+async function loadDeliveryOverview() {
+  const el = document.getElementById('delivery-overview');
+  try {
+    const info = await (await api('/me/notifications')).json();
+    const names = { sms: 'Text message', email: 'Email', discord: 'Discord' };
+    const active = (info.channels || []).find(
+      (c) => c.channel === info.preferred_channel);
+    if (active && active.verified && !active.opted_out) {
+      el.innerHTML = '<p class="muted-note" style="margin-top:0.5rem;">' +
+        '<strong style="color:var(--ink);">' +
+        esc(names[active.channel] || active.channel) + '</strong> · ' +
+        esc(active.destination_masked) +
+        ' <span class="chip-ok">\\u2713 verified</span></p>';
+    } else {
+      el.innerHTML = '<p class="muted-note" style="margin-top:0.5rem;">' +
+        '<span class="chip-warn">Not set up</span>. Your digest only appears ' +
+        'in the app until you add text, email, or Discord delivery.</p>';
+    }
+  } catch (e) {
+    el.innerHTML = '<p class="muted-note">Could not load delivery settings.</p>';
+  }
+}
+
 loadAccount();
 loadConnection();
+loadDeliveryOverview();
 """
 
 
@@ -1965,7 +1920,7 @@ def dashboard_page(supabase_url: str, anon_key: str) -> str:
         _DASHBOARD_BODY,
         supabase_url=supabase_url,
         anon_key=anon_key,
-        extra_js=_DELIVERY_JS + _DASHBOARD_JS,
+        extra_js=_DASHBOARD_JS,
         wrap_class="app-wrap dash-wrap",
     )
 
@@ -1977,6 +1932,173 @@ def settings_page(supabase_url: str, anon_key: str) -> str:
         supabase_url=supabase_url,
         anon_key=anon_key,
         extra_js=_SETTINGS_JS,
+        wrap_class="app-wrap settings-wrap",
+    )
+
+
+# --------------------------------------------------------------------------
+# /app/settings/delivery — digest channel + schedule management
+# --------------------------------------------------------------------------
+
+_DELIVERY_SETTINGS_BODY = """
+<div class="topbar">
+  <h1 style="font-size:1.5rem;">Delivery</h1>
+  <span class="who" id="who"></span>
+</div>
+<p class="muted-note" style="margin:-0.5rem 0 1rem;">
+  <a href="/app/settings">&larr; Back to settings</a></p>
+
+<div class="dash-card">
+  <h3>Channel <button class="link-btn" id="delivery-change-btn"
+    style="display:none;">Change</button></h3>
+  <div id="delivery-summary"><div aria-hidden="true">
+    <div class="skl"></div><div class="skl short"></div>
+  </div></div>
+  <div id="delivery-editor" style="display:none;">
+""" + _DELIVERY_PICKER_HTML + """
+  </div>
+</div>
+
+<div class="dash-card">
+  <h3>Schedule <button class="link-btn" id="schedule-edit-btn">Edit</button></h3>
+  <p id="schedule-row" style="display:none;"><span id="schedule-text"></span></p>
+  <div id="schedule-editor" style="display:none;">
+    <label for="dash-tz">Timezone</label>
+    <select id="dash-tz"></select>
+    <label for="dash-send-time">Send time</label>
+    <input type="time" id="dash-send-time">
+    <button class="btn" id="save-schedule-btn" style="margin-top:0.9rem;">Save schedule</button>
+    <div class="error-box" id="schedule-error"></div>
+  </div>
+</div>
+"""
+
+_DELIVERY_SETTINGS_JS = """
+requireSession();
+
+let meProfile = null;
+const CHANNEL_NAMES = { sms: 'Text message', email: 'Email', discord: 'Discord' };
+
+function esc(s) {
+  const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML;
+}
+
+async function loadDelivery() {
+  const summary = document.getElementById('delivery-summary');
+  const changeBtn = document.getElementById('delivery-change-btn');
+  document.getElementById('delivery-editor').style.display = 'none';
+  let active = null;
+  try {
+    const info = await (await api('/me/notifications')).json();
+    active = (info.channels || []).find(
+      (c) => c.channel === info.preferred_channel);
+    if (active && active.verified && !active.opted_out) {
+      summary.innerHTML =
+        '<p style="margin-top:0.75rem;">' +
+        '<strong>' + esc(CHANNEL_NAMES[active.channel] || active.channel) + '</strong>' +
+        ' · ' + esc(active.destination_masked) +
+        ' <span class="chip-ok">\\u2713 verified</span></p>' +
+        '<p class="muted-note">Your digest and alerts are delivered here.</p>';
+    } else if (active && active.opted_out) {
+      summary.innerHTML =
+        '<p class="muted-note"><span class="chip-warn">Delivery paused</span>. You ' +
+        'unsubscribed from ' + esc(CHANNEL_NAMES[active.channel] || active.channel) +
+        '. Set up a channel to resume delivery.</p>';
+    } else {
+      summary.innerHTML =
+        '<p class="muted-note"><span class="chip-warn">Not set up</span>. Your digest ' +
+        'only appears in the app. Add a channel to get it by text, email, or Discord.</p>';
+    }
+    changeBtn.style.display = 'inline';
+    changeBtn.textContent = active && active.verified ? 'Change' : 'Set up';
+  } catch (e) {
+    summary.innerHTML = '<p class="muted-note">Could not load delivery settings.</p>';
+  }
+  return active;
+}
+
+async function openEditor() {
+  const editor = document.getElementById('delivery-editor');
+  editor.style.display = 'block';
+  riseIn(editor);
+  await initDeliveryPicker(() => loadDelivery());
+}
+
+document.getElementById('delivery-change-btn').addEventListener('click', async () => {
+  const editor = document.getElementById('delivery-editor');
+  if (editor.style.display !== 'none') { editor.style.display = 'none'; return; }
+  await openEditor();
+});
+
+function renderSchedule() {
+  if (!meProfile) return;
+  document.getElementById('schedule-text').textContent =
+    'Digest at ' + (meProfile.digest_send_time || '07:45') +
+    ' · ' + (meProfile.timezone || 'America/Toronto');
+  document.getElementById('schedule-row').style.display = 'block';
+}
+
+document.getElementById('schedule-edit-btn').addEventListener('click', () => {
+  const editor = document.getElementById('schedule-editor');
+  if (editor.style.display !== 'none') { editor.style.display = 'none'; return; }
+  fillTzSelect(document.getElementById('dash-tz'), meProfile && meProfile.timezone);
+  document.getElementById('dash-send-time').value =
+    (meProfile && meProfile.digest_send_time) || '07:45';
+  editor.style.display = 'block';
+  riseIn(editor);
+});
+
+document.getElementById('save-schedule-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('save-schedule-btn');
+  const errBox = document.getElementById('schedule-error');
+  errBox.style.display = 'none';
+  btn.disabled = true;
+  try {
+    const resp = await api('/me', {
+      method: 'PATCH',
+      body: JSON.stringify({
+        timezone: document.getElementById('dash-tz').value,
+        digest_send_time: document.getElementById('dash-send-time').value,
+      }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || 'Could not save schedule');
+    }
+    meProfile = await resp.json();
+    document.getElementById('schedule-editor').style.display = 'none';
+    renderSchedule();
+  } catch (e) {
+    errBox.textContent = e.message;
+    errBox.style.display = 'block';
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+async function init() {
+  try {
+    meProfile = await (await api('/me')).json();
+    document.getElementById('who').textContent =
+      (meProfile.email || '') + ' \\u00b7 ' + (meProfile.plan === 'pro' ? 'Pro' : 'Free');
+  } catch (e) { /* who line is cosmetic */ }
+  renderSchedule();
+  const active = await loadDelivery();
+  // Arriving without a working channel (e.g. from the dashboard nudge):
+  // open the picker right away instead of making the user click Set up.
+  if (!(active && active.verified && !active.opted_out)) await openEditor();
+}
+init();
+"""
+
+
+def delivery_settings_page(supabase_url: str, anon_key: str) -> str:
+    return _page(
+        "Delivery — Cirvia",
+        _DELIVERY_SETTINGS_BODY,
+        supabase_url=supabase_url,
+        anon_key=anon_key,
+        extra_js=_DELIVERY_JS + _DELIVERY_SETTINGS_JS,
         wrap_class="app-wrap settings-wrap",
     )
 

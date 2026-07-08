@@ -26,7 +26,8 @@ def client(monkeypatch):
 
 @pytest.mark.parametrize(
     "path",
-    ["/app", "/app/onboarding", "/app/dashboard", "/app/settings", "/app/reset"],
+    ["/app", "/app/onboarding", "/app/dashboard", "/app/settings",
+     "/app/settings/delivery", "/app/reset"],
 )
 def test_app_pages_render_without_token(client, path):
     resp = client.get(path)
@@ -82,6 +83,34 @@ def test_reset_page_has_password_form(client):
     assert "updateUser" in resp.text
 
 
+def test_dashboard_has_delivery_setup_banner(client):
+    resp = client.get("/app/dashboard")
+    assert 'id="delivery-banner"' in resp.text
+    assert 'href="/app/settings/delivery"' in resp.text
+    assert 'id="delivery-banner-dismiss"' in resp.text
+    # Hidden until /me/notifications says no working channel exists.
+    assert 'id="delivery-banner" style="display:none;"' in resp.text
+    # Delivery management itself has moved off the dashboard.
+    assert 'id="delivery-summary"' not in resp.text
+    assert 'id="schedule-editor"' not in resp.text
+
+
+def test_delivery_settings_page_has_picker_and_schedule(client):
+    resp = client.get("/app/settings/delivery")
+    assert resp.status_code == 200
+    assert 'id="delivery-summary"' in resp.text
+    assert 'id="channel-options"' in resp.text
+    assert 'id="schedule-editor"' in resp.text
+    assert 'id="dash-send-time"' in resp.text
+    assert 'href="/app/settings"' in resp.text
+
+
+def test_settings_links_to_delivery_page(client):
+    resp = client.get("/app/settings")
+    assert 'href="/app/settings/delivery"' in resp.text
+    assert 'id="delivery-overview"' in resp.text
+
+
 def test_dashboard_has_connection_banner(client):
     resp = client.get("/app/dashboard")
     assert 'id="connection-banner"' in resp.text
@@ -98,7 +127,8 @@ def test_app_pages_noindex(client):
 
 @pytest.mark.parametrize(
     "path",
-    ["/app", "/app/onboarding", "/app/dashboard", "/app/settings", "/app/reset"],
+    ["/app", "/app/onboarding", "/app/dashboard", "/app/settings",
+     "/app/settings/delivery", "/app/reset"],
 )
 def test_app_pages_503_when_supabase_not_configured(monkeypatch, path):
     monkeypatch.setenv("API_TOKEN", "test-token")

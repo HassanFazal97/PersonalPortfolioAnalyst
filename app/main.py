@@ -58,6 +58,7 @@ from app.tools.registry import CHAT_TOOLS, ToolContext
 from app.webapp import (
     NOT_CONFIGURED_HTML,
     dashboard_page,
+    delivery_settings_page,
     login_page,
     onboarding_page,
     reset_page,
@@ -176,6 +177,7 @@ _AUTH_EXEMPT_PATHS = {
     "/app/onboarding",
     "/app/dashboard",
     "/app/settings",
+    "/app/settings/delivery",
     "/app/reset",
     # Twilio cannot attach our bearer token; the route validates
     # X-Twilio-Signature instead.
@@ -452,6 +454,11 @@ def create_app() -> FastAPI:
     async def app_settings() -> HTMLResponse:
         """Account, brokerage connection, plan, and account deletion."""
         return _webapp_html(settings_page)
+
+    @app.get("/app/settings/delivery", response_class=HTMLResponse)
+    async def app_settings_delivery() -> HTMLResponse:
+        """Digest delivery channel and schedule management."""
+        return _webapp_html(delivery_settings_page)
 
     @app.get("/app/reset", response_class=HTMLResponse)
     async def app_reset() -> HTMLResponse:
