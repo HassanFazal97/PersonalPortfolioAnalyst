@@ -8,8 +8,34 @@ SnapTrade / partner reviewers see.
 
 from __future__ import annotations
 
+from urllib.parse import quote
+
+from app.config import get_settings
+
 CONTACT_EMAIL = "fazalhassan@live.ca"
 LAST_UPDATED = "July 5, 2026"
+
+# Brand mark: rounded violet tile with a bold geometric "C" (flat terminals,
+# echoing Schibsted Grotesk). Inlined as a data URI so the tab icon needs no
+# static file; the PNG fallbacks in app/static/ cover Apple touch + OG cards.
+_FAVICON_SVG = (
+    "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'>"
+    "<rect width='64' height='64' rx='14' fill='#683eb6'/>"
+    "<path d='M44.3 42.3A16 16 0 1 1 44.3 21.7' fill='none' stroke='#fff' stroke-width='10'/>"
+    "</svg>"
+)
+
+# Shared by the marketing layout and the app pages (app/webapp.py).
+ICON_LINKS = (
+    f'<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,{quote(_FAVICON_SVG)}">\n'
+    '<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">\n'
+    '<meta name="theme-color" content="#08060c">\n'
+)
+
+
+def _public_base_url() -> str:
+    """Absolute origin for og:url / og:image (no trailing slash)."""
+    return (get_settings().public_base_url or "https://cirvia.ca").rstrip("/")
 
 _CSS = """
 :root {
@@ -639,12 +665,23 @@ _FOOTER = (
 )
 
 
-def _layout(title: str, description: str, body: str, active: str = "") -> str:
+def _layout(title: str, description: str, body: str, active: str = "", path: str = "/") -> str:
+    base = _public_base_url()
+    og_image = f"{base}/static/og.png"
     return (
         '<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n'
         '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
         f"<title>{title}</title>\n"
         f'<meta name="description" content="{description}">\n'
+        + ICON_LINKS
+        + f'<meta property="og:title" content="{title}">\n'
+        + f'<meta property="og:description" content="{description}">\n'
+        + '<meta property="og:type" content="website">\n'
+        + '<meta property="og:site_name" content="Cirvia">\n'
+        + f'<meta property="og:url" content="{base}{path}">\n'
+        + f'<meta property="og:image" content="{og_image}">\n'
+        + '<meta name="twitter:card" content="summary_large_image">\n'
+        + f'<meta name="twitter:image" content="{og_image}">\n'
         + _FONT_LINKS
         + "<style>"
         + _CSS
@@ -1203,6 +1240,7 @@ LANDING_HTML = _layout(
     "real holdings. Read-only. No trade execution.",
     _HOME_BODY,
     active="home",
+    path="/",
 )
 
 PRICING_HTML = _layout(
@@ -1211,6 +1249,7 @@ PRICING_HTML = _layout(
     "($120/yr) for unlimited accounts, daily digests, macro alerts, and unlimited chat.",
     _PRICING_BODY,
     active="pricing",
+    path="/pricing",
 )
 
 CONTACT_HTML = _layout(
@@ -1218,16 +1257,19 @@ CONTACT_HTML = _layout(
     "Get in touch with Cirvia for early access, support, privacy requests, or partnerships.",
     _CONTACT_BODY,
     active="contact",
+    path="/contact",
 )
 
 PRIVACY_HTML = _layout(
     "Privacy Policy — Cirvia",
     "How Cirvia collects, uses, and protects your personal and brokerage information.",
     _PRIVACY_BODY,
+    path="/privacy",
 )
 
 TERMS_HTML = _layout(
     "Terms of Service — Cirvia",
     "The terms governing your use of Cirvia's read-only, informational portfolio analysis service.",
     _TERMS_BODY,
+    path="/terms",
 )
