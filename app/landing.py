@@ -1166,7 +1166,9 @@ _PRICING_BODY = f"""
         <li>Macro alerts when the world moves</li>
         <li>Unlimited chat</li>
       </ul>
-      <a class="btn" href="/app">Go Pro</a>
+      <a class="btn ghost" href="/app">Start free, upgrade later</a>
+      <p class="price-note" style="margin-top:0.75rem;">Pro billing is coming soon.
+      Every new account starts on the Free plan.</p>
     </div>
   </div>
 </section>
