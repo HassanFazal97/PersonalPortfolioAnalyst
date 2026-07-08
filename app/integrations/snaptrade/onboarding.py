@@ -119,12 +119,18 @@ async def portfolio_status(
         user_id == _OWNER_USER_ID and bool(settings.snaptrade_user_secret)
     )
     connected = False
+    connection_disabled = False
     accounts_count = 0
     if registered:
         try:
             service = await service_for_user(repo, user_id, settings)
             connections = service.list_connections()
-            connected = len(connections) > 0
+            # SnapTrade flags a connection ``disabled`` when its brokerage auth
+            # breaks (revoked/expired). Only live connections count as
+            # connected; a disabled-only set means "reconnect needed".
+            active = [c for c in connections if not c.get("disabled")]
+            connected = len(active) > 0
+            connection_disabled = bool(connections) and not active
             if connected and row is not None and row.connected_at is None:
                 await repo.update_snaptrade_status(
                     user_id, connected_at=datetime.now()
@@ -135,6 +141,7 @@ async def portfolio_status(
     return {
         "registered": registered,
         "connected": connected,
+        "connection_disabled": connection_disabled,
         "accounts_count": accounts_count,
         "last_sync_at": row.last_sync_at.isoformat() if row and row.last_sync_at else None,
         "last_sync_error": row.last_sync_error if row else None,

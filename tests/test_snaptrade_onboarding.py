@@ -11,6 +11,7 @@ from cryptography.fernet import Fernet
 from app.config import DEFAULT_USER_ID
 from app.crypto.secrets import decrypt_secret, encrypt_secret
 from app.integrations.snaptrade.onboarding import (
+    portfolio_status,
     register_snaptrade_user,
     resolve_credentials,
     snaptrade_user_id_for,
@@ -86,3 +87,62 @@ async def test_owner_falls_back_to_env_when_no_db_row():
     creds = await resolve_credentials(repo, _OWNER, settings)
     assert creds is not None
     assert creds.user_secret == "env-secret"
+
+
+# --- portfolio_status: live vs disabled connections ---------------------------
+
+
+async def _registered_repo():
+    repo = FakeRepo()
+    await repo.save_snaptrade_credentials(
+        user_id=_OWNER,
+        snaptrade_user_id=f"user-{_OWNER}",
+        user_secret_enc=encrypt_secret(_FERNET_KEY, "secret"),
+    )
+    return repo
+
+
+def _status_service(monkeypatch, connections):
+    service = MagicMock()
+    service.list_connections.return_value = connections
+    service.list_accounts.return_value = []
+
+    async def fake_service_for_user(repo, user_id, settings):
+        return service
+
+    monkeypatch.setattr(
+        "app.integrations.snaptrade.onboarding.service_for_user",
+        fake_service_for_user,
+    )
+    return service
+
+
+@pytest.mark.asyncio
+async def test_status_active_connection_is_connected(monkeypatch):
+    repo = await _registered_repo()
+    _status_service(monkeypatch, [{"id": "auth-1", "disabled": False}])
+    status = await portfolio_status(repo, _OWNER, MagicMock())
+    assert status["connected"] is True
+    assert status["connection_disabled"] is False
+
+
+@pytest.mark.asyncio
+async def test_status_disabled_connection_flags_reconnect(monkeypatch):
+    # SnapTrade marks a connection disabled when brokerage auth breaks; that
+    # must read as "reconnect needed", not "connected".
+    repo = await _registered_repo()
+    _status_service(monkeypatch, [{"id": "auth-1", "disabled": True}])
+    status = await portfolio_status(repo, _OWNER, MagicMock())
+    assert status["connected"] is False
+    assert status["connection_disabled"] is True
+
+
+@pytest.mark.asyncio
+async def test_status_no_connections_is_not_disabled(monkeypatch):
+    # A registered user who never connected: no banner signal, onboarding
+    # keeps its empty state.
+    repo = await _registered_repo()
+    _status_service(monkeypatch, [])
+    status = await portfolio_status(repo, _OWNER, MagicMock())
+    assert status["connected"] is False
+    assert status["connection_disabled"] is False

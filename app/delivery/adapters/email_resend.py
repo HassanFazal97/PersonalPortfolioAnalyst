@@ -28,17 +28,30 @@ class ResendEmailAdapter:
         self, destination: str, body: str, payload: dict[str, Any]
     ) -> SendResult:
         subject = payload.get("subject") or "Portfolio update"
+        message: dict[str, Any] = {
+            "from": self._from,
+            "to": [destination],
+            "subject": subject,
+            "text": body,
+        }
+        # CASL/deliverability: every email carries a one-click unsubscribe —
+        # a plain footer link plus the RFC 8058 headers mail clients surface.
+        unsubscribe_url = payload.get("unsubscribe_url")
+        if unsubscribe_url:
+            message["text"] = (
+                f"{body}\n\nTo stop receiving these emails, unsubscribe here: "
+                f"{unsubscribe_url}"
+            )
+            message["headers"] = {
+                "List-Unsubscribe": f"<{unsubscribe_url}>",
+                "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+            }
         try:
             async with httpx.AsyncClient(timeout=self._timeout) as client:
                 resp = await client.post(
                     _API_URL,
                     headers={"Authorization": f"Bearer {self._api_key}"},
-                    json={
-                        "from": self._from,
-                        "to": [destination],
-                        "subject": subject,
-                        "text": body,
-                    },
+                    json=message,
                 )
         except httpx.HTTPError as exc:
             return SendResult(ok=False, error=f"resend request failed: {exc}")

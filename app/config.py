@@ -122,6 +122,10 @@ class Settings(BaseSettings):
     # Resend email. Both must be set for the email channel to exist.
     resend_api_key: str = Field(default="", alias="RESEND_API_KEY")
     email_from: str = Field(default="", alias="EMAIL_FROM")  # "Name <digest@domain>"
+    # HMAC key for signed email unsubscribe links (CASL). Falls back to
+    # API_TOKEN when unset; set a dedicated value so token rotation doesn't
+    # break old unsubscribe links.
+    unsubscribe_secret: str = Field(default="", alias="UNSUBSCRIBE_SECRET")
 
     # SnapTrade — Wealthsimple portfolio sync (https://snaptrade.com).
     snaptrade_client_id: str = Field(default="", alias="SNAPTRADE_CLIENT_ID")

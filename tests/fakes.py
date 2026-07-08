@@ -424,6 +424,19 @@ class FakeRepo:
             key=lambda r: r.channel,
         )
 
+    async def get_notification_channel(self, user_id, channel):
+        return self._notification_channels.get((user_id, channel))
+
+    async def set_opt_out_by_destination(self, *, channel, destination, opted_out):
+        now = datetime.now(timezone.utc)
+        updated = 0
+        for (_, ch), row in self._notification_channels.items():
+            if ch == channel and row.destination == destination:
+                row.opted_out_at = now if opted_out else None
+                row.updated_at = now
+                updated += 1
+        return updated
+
     async def upsert_notification_channel(
         self, user_id, *, channel, destination, consent=False
     ):

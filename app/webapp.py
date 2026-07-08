@@ -57,6 +57,8 @@ nav {
   line-height: 1.25; max-width: none; margin: 0 0 0.35rem; }
 .auth-form .sub { color: var(--ink-3); font-size: 0.95rem; margin-bottom: 1.4rem; }
 .field-hint { color: var(--ink-3); font-size: 0.8rem; margin-top: 0.35rem; display: none; }
+.forgot-row { text-align: right; margin-top: 0.45rem; }
+.forgot-row .link-btn { font-size: 0.84rem; }
 @media (max-width: 880px) {
   .auth-split { grid-template-columns: 1fr; }
   .auth-brand { display: none; }
@@ -193,6 +195,13 @@ tr:last-child td { border-bottom: none; }
 .consent-row input { margin-top: 0.2rem; }
 .chip-ok { color: var(--gain); font-size: 0.8rem; font-weight: 600; }
 .chip-warn { color: var(--warn); font-size: 0.8rem; font-weight: 600; }
+/* broken-connection banner (error-box vocabulary, --warn tinted) */
+.warn-banner { display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap; gap: 0.75rem 1rem; padding: 0.85rem 1.1rem;
+  border: 1px solid oklch(80% 0.11 85 / 0.4); background: oklch(80% 0.11 85 / 0.1);
+  border-radius: var(--r-m); font-size: 0.9rem; color: var(--ink-2); }
+.warn-banner strong { color: var(--warn); font-weight: 650; }
+.warn-banner .actions { display: flex; align-items: center; gap: 0.9rem; }
 /* holdings + news dashboard */
 .holdings-row { cursor: pointer; transition: background 0.15s var(--ease); }
 .holdings-row:hover { background: var(--surface-2); }
@@ -354,6 +363,9 @@ _LOGIN_BODY = """
         <label for="password">Password</label>
         <input type="password" id="password" autocomplete="current-password" minlength="8" required>
         <p class="field-hint" id="pw-hint">At least 8 characters.</p>
+        <p class="forgot-row" id="forgot-row">
+          <button class="link-btn" id="forgot-btn" type="button">Forgot password?</button>
+        </p>
         <button class="btn full" id="auth-btn" type="submit">Sign in</button>
       </form>
       <div class="error-box" id="auth-error"></div>
@@ -388,9 +400,35 @@ document.getElementById('switch-btn').addEventListener('click', () => {
     signin ? 'Create an account' : 'Sign in';
   btn.textContent = signin ? 'Sign in' : 'Create account';
   document.getElementById('pw-hint').style.display = signin ? 'none' : 'block';
+  document.getElementById('forgot-row').style.display = signin ? 'block' : 'none';
   document.getElementById('password').setAttribute('autocomplete',
     signin ? 'current-password' : 'new-password');
   errBox.style.display = 'none'; noticeBox.style.display = 'none';
+});
+
+document.getElementById('forgot-btn').addEventListener('click', async () => {
+  errBox.style.display = 'none'; noticeBox.style.display = 'none';
+  const email = document.getElementById('email').value.trim();
+  if (!email) {
+    errBox.textContent = 'Enter your email above first, then click Forgot password.';
+    errBox.style.display = 'block';
+    return;
+  }
+  const forgotBtn = document.getElementById('forgot-btn');
+  forgotBtn.disabled = true;
+  try {
+    const { error } = await sb.auth.resetPasswordForEmail(email, {
+      redirectTo: location.origin + '/app/reset',
+    });
+    if (error) throw error;
+    noticeBox.textContent = 'Check your email for a link to reset your password.';
+    noticeBox.style.display = 'block';
+  } catch (e) {
+    errBox.textContent = e.message || 'Could not send the reset email. Try again.';
+    errBox.style.display = 'block';
+  } finally {
+    forgotBtn.disabled = false;
+  }
 });
 
 async function routeAfterAuth() {
@@ -433,6 +471,109 @@ form.addEventListener('submit', async (ev) => {
 getToken().then((t) => { if (t) routeAfterAuth(); });
 
 riseIn(document.querySelector('.auth-form'), 0.28);
+"""
+
+
+# --------------------------------------------------------------------------
+# /app/reset — set a new password (Supabase recovery-link redirect)
+# --------------------------------------------------------------------------
+
+_RESET_BODY = """
+<div class="auth-form-col" style="min-height:100dvh;">
+  <div class="auth-form">
+    <a class="logo" href="/" style="display:inline-block;margin-bottom:2rem;">Cir<span>via</span></a>
+    <h1>Set a new password</h1>
+    <p class="sub">Choose a new password for your account.</p>
+    <div class="status-line" id="reset-checking">
+      <span class="spinner"></span><span>Checking your reset link…</span>
+    </div>
+    <form id="reset-form" style="display:none;">
+      <label for="new-password">New password</label>
+      <input type="password" id="new-password" autocomplete="new-password" minlength="8" required>
+      <p class="field-hint" style="display:block;">At least 8 characters.</p>
+      <label for="confirm-password">Confirm new password</label>
+      <input type="password" id="confirm-password" autocomplete="new-password" minlength="8" required>
+      <button class="btn full" id="reset-btn" type="submit">Set new password</button>
+    </form>
+    <div class="error-box" id="reset-error"></div>
+    <div class="notice-box" id="reset-notice"></div>
+    <p class="switch-mode" id="reset-back" style="display:none;">
+      <a href="/app">Back to sign in</a>
+    </p>
+  </div>
+</div>
+"""
+
+_RESET_JS = """
+const resetForm = document.getElementById('reset-form');
+const resetErr = document.getElementById('reset-error');
+const resetNotice = document.getElementById('reset-notice');
+const resetChecking = document.getElementById('reset-checking');
+let recoveryReady = false;
+
+function showResetForm() {
+  if (recoveryReady) return;
+  recoveryReady = true;
+  resetChecking.style.display = 'none';
+  resetForm.style.display = 'block';
+  riseIn(resetForm);
+  document.getElementById('new-password').focus();
+}
+
+function showLinkInvalid() {
+  if (recoveryReady) return;
+  resetChecking.style.display = 'none';
+  resetErr.textContent = 'This reset link is invalid or has expired. ' +
+    'Request a new one from the sign-in page.';
+  resetErr.style.display = 'block';
+  document.getElementById('reset-back').style.display = 'block';
+}
+
+// supabase-js turns the recovery token in the URL hash into a session and
+// fires PASSWORD_RECOVERY (or SIGNED_IN) once it has.
+sb.auth.onAuthStateChange((event, session) => {
+  if (event === 'PASSWORD_RECOVERY' || session) showResetForm();
+});
+
+// Expired/used links come back as #error=... instead of a token.
+const resetHash = new URLSearchParams(location.hash.replace(/^#/, ''));
+if (resetHash.get('error')) {
+  showLinkInvalid();
+} else {
+  // Fallback: if no auth event lands shortly, check for a session once more,
+  // then declare the link invalid.
+  setTimeout(async () => {
+    if (recoveryReady) return;
+    const { data } = await sb.auth.getSession();
+    if (data.session) showResetForm();
+    else showLinkInvalid();
+  }, 2500);
+}
+
+resetForm.addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  resetErr.style.display = 'none'; resetNotice.style.display = 'none';
+  const password = document.getElementById('new-password').value;
+  const confirm = document.getElementById('confirm-password').value;
+  if (password !== confirm) {
+    resetErr.textContent = 'Passwords do not match.';
+    resetErr.style.display = 'block';
+    return;
+  }
+  const btn = document.getElementById('reset-btn');
+  btn.disabled = true;
+  try {
+    const { error } = await sb.auth.updateUser({ password });
+    if (error) throw error;
+    resetNotice.textContent = 'Password updated. Taking you to your dashboard…';
+    resetNotice.style.display = 'block';
+    setTimeout(() => { window.location.href = '/app/dashboard'; }, 900);
+  } catch (e) {
+    resetErr.textContent = e.message || 'Could not update your password. Try again.';
+    resetErr.style.display = 'block';
+    btn.disabled = false;
+  }
+});
 """
 
 
@@ -934,6 +1075,14 @@ _DASHBOARD_BODY = """
 </div>
 <div class="dash-layout">
 <div class="dash-main">
+  <div class="warn-banner" id="connection-banner" style="display:none;">
+    <span id="connection-banner-msg"><strong>Your brokerage connection needs
+    attention.</strong> Your digest may be out of date.</span>
+    <span class="actions">
+      <button class="btn" id="reconnect-btn">Reconnect</button>
+      <button class="link-btn" id="connection-banner-dismiss">Dismiss</button>
+    </span>
+  </div>
   <div class="dash-card">
     <div class="filters-row" id="news-filters">
       <label>Period
@@ -1402,11 +1551,85 @@ document.getElementById('save-schedule-btn').addEventListener('click', async () 
   }
 });
 
+// --- broken-connection banner ------------------------------------------------
+// Shown when the brokerage link existed but is broken now: SnapTrade reports
+// the connection disabled, the last sync errored, or a previously synced
+// account has no connection left. Fresh accounts (never connected, never
+// synced) keep the empty-state link to onboarding instead.
+const BANNER_DISMISS_KEY = 'cirvia-connection-banner-dismissed';
+let reconnectPollTimer = null;
+
+function connectionBroken(s) {
+  if (!s.registered) return false;
+  return Boolean(s.connection_disabled || s.last_sync_error ||
+    (!s.connected && s.last_sync_at));
+}
+
+async function checkConnection() {
+  if (sessionStorage.getItem(BANNER_DISMISS_KEY)) return;
+  try {
+    const s = await (await api('/portfolio/status')).json();
+    if (connectionBroken(s)) {
+      const banner = document.getElementById('connection-banner');
+      banner.style.display = 'flex';
+      riseIn(banner);
+    }
+  } catch (e) { /* status is advisory; never block the dashboard */ }
+}
+
+function hideConnectionBanner() {
+  document.getElementById('connection-banner').style.display = 'none';
+}
+
+document.getElementById('connection-banner-dismiss').addEventListener('click', () => {
+  sessionStorage.setItem(BANNER_DISMISS_KEY, '1');
+  hideConnectionBanner();
+});
+
+async function pollReconnect() {
+  try {
+    const s = await (await api('/portfolio/status')).json();
+    if (s.connected) {
+      clearInterval(reconnectPollTimer); reconnectPollTimer = null;
+      await api('/portfolio/sync', { method: 'POST' }).catch(() => {});
+      hideConnectionBanner();
+      sessionStorage.removeItem(BANNER_DISMISS_KEY);
+      await loadHoldings();
+    }
+  } catch (e) { /* keep polling */ }
+}
+
+document.getElementById('reconnect-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('reconnect-btn');
+  btn.disabled = true;
+  try {
+    // Same portal flow as onboarding: ensure registration, then open the
+    // SnapTrade connection portal in a new tab and wait for the round-trip.
+    await api('/portfolio/snaptrade/register', { method: 'POST' });
+    const resp = await api('/portfolio/connect-url');
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || 'Could not get the connection link');
+    }
+    const { url } = await resp.json();
+    window.open(url, '_blank');
+    btn.textContent = 'Waiting for connection…';
+    if (!reconnectPollTimer) reconnectPollTimer = setInterval(pollReconnect, 5000);
+  } catch (e) {
+    btn.textContent = 'Reconnect';
+    document.getElementById('connection-banner-msg').textContent =
+      e.message || 'Could not start the reconnect. Try again.';
+  } finally {
+    btn.disabled = false;
+  }
+});
+
 loadMe().then(() => {
   loadHoldings();
   reloadNewsFeeds();
   loadDelivery();
   renderSchedule();
+  checkConnection();
 });
 """
 
@@ -1418,6 +1641,17 @@ def login_page(supabase_url: str, anon_key: str) -> str:
         supabase_url=supabase_url,
         anon_key=anon_key,
         extra_js=_LOGIN_JS,
+        chrome=False,
+    )
+
+
+def reset_page(supabase_url: str, anon_key: str) -> str:
+    return _page(
+        "Set a new password — Cirvia",
+        _RESET_BODY,
+        supabase_url=supabase_url,
+        anon_key=anon_key,
+        extra_js=_RESET_JS,
         chrome=False,
     )
 
