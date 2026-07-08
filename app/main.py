@@ -14,6 +14,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, time
 from urllib.parse import parse_qsl
 
+import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -56,6 +57,7 @@ from app.webapp import (
     dashboard_page,
     login_page,
     onboarding_page,
+    settings_page,
 )
 
 
@@ -166,6 +168,7 @@ _AUTH_EXEMPT_PATHS = {
     "/app",
     "/app/onboarding",
     "/app/dashboard",
+    "/app/settings",
     # Twilio cannot attach our bearer token; the route validates
     # X-Twilio-Signature instead.
     "/webhooks/twilio/sms",
@@ -320,6 +323,27 @@ async def _validate_digest_tickers(
     return normalized
 
 
+async def _delete_supabase_auth_user(settings, auth_id: uuid.UUID | None) -> bool:
+    """Delete the Supabase auth user via the admin API (service-role key).
+
+    Best-effort: returns False when the key/URL/auth_id is missing or the call
+    fails — the caller has already removed all app data either way."""
+    if not (settings.supabase_url and settings.supabase_service_role_key and auth_id):
+        return False
+    url = f"{settings.supabase_url.rstrip('/')}/auth/v1/admin/users/{auth_id}"
+    headers = {
+        "apikey": settings.supabase_service_role_key,
+        "Authorization": f"Bearer {settings.supabase_service_role_key}",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.delete(url, headers=headers)
+    except httpx.HTTPError:
+        return False
+    # 404 = already gone, which is the outcome we wanted.
+    return resp.status_code < 400 or resp.status_code == 404
+
+
 async def _enforce_usage_limits(repo: Repo, user_id: uuid.UUID, settings) -> None:
     """Guard a chat against the per-user monthly cost cap and the Free daily
     chat limit. Owner/service token is exempt. Raises 402 when over."""
@@ -391,6 +415,11 @@ def create_app() -> FastAPI:
         """Holdings, digest, alerts, and chat."""
         return _webapp_html(dashboard_page)
 
+    @app.get("/app/settings", response_class=HTMLResponse)
+    async def app_settings() -> HTMLResponse:
+        """Account, brokerage connection, plan, and account deletion."""
+        return _webapp_html(settings_page)
+
     @app.get("/health")
     async def health() -> dict:
         repo: Repo | None = app.state.repo
@@ -460,6 +489,32 @@ def create_app() -> FastAPI:
             "latency_ms": result.latency_ms,
             "tool_calls": result.tool_summaries,
         }
+
+    @app.get("/chat/history")
+    async def chat_history(request: Request, limit: int = 10) -> dict:
+        """The user's recent chat turns, oldest first (dashboard rehydration).
+
+        Turns are reconstructed from ``agent_runs`` (trigger='chat'): each run
+        is one user message plus, when it finished, one assistant answer."""
+        repo = _require_repo(app)
+        user_id = _user_id(request)
+        limit = max(1, min(limit, 50))
+        runs = await repo.list_chat_runs(user_id, limit=(limit + 1) // 2)
+        turns: list[dict] = []
+        for run in reversed(runs):  # repo returns newest first
+            created = run.created_at.isoformat() if run.created_at else None
+            turns.append(
+                {"role": "user", "content": run.user_message, "created_at": created}
+            )
+            if run.final_answer:
+                turns.append(
+                    {
+                        "role": "assistant",
+                        "content": run.final_answer,
+                        "created_at": created,
+                    }
+                )
+        return {"turns": turns[-limit:]}
 
     @app.get("/runs/{run_id}")
     async def get_run(run_id: uuid.UUID) -> dict:
@@ -587,6 +642,39 @@ def create_app() -> FastAPI:
         except (SnapTradeError, RuntimeError) as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
 
+    @app.delete("/connection")
+    async def disconnect_brokerage(request: Request) -> dict:
+        """Sever the caller's brokerage connection.
+
+        Deletes the remote SnapTrade user when the client supports it
+        (commercial mode), then clears the stored credentials. Already-synced
+        holdings stay visible but stop updating."""
+        repo = _require_repo(app)
+        user_id = _user_id(request)
+        settings = get_settings()
+        row = await repo.get_snaptrade_credentials(user_id)
+        owner_env_creds = user_id == _OWNER_USER_ID and bool(
+            settings.snaptrade_user_secret
+        )
+        if row is None and not owner_env_creds:
+            raise HTTPException(
+                status_code=404, detail="no brokerage connection to disconnect"
+            )
+        remote_deleted = False
+        remote_error: str | None = None
+        try:
+            service = await service_for_user(repo, user_id, settings)
+            remote_deleted = service.delete_user()
+        except SnapTradeError as exc:
+            remote_error = str(exc)
+        local_cleared = await repo.delete_snaptrade_credentials(user_id)
+        return {
+            "disconnected": True,
+            "remote_deleted": remote_deleted,
+            "local_cleared": local_cleared,
+            "remote_error": remote_error,
+        }
+
     # ---- User profile & holdings ---------------------------------------
 
     @app.get("/me")
@@ -621,6 +709,24 @@ def create_app() -> FastAPI:
             digest_tickers=digest_tickers,
         )
         return await _me_payload(repo, user_id)
+
+    @app.delete("/me")
+    async def delete_me(request: Request) -> dict:
+        """Delete the caller's account: every app table they own, and — when a
+        service-role key is configured — the Supabase auth user too."""
+        repo = _require_repo(app)
+        user_id = _user_id(request)
+        if user_id == _OWNER_USER_ID:
+            # The seeded owner backs the service token and background jobs.
+            raise HTTPException(
+                status_code=400, detail="the owner account cannot be deleted"
+            )
+        settings = get_settings()
+        user = await repo.get_user(user_id)
+        auth_id = getattr(user, "auth_id", None) if user is not None else None
+        await repo.delete_user_data(user_id)
+        auth_user_deleted = await _delete_supabase_auth_user(settings, auth_id)
+        return {"deleted": True, "auth_user_deleted": auth_user_deleted}
 
     @app.get("/news")
     async def list_news(

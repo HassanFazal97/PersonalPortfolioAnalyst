@@ -54,8 +54,26 @@ class FakeRepo:
             "prompt_version": prompt_version,
             "status": "running",
             "user_id": user_id,
+            "created_at": datetime.now(timezone.utc),
         }
         return run_id
+
+    async def list_chat_runs(self, user_id, *, limit=10):
+        rows = [
+            SimpleNamespace(id=rid, **{
+                "user_message": r.get("user_message"),
+                "final_answer": r.get("final_answer"),
+                "status": r.get("status"),
+                "created_at": r.get("created_at"),
+            })
+            for rid, r in self.runs.items()
+            if r.get("user_id") == user_id and r.get("trigger") == "chat"
+        ]
+        rows.sort(
+            key=lambda r: r.created_at or datetime.min.replace(tzinfo=timezone.utc),
+            reverse=True,
+        )
+        return rows[:limit]
 
     async def get_or_create_user(self, *, auth_id, email=None):
         if auth_id not in self._users_by_auth:
@@ -363,6 +381,42 @@ class FakeRepo:
             last_sync_at=None,
             last_sync_error=None,
         )
+
+    async def delete_snaptrade_credentials(self, user_id):
+        return self._snaptrade.pop(user_id, None) is not None
+
+    async def delete_user_data(self, user_id):
+        self.deleted_users = getattr(self, "deleted_users", [])
+        self.deleted_users.append(user_id)
+        run_ids = {
+            rid for rid, r in self.runs.items() if r.get("user_id") == user_id
+        }
+        for rid in run_ids:
+            del self.runs[rid]
+        self.model_calls = [m for m in self.model_calls if m["run_id"] not in run_ids]
+        self.tool_calls = [t for t in self.tool_calls if t["run_id"] not in run_ids]
+        self._digests_by_user = {
+            k: v for k, v in self._digests_by_user.items() if k[0] != user_id
+        }
+        self._news_items = [n for n in self._news_items if n.user_id != user_id]
+        self._news_fingerprints = {
+            k for k in self._news_fingerprints if k[0] != user_id
+        }
+        if hasattr(self, "_position_rows"):
+            self._position_rows = {
+                k: v for k, v in self._position_rows.items() if k[0] != user_id
+            }
+        self._notification_channels = {
+            k: v for k, v in self._notification_channels.items() if k[0] != user_id
+        }
+        self._verification_codes = {
+            k: v for k, v in self._verification_codes.items()
+            if v.user_id != user_id
+        }
+        self._snaptrade.pop(user_id, None)
+        user = self._users_by_id.pop(user_id, None)
+        if user is not None and getattr(user, "auth_id", None) is not None:
+            self._users_by_auth.pop(user.auth_id, None)
 
     async def update_snaptrade_status(self, user_id, *, connected_at=None, last_sync_at=None, last_sync_error=None):
         row = self._snaptrade.get(user_id)

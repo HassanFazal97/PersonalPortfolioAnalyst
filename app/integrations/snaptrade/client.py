@@ -144,6 +144,14 @@ class _CommercialBackend:
                 return False
             raise
 
+    def delete_user(self) -> bool:
+        """Delete the SnapTrade user, severing every brokerage connection."""
+        response = self._client.authentication.delete_snap_trade_user(
+            user_id=self.user_id
+        )
+        _require_ok(response, action="delete_snap_trade_user")
+        return True
+
     def get_account_positions(self, account_id: str) -> list[dict[str, Any]]:
         response = self._client.account_information.get_all_account_positions(
             account_id=account_id,
@@ -232,6 +240,18 @@ class SnapTradeService:
         except PersonalSnapTradeError as exc:
             if _is_refresh_unavailable(exc):
                 return False
+            raise SnapTradeError(str(exc)) from exc
+
+    def delete_user(self) -> bool:
+        """Delete the SnapTrade user remotely (commercial mode only).
+
+        Personal dashboard keys have no per-user deletion — returns False so
+        callers can still clear local state and say what happened."""
+        if self.personal_mode or not isinstance(self._backend, _CommercialBackend):
+            return False
+        try:
+            return self._backend.delete_user()
+        except ApiException as exc:
             raise SnapTradeError(str(exc)) from exc
 
     def get_account_positions(self, account_id: str) -> list[dict[str, Any]]:

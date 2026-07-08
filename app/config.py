@@ -76,6 +76,12 @@ class Settings(BaseSettings):
     # Publishable (anon) key — public by design; embedded in the web app pages
     # so the browser can sign in with supabase-js.
     supabase_anon_key: str = Field(default="", alias="SUPABASE_ANON_KEY")
+    # Service-role key (server-only, never sent to the browser). When set,
+    # account deletion also removes the Supabase auth user via the admin API;
+    # without it we delete app data only and the client signs out.
+    supabase_service_role_key: str = Field(
+        default="", alias="SUPABASE_SERVICE_ROLE_KEY"
+    )
 
     model: str = Field(default="claude-sonnet-4-6", alias="MODEL")
     # Cheap, fast model for news signal tagging (risk/opportunity/neutral).
