@@ -562,9 +562,14 @@ def create_app() -> FastAPI:
         return {"turns": turns[-limit:]}
 
     @app.get("/runs/{run_id}")
-    async def get_run(run_id: uuid.UUID) -> dict:
+    async def get_run(run_id: uuid.UUID, request: Request) -> dict:
         repo = _require_repo(app)
         run, model_calls, tool_calls = await repo.get_run_trajectory(run_id)
+        # Tenant isolation: non-owner callers may only read their own runs.
+        # 404 (not 403) so run ids can't be probed for existence.
+        caller = _user_id(request)
+        if run is not None and caller != _OWNER_USER_ID and run.user_id != caller:
+            run = None
         if run is None:
             raise HTTPException(status_code=404, detail="run not found")
         return {
@@ -592,9 +597,14 @@ def create_app() -> FastAPI:
         }
 
     @app.get("/runs")
-    async def list_runs(trigger: str | None = None, limit: int = 50) -> dict:
+    async def list_runs(
+        request: Request, trigger: str | None = None, limit: int = 50
+    ) -> dict:
         repo = _require_repo(app)
-        runs = await repo.list_runs(trigger=trigger, limit=limit)
+        # Owner/service token sees all runs (ops debugging); users see their own.
+        caller = _user_id(request)
+        scope = None if caller == _OWNER_USER_ID else caller
+        runs = await repo.list_runs(trigger=trigger, limit=limit, user_id=scope)
         return {"runs": [_run_meta(r) for r in runs]}
 
     @app.post("/digest/run")

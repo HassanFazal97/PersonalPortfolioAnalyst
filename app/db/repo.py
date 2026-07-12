@@ -521,12 +521,20 @@ class Repo:
             return list(result.scalars().all())
 
     async def list_runs(
-        self, *, trigger: str | None = None, limit: int = 50
+        self,
+        *,
+        trigger: str | None = None,
+        limit: int = 50,
+        user_id: uuid.UUID | None = None,
     ) -> list[AgentRun]:
+        """Recent runs, newest first. ``user_id=None`` means unscoped — only
+        the owner/service caller may use that."""
         async with self._session() as s:
             stmt = select(AgentRun).order_by(AgentRun.created_at.desc()).limit(limit)
             if trigger:
                 stmt = stmt.where(AgentRun.trigger == trigger)
+            if user_id is not None:
+                stmt = stmt.where(AgentRun.user_id == user_id)
             return list((await s.execute(stmt)).scalars().all())
 
     # ---- digests ---------------------------------------------------------

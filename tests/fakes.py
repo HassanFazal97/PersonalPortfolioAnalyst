@@ -155,6 +155,39 @@ class FakeRepo:
     async def finalize_run(self, run_id, **kwargs):
         self.runs[run_id].update(kwargs)
 
+    def _run_ns(self, rid):
+        r = self.runs[rid]
+        return SimpleNamespace(
+            id=rid,
+            **{
+                k: r.get(k)
+                for k in (
+                    "trigger", "user_message", "final_answer", "status",
+                    "iterations", "input_tokens", "output_tokens", "cost_usd",
+                    "latency_ms", "model", "prompt_version", "error_detail",
+                    "created_at", "user_id",
+                )
+            },
+        )
+
+    async def list_runs(self, *, trigger=None, limit=50, user_id=None):
+        rows = [
+            self._run_ns(rid)
+            for rid, r in self.runs.items()
+            if (trigger is None or r.get("trigger") == trigger)
+            and (user_id is None or r.get("user_id") == user_id)
+        ]
+        rows.sort(
+            key=lambda r: r.created_at or datetime.min.replace(tzinfo=timezone.utc),
+            reverse=True,
+        )
+        return rows[:limit]
+
+    async def get_run_trajectory(self, run_id):
+        if run_id not in self.runs:
+            return None, [], []
+        return self._run_ns(run_id), [], []
+
     async def log_model_call(self, *, run_id, iteration, request, response, usage):
         self.model_calls.append(
             {"run_id": run_id, "iteration": iteration, "request": request,
