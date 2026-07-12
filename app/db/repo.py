@@ -50,10 +50,11 @@ _OWNER_USER_ID = uuid.UUID(DEFAULT_USER_ID)
 def _apply_rls_user(session: Session, transaction, connection) -> None:
     """Set the per-transaction ``app.current_user_id`` GUC that RLS policies
     filter on, from the request's ContextVar. Background jobs (ContextVar unset)
-    fall back to the owner. Under the table-owner DB role this is a harmless
-    no-op (RLS is bypassed); it takes effect once DATABASE_URL points at a
-    non-owner role (roadmap Phase 2 deploy step). The value is always a uuid, so
-    inlining it is injection-safe."""
+    fall back to the owner id, which the policies treat as the service context
+    (cross-tenant; see migration 012). This is load-bearing in production:
+    DATABASE_URL there is a restricted non-owner role, so RLS is enforced on
+    every app query. The value is always a uuid, so inlining it is
+    injection-safe."""
     uid = get_current_user_id() or _OWNER_USER_ID
     connection.exec_driver_sql(
         f"SELECT set_config('app.current_user_id', '{uid}', true)"

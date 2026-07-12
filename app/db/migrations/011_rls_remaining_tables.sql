@@ -3,8 +3,12 @@
 -- "Unrestricted" in the Supabase dashboard, and — more importantly — the
 -- auto-generated Data API (PostgREST) serves the public schema to anyone
 -- holding the anon key, with RLS as the only gate. RLS-less tables there
--- are world-readable/writable. The app itself is unaffected: it connects
--- as the table owner, which bypasses RLS (until Phase 2's non-owner role).
+-- are world-readable/writable.
+--
+-- NOTE (added later): the assumption that the app connects as table owner
+-- was wrong in production (DATABASE_URL is a restricted role), so these
+-- strict policies broke auth-time user provisioning. 012 rebuilds every
+-- tenant policy with an owner service-context escape.
 
 -- users: a user may only see their own row. PK is the tenant id itself.
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
