@@ -383,6 +383,9 @@ _LOGIN_BODY = """
       <a class="logo form-logo" href="/">Cir<span>via</span></a>
       <h1 id="auth-title">Sign in</h1>
       <p class="sub" id="auth-sub">Continue to your portfolio brief.</p>
+      <div class="status-line" id="auth-redirecting" style="display:none;">
+        <span class="spinner"></span><span>Taking you to your dashboard&hellip;</span>
+      </div>
       <form id="auth-form">
         <label for="email">Email</label>
         <input type="email" id="email" autocomplete="email" required>
@@ -493,8 +496,31 @@ form.addEventListener('submit', async (ev) => {
   }
 });
 
-// Already signed in? Skip the form.
-getToken().then((t) => { if (t) routeAfterAuth(); });
+// Already signed in? Skip the form — and don't flash it first: a synchronous
+// localStorage peek hides it before paint, then the authoritative
+// getSession() routes onward (or restores the form if the stored session
+// turns out to be dead).
+function showRedirecting(on) {
+  form.style.display = on ? 'none' : '';
+  document.querySelector('.switch-mode').style.display = on ? 'none' : '';
+  document.getElementById('auth-redirecting').style.display = on ? 'flex' : 'none';
+  document.getElementById('auth-title').textContent = on ? 'Welcome back' : 'Sign in';
+  document.getElementById('auth-sub').textContent =
+    on ? '' : 'Continue to your portfolio brief.';
+}
+let precheckHid = false;
+try {
+  const key = 'sb-' + new URL(SB_URL).hostname.split('.')[0] + '-auth-token';
+  const s = JSON.parse(localStorage.getItem(key) || 'null');
+  if (s && (s.refresh_token || (s.expires_at && s.expires_at * 1000 > Date.now()))) {
+    precheckHid = true;
+    showRedirecting(true);
+  }
+} catch (e) { /* fall through to the visible form */ }
+getToken().then((t) => {
+  if (t) { routeAfterAuth(); return; }
+  if (precheckHid) showRedirecting(false);
+});
 
 riseIn(document.querySelector('.auth-form'), 0.28);
 """

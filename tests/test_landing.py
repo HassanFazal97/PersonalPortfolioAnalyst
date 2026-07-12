@@ -27,6 +27,8 @@ def test_nav_swaps_to_signed_in_state_when_supabase_configured(monkeypatch):
     assert 'data-auth="cta"' in html
     assert "sb-myref-auth-token" in html
     assert "Open dashboard" in html
+    # Signed-in CTAs skip the /app session-check hop.
+    assert "/app/dashboard" in html
 
 
 def test_nav_swap_script_omitted_without_supabase(monkeypatch):

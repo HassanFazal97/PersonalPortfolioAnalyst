@@ -668,6 +668,9 @@ def _auth_nav_js() -> str:
     });
     document.querySelectorAll('[data-auth="cta"]').forEach(function (el) {
       el.textContent = 'Open dashboard';
+      // Straight to the dashboard — /app would flash the sign-in form
+      // before redirecting. Signed-out visitors keep the /app href.
+      el.setAttribute('href', '/app/dashboard');
     });
   } catch (e) { /* signed-out rendering is the safe default */ }
 })();
