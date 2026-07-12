@@ -8,7 +8,7 @@ SnapTrade / partner reviewers see.
 
 from __future__ import annotations
 
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 from app.config import get_settings
 
@@ -638,10 +638,40 @@ def _nav(active: str) -> str:
         '<nav><div class="nav-inner">'
         '<a class="logo" href="/">Cir<span>via</span></a>'
         f'<div class="nav-links">{links}'
-        '<a class="keep" href="/app">Sign in</a>'
-        '<a class="btn" href="/app">Get started</a>'
+        '<a class="keep" href="/app" data-auth="signin">Sign in</a>'
+        '<a class="btn" href="/app" data-auth="cta">Get started</a>'
         "</div></div></nav>"
     )
+
+
+def _auth_nav_js() -> str:
+    """Swap the static nav to a signed-in state when a Supabase session exists.
+
+    The marketing pages don't load supabase-js, so this reads the SDK's
+    localStorage entry (``sb-<project-ref>-auth-token``) directly. A session
+    with a refresh token counts as signed in even if the access token has
+    expired — the app pages refresh it on arrival. Any parse problem falls
+    back to the signed-out rendering, which is always safe."""
+    supabase_url = get_settings().supabase_url
+    if not supabase_url:
+        return ""
+    ref = urlparse(supabase_url).hostname.split(".")[0]
+    return """
+(function () {
+  try {
+    var raw = localStorage.getItem('sb-%s-auth-token');
+    if (!raw) return;
+    var s = JSON.parse(raw);
+    if (!s || !(s.refresh_token || (s.expires_at && s.expires_at * 1000 > Date.now()))) return;
+    document.querySelectorAll('[data-auth="signin"]').forEach(function (el) {
+      el.remove();
+    });
+    document.querySelectorAll('[data-auth="cta"]').forEach(function (el) {
+      el.textContent = 'Open dashboard';
+    });
+  } catch (e) { /* signed-out rendering is the safe default */ }
+})();
+""" % ref
 
 
 _FOOTER = (
@@ -698,6 +728,7 @@ def _layout(title: str, description: str, body: str, active: str = "", path: str
         + "<script>"
         + _SCENE_JS
         + "</script>\n"
+        + f"<script>{_auth_nav_js()}</script>\n"
         + "</body>\n</html>"
     )
 
@@ -712,7 +743,7 @@ _HOME_BODY = """
     <h1 data-hero>Know what matters before the market opens.</h1>
     <p class="lead" data-hero>Your holdings. Your brief. Every morning.</p>
     <div class="cta-row" data-hero>
-      <a class="btn lg" href="/app">Get started free</a>
+      <a class="btn lg" href="/app" data-auth="cta">Get started free</a>
       <a class="quiet" href="#how">See how it works</a>
     </div>
   </div>
@@ -841,7 +872,7 @@ _HOME_BODY = """
 <div class="cta-final" data-reveal>
   <h2>Know your portfolio by 7:45.</h2>
   <p>Start free. Connected in under three minutes.</p>
-  <a class="btn lg" href="/app">Get started free</a>
+  <a class="btn lg" href="/app" data-auth="cta">Get started free</a>
 </div>
 """
 
@@ -1231,7 +1262,7 @@ _PRICING_BODY = f"""
 <div class="cta-final" data-reveal>
   <h2>Ready when you are.</h2>
   <p>Start free. Upgrade any time.</p>
-  <a class="btn lg" href="/app">Get started free</a>
+  <a class="btn lg" href="/app" data-auth="cta">Get started free</a>
 </div>
 """
 
