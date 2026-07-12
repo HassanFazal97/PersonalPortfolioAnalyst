@@ -10,6 +10,7 @@ from cryptography.fernet import Fernet
 
 from app.config import DEFAULT_USER_ID
 from app.crypto.secrets import decrypt_secret, encrypt_secret
+from app.integrations.snaptrade.client import SnapTradeError
 from app.integrations.snaptrade.onboarding import (
     portfolio_status,
     register_snaptrade_user,
@@ -146,3 +147,49 @@ async def test_status_no_connections_is_not_disabled(monkeypatch):
     status = await portfolio_status(repo, _OWNER, MagicMock())
     assert status["connected"] is False
     assert status["connection_disabled"] is False
+
+
+# --- stale credentials self-heal (test → prod key swap) ------------------------
+
+
+@pytest.mark.asyncio
+async def test_status_stale_user_clears_dead_row(monkeypatch):
+    # 401/1083 means the stored secret was registered under a different
+    # clientId — the row is dead and must be dropped so the user can
+    # re-register.
+    user = uuid.uuid4()
+    repo = FakeRepo()
+    await repo.save_snaptrade_credentials(
+        user_id=user,
+        snaptrade_user_id=f"user-{user}",
+        user_secret_enc=encrypt_secret(_FERNET_KEY, "secret"),
+    )
+    service = _status_service(monkeypatch, [])
+    service.list_connections.side_effect = SnapTradeError(
+        "list_connections failed with HTTP 401", status=401, code="1083"
+    )
+    settings = MagicMock()
+    settings.snaptrade_user_secret = ""
+
+    status = await portfolio_status(repo, user, settings)
+
+    assert status["registered"] is False
+    assert status["connected"] is False
+    assert await repo.get_snaptrade_credentials(user) is None
+
+
+@pytest.mark.asyncio
+async def test_status_non_stale_error_keeps_row(monkeypatch):
+    # Transient failures (5xx, rate limits, network) must not destroy
+    # credentials — only degrade to "not connected".
+    repo = await _registered_repo()
+    service = _status_service(monkeypatch, [])
+    service.list_connections.side_effect = SnapTradeError(
+        "list_connections failed with HTTP 500", status=500
+    )
+
+    status = await portfolio_status(repo, _OWNER, MagicMock())
+
+    assert status["registered"] is True
+    assert status["connected"] is False
+    assert await repo.get_snaptrade_credentials(_OWNER) is not None

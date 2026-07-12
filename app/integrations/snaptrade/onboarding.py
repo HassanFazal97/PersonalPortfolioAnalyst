@@ -136,8 +136,17 @@ async def portfolio_status(
                     user_id, connected_at=datetime.now()
                 )
             accounts_count = len(service.list_accounts())
-        except SnapTradeError:
-            pass
+        except SnapTradeError as exc:
+            if exc.stale_user and row is not None:
+                # The stored secret was issued under a different clientId
+                # (e.g. test keys swapped for prod keys), so the remote user
+                # no longer exists. Drop the dead row so the onboarding UI
+                # walks the user through register + connect again.
+                await repo.delete_snaptrade_credentials(user_id)
+                row = None
+                registered = user_id == _OWNER_USER_ID and bool(
+                    settings.snaptrade_user_secret
+                )
     return {
         "registered": registered,
         "connected": connected,

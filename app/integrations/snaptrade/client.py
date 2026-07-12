@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -29,6 +30,38 @@ class SnapTradeUserCredentials:
 
 class SnapTradeError(RuntimeError):
     """SnapTrade API call failed or returned an unexpected payload."""
+
+    # 401/1083: the userId/userSecret was registered under a different
+    # clientId (e.g. test keys swapped for prod) — the remote user does
+    # not exist in this environment.
+    STALE_USER_CODE = "1083"
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status: int | None = None,
+        code: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.status = status
+        self.code = code
+
+    @property
+    def stale_user(self) -> bool:
+        return self.code == self.STALE_USER_CODE
+
+
+def _api_error(exc: ApiException, *, action: str) -> SnapTradeError:
+    status = getattr(exc, "status", None)
+    body = getattr(exc, "body", None)
+    code = None
+    if isinstance(body, Mapping):
+        raw = body.get("code")
+        code = str(raw) if raw is not None else None
+    return SnapTradeError(
+        f"{action} failed with HTTP {status}: {body}", status=status, code=code
+    )
 
 
 def _body(response: Any) -> Any:
@@ -213,25 +246,31 @@ class SnapTradeService:
                     "Remove SNAPTRADE_USER_ID and SNAPTRADE_USER_SECRET from .env — "
                     "only CLIENT_ID and CONSUMER_KEY are needed."
                 ) from exc
-            raise SnapTradeError(str(exc)) from exc
+            raise _api_error(exc, action="register_user") from exc
 
     def connection_portal_url(self, *, broker: str = WEALTHSIMPLE_BROKER) -> str:
         try:
             return self._backend.connection_portal_url(broker=broker)
         except PersonalSnapTradeError as exc:
             raise SnapTradeError(str(exc)) from exc
+        except ApiException as exc:
+            raise _api_error(exc, action="connection_portal_url") from exc
 
     def list_accounts(self) -> list[dict[str, Any]]:
         try:
             return self._backend.list_accounts()
         except PersonalSnapTradeError as exc:
             raise SnapTradeError(str(exc)) from exc
+        except ApiException as exc:
+            raise _api_error(exc, action="list_accounts") from exc
 
     def list_connections(self) -> list[dict[str, Any]]:
         try:
             return self._backend.list_connections()
         except PersonalSnapTradeError as exc:
             raise SnapTradeError(str(exc)) from exc
+        except ApiException as exc:
+            raise _api_error(exc, action="list_connections") from exc
 
     def refresh_connection(self, authorization_id: str) -> bool:
         """Trigger a holdings refresh. Returns False if manual refresh is unavailable."""
@@ -241,6 +280,8 @@ class SnapTradeService:
             if _is_refresh_unavailable(exc):
                 return False
             raise SnapTradeError(str(exc)) from exc
+        except ApiException as exc:
+            raise _api_error(exc, action="refresh_connection") from exc
 
     def delete_user(self) -> bool:
         """Delete the SnapTrade user remotely (commercial mode only).
@@ -252,10 +293,12 @@ class SnapTradeService:
         try:
             return self._backend.delete_user()
         except ApiException as exc:
-            raise SnapTradeError(str(exc)) from exc
+            raise _api_error(exc, action="delete_user") from exc
 
     def get_account_positions(self, account_id: str) -> list[dict[str, Any]]:
         try:
             return self._backend.get_account_positions(account_id)
         except PersonalSnapTradeError as exc:
             raise SnapTradeError(str(exc)) from exc
+        except ApiException as exc:
+            raise _api_error(exc, action="get_account_positions") from exc
