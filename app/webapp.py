@@ -611,6 +611,12 @@ _DELIVERY_PICKER_HTML = """
 <div id="delivery-picker">
   <label>Notification method</label>
   <div class="channel-options" id="channel-options"></div>
+  <div id="discord-connect-block" style="display:none;">
+    <p class="muted-note" id="discord-connect-help" style="margin-top:0.4rem;"></p>
+    <button class="btn full" id="discord-connect-btn">Connect Discord</button>
+    <p class="muted-note" style="margin-top:0.5rem;"><button class="link-btn"
+      id="discord-manual-btn">Paste a webhook URL instead</button></p>
+  </div>
   <div id="dest-block" style="display:none;">
     <label id="dest-label" for="dest-input">Destination</label>
     <input id="dest-input" type="text">
@@ -665,6 +671,7 @@ const CHANNEL_META = {
 let dpChannel = null;
 let dpOnVerified = null;
 let dpBound = false;
+let dpDiscordOauth = false;  // server offers one-click OAuth connect
 
 function dpError(msg) {
   const box = document.getElementById('delivery-error');
@@ -678,7 +685,19 @@ function dpSelect(ch, el, existing) {
   document.querySelectorAll('.channel-opt').forEach(
     (o) => o.classList.toggle('selected', o === el));
   const meta = CHANNEL_META[ch];
-  document.getElementById('dest-block').style.display = 'block';
+  // Discord with OAuth configured: offer one-click connect instead of the
+  // paste-a-webhook form (still reachable via the manual link).
+  const useOauth = ch === 'discord' && dpDiscordOauth;
+  document.getElementById('discord-connect-block').style.display =
+    useOauth ? 'block' : 'none';
+  if (useOauth) {
+    document.getElementById('discord-connect-help').textContent =
+      (existing && existing.destination_masked
+        ? 'Currently ' + existing.destination_masked + '. Connecting again replaces it. '
+        : '') +
+      "Pick a server and channel on Discord \\u2014 we'll set up the webhook for you.";
+  }
+  document.getElementById('dest-block').style.display = useOauth ? 'none' : 'block';
   document.getElementById('code-block').style.display = 'none';
   dpError(null);
   const input = document.getElementById('dest-input');
@@ -696,6 +715,7 @@ function dpSelect(ch, el, existing) {
 
 function dpReset() {
   dpChannel = null;
+  document.getElementById('discord-connect-block').style.display = 'none';
   document.getElementById('dest-block').style.display = 'none';
   document.getElementById('code-block').style.display = 'none';
   document.getElementById('dest-input').value = '';
@@ -744,6 +764,19 @@ async function dpVerify() {
   finally { btn.disabled = false; }
 }
 
+async function dpDiscordConnect() {
+  const btn = document.getElementById('discord-connect-btn');
+  btn.disabled = true; dpError(null);
+  try {
+    const ret = window.location.pathname.indexOf('onboarding') !== -1
+      ? 'onboarding' : 'settings';
+    const resp = await api('/me/notifications/discord/connect-url?return_to=' + ret);
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.detail || 'Discord connect is unavailable');
+    window.location.href = data.url;  // Discord shows its server+channel picker
+  } catch (e) { dpError(e.message); btn.disabled = false; }
+}
+
 async function initDeliveryPicker(onVerified) {
   dpOnVerified = onVerified;
   if (!dpBound) {
@@ -753,10 +786,17 @@ async function initDeliveryPicker(onVerified) {
     document.getElementById('verify-btn').addEventListener('click', dpVerify);
     document.getElementById('code-input').addEventListener('keydown',
       (e) => { if (e.key === 'Enter') dpVerify(); });
+    document.getElementById('discord-connect-btn')
+      .addEventListener('click', dpDiscordConnect);
+    document.getElementById('discord-manual-btn').addEventListener('click', () => {
+      document.getElementById('discord-connect-block').style.display = 'none';
+      document.getElementById('dest-block').style.display = 'block';
+    });
   }
   dpReset();
   try {
     const info = await (await api('/me/notifications')).json();
+    dpDiscordOauth = !!info.discord_oauth;
     const registered = {};
     for (const c of info.channels || []) registered[c.channel] = c;
     const opts = document.getElementById('channel-options');
@@ -1082,11 +1122,25 @@ document.getElementById('prefs-btn').addEventListener('click', async () => {
   }
 });
 
-// Returning mid-onboarding: if already connected, jump ahead to sync.
-api('/portfolio/status').then(async (resp) => {
-  const s = await resp.json();
-  if (s.connected) await runSync();
-}).catch(() => {});
+// Back from the Discord OAuth connect flow (delivery is the last step):
+// success means the channel is already verified server-side, so onboarding
+// is done; failure reopens the delivery picker to try again.
+const dcStatus = new URLSearchParams(window.location.search).get('discord');
+if (dcStatus === 'connected') {
+  window.location.replace('/app/dashboard');
+} else if (dcStatus) {
+  showPanel('panel-delivery');
+  initDeliveryPicker(() => { window.location.href = '/app/dashboard'; })
+    .then(() => dpError(dcStatus === 'cancelled'
+      ? 'Discord connection was cancelled. Try again, or paste a webhook URL instead.'
+      : 'Discord connection failed. Try again, or paste a webhook URL instead.'));
+} else {
+  // Returning mid-onboarding: if already connected, jump ahead to sync.
+  api('/portfolio/status').then(async (resp) => {
+    const s = await resp.json();
+    if (s.connected) await runSync();
+  }).catch(() => {});
+}
 """
 
 
@@ -2077,6 +2131,11 @@ document.getElementById('save-schedule-btn').addEventListener('click', async () 
 });
 
 async function init() {
+  // Back from the Discord OAuth connect flow: connected needs no action
+  // (the summary below shows the verified channel); on failure reopen the
+  // picker with an explanation. Strip the param so refresh doesn't repeat it.
+  const discordStatus = new URLSearchParams(window.location.search).get('discord');
+  if (discordStatus) history.replaceState(null, '', window.location.pathname);
   try {
     meProfile = await (await api('/me')).json();
     document.getElementById('who').textContent =
@@ -2084,6 +2143,13 @@ async function init() {
   } catch (e) { /* who line is cosmetic */ }
   renderSchedule();
   const active = await loadDelivery();
+  if (discordStatus && discordStatus !== 'connected') {
+    await openEditor();
+    dpError(discordStatus === 'cancelled'
+      ? 'Discord connection was cancelled. Try again, or paste a webhook URL instead.'
+      : 'Discord connection failed. Try again, or paste a webhook URL instead.');
+    return;
+  }
   // Arriving without a working channel (e.g. from the dashboard nudge):
   // open the picker right away instead of making the user click Set up.
   if (!(active && active.verified && !active.opted_out)) await openEditor();

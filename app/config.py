@@ -132,6 +132,12 @@ class Settings(BaseSettings):
     # API_TOKEN when unset; set a dedicated value so token rotation doesn't
     # break old unsubscribe links.
     unsubscribe_secret: str = Field(default="", alias="UNSUBSCRIBE_SECRET")
+    # Discord OAuth2 app (scope webhook.incoming) — one-click "Connect
+    # Discord". Both must be set for the connect flow to be offered; users
+    # can always paste a webhook URL manually. Requires PUBLIC_BASE_URL so
+    # the redirect URI matches what's registered in the Discord app.
+    discord_client_id: str = Field(default="", alias="DISCORD_CLIENT_ID")
+    discord_client_secret: str = Field(default="", alias="DISCORD_CLIENT_SECRET")
 
     # SnapTrade — Wealthsimple portfolio sync (https://snaptrade.com).
     snaptrade_client_id: str = Field(default="", alias="SNAPTRADE_CLIENT_ID")

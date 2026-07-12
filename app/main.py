@@ -18,7 +18,7 @@ from urllib.parse import parse_qsl
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -32,7 +32,7 @@ from app.auth.context import set_current_user_id
 from app.auth.jwt import AuthError, jwks_url_for, verify_supabase_jwt
 from app.config import DEFAULT_USER_ID, get_settings, monthly_cost_cap
 from app.db.repo import Repo
-from app.delivery import twilio_inbound, unsubscribe, verification
+from app.delivery import discord_connect, twilio_inbound, unsubscribe, verification
 from app.delivery.adapters import build_adapters
 from app.delivery.channels import mask_destination
 from app.delivery.dispatcher import Dispatcher
@@ -184,7 +184,12 @@ _AUTH_EXEMPT_PATHS = {
     "/webhooks/twilio/sms",
     # Email unsubscribe links carry their own signed token.
     "/unsubscribe",
+    # Discord's OAuth redirect is a bare browser GET; the signed ``state``
+    # (minted by connect-url for the signed-in user) is the auth.
+    "/integrations/discord/callback",
 }
+
+_DISCORD_CALLBACK_PATH = "/integrations/discord/callback"
 
 _OWNER_USER_ID = uuid.UUID(DEFAULT_USER_ID)
 
@@ -818,12 +823,20 @@ def create_app() -> FastAPI:
     # ---- Notification channels ------------------------------------------
 
     async def _notifications_payload(repo: Repo, user_id: uuid.UUID) -> dict:
+        settings = get_settings()
         user = await repo.get_user(user_id)
         rows = await repo.get_notification_channels(user_id)
         return {
             "preferred_channel": getattr(user, "preferred_channel", None),
             # Channels this deployment can send (creds configured) — drives the UI picker.
             "available_channels": sorted(app.state.delivery_adapters.keys()),
+            # One-click Discord connect (OAuth webhook.incoming) is offered
+            # when the app creds + a state-signing secret are configured.
+            "discord_oauth": bool(
+                settings.discord_client_id
+                and settings.discord_client_secret
+                and unsubscribe.unsubscribe_secret(settings)
+            ),
             "channels": [
                 {
                     "channel": row.channel,
@@ -889,6 +902,77 @@ def create_app() -> FastAPI:
                 status_code=400, detail="channel is not verified for this account"
             )
         return await _notifications_payload(repo, user_id)
+
+    def _public_base(request: Request) -> str:
+        settings = get_settings()
+        return settings.public_base_url.rstrip("/") or str(request.base_url).rstrip("/")
+
+    def _discord_redirect(return_path: str, status: str) -> RedirectResponse:
+        return RedirectResponse(f"{return_path}?discord={status}", status_code=303)
+
+    @app.get("/me/notifications/discord/connect-url")
+    async def discord_connect_url(request: Request, return_to: str = "settings") -> dict:
+        """Mint the Discord OAuth2 authorize URL (scope webhook.incoming).
+
+        Discord shows its native server + channel picker; the callback below
+        receives a ready-made webhook URL. ``return_to`` names which app page
+        the callback should land on afterwards."""
+        settings = get_settings()
+        secret = unsubscribe.unsubscribe_secret(settings)
+        if not (settings.discord_client_id and settings.discord_client_secret and secret):
+            raise HTTPException(
+                status_code=503,
+                detail="Discord connect is not configured; paste a webhook URL instead",
+            )
+        if return_to not in discord_connect.RETURN_PATHS:
+            raise HTTPException(status_code=400, detail="unknown return_to")
+        state = discord_connect.sign_state(secret, _user_id(request), return_to=return_to)
+        url = discord_connect.authorize_url(
+            settings.discord_client_id,
+            redirect_uri=_public_base(request) + _DISCORD_CALLBACK_PATH,
+            state=state,
+        )
+        return {"url": url}
+
+    @app.get(_DISCORD_CALLBACK_PATH)
+    async def discord_oauth_callback(
+        request: Request, code: str = "", state: str = "", error: str = ""
+    ) -> RedirectResponse:
+        """Discord redirects here after the user picks a server + channel.
+
+        Bearer-exempt: the signed ``state`` proves which user initiated the
+        connect. On success the webhook becomes the verified, preferred
+        ``discord`` destination — OAuth already proved ownership, so no
+        verification code is needed."""
+        settings = get_settings()
+        secret = unsubscribe.unsubscribe_secret(settings)
+        parsed = discord_connect.verify_state(secret, state) if secret else None
+        if parsed is None:
+            # No trusted user/return target; land somewhere sensible and let
+            # the page offer the manual webhook fallback.
+            return _discord_redirect("/app/settings/delivery", "error")
+        user_id, return_path = parsed
+        if error or not code:
+            status = "cancelled" if error == "access_denied" else "error"
+            return _discord_redirect(return_path, status)
+        repo = _require_repo(app)
+        _bind_user(request, user_id)
+        try:
+            webhook_url = await discord_connect.exchange_code(
+                settings.discord_client_id,
+                settings.discord_client_secret,
+                code=code,
+                redirect_uri=_public_base(request) + _DISCORD_CALLBACK_PATH,
+            )
+        except discord_connect.DiscordConnectError as exc:
+            logging.getLogger(__name__).warning("discord connect failed: %s", exc)
+            return _discord_redirect(return_path, "error")
+        await repo.upsert_notification_channel(
+            user_id, channel="discord", destination=webhook_url
+        )
+        await repo.mark_channel_verified(user_id, "discord")
+        await repo.set_preferred_channel(user_id, "discord")
+        return _discord_redirect(return_path, "connected")
 
     @app.post("/webhooks/twilio/sms")
     async def twilio_sms_webhook(request: Request) -> Response:
