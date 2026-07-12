@@ -17,9 +17,6 @@ from app.integrations.snaptrade.personal_client import (
     _is_refresh_unavailable,
 )
 
-WEALTHSIMPLE_BROKER = "WEALTHSIMPLETRADE"
-
-
 @dataclass(frozen=True)
 class SnapTradeUserCredentials:
     """Per-user SnapTrade identity (commercial mode)."""
@@ -76,7 +73,7 @@ def _require_ok(response: Any, *, action: str) -> Any:
 
 
 class _SnapTradeBackend(Protocol):
-    def connection_portal_url(self, *, broker: str = WEALTHSIMPLE_BROKER) -> str: ...
+    def connection_portal_url(self, *, broker: str | None = None) -> str: ...
 
     def list_accounts(self) -> list[dict[str, Any]]: ...
 
@@ -128,13 +125,15 @@ class _CommercialBackend:
             raise SnapTradeError(f"Register response missing userSecret: {body!r}")
         return {"userId": uid, "userSecret": user_secret}
 
-    def connection_portal_url(self, *, broker: str = WEALTHSIMPLE_BROKER) -> str:
+    def connection_portal_url(self, *, broker: str | None = None) -> str:
+        # No broker → the portal shows SnapTrade's full brokerage picker.
+        extra = {"broker": broker} if broker else {}
         response = self._client.authentication.login_snap_trade_user(
             user_id=self.user_id,
             user_secret=self.user_secret,
-            broker=broker,
             connection_type="read",
             connection_portal_version="v4",
+            **extra,
         )
         body = _require_ok(response, action="login_snap_trade_user")
         if isinstance(body, dict):
@@ -248,7 +247,7 @@ class SnapTradeService:
                 ) from exc
             raise _api_error(exc, action="register_user") from exc
 
-    def connection_portal_url(self, *, broker: str = WEALTHSIMPLE_BROKER) -> str:
+    def connection_portal_url(self, *, broker: str | None = None) -> str:
         try:
             return self._backend.connection_portal_url(broker=broker)
         except PersonalSnapTradeError as exc:

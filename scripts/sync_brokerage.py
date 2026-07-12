@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Sync live Wealthsimple holdings from SnapTrade into the positions table.
+"""Sync live brokerage holdings from SnapTrade into the positions table.
 
-Usage:  python scripts/sync_wealthsimple.py
-        python scripts/sync_wealthsimple.py --no-refresh
+Usage:  python scripts/sync_brokerage.py
+        python scripts/sync_brokerage.py --no-refresh
 """
 
 from __future__ import annotations
@@ -17,11 +17,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.config import get_settings  # noqa: E402
 from app.db.repo import Repo  # noqa: E402
-from app.integrations.snaptrade.sync import sync_wealthsimple_positions  # noqa: E402
+from app.integrations.snaptrade.sync import sync_brokerage_positions  # noqa: E402
 
 
 async def main() -> None:
-    parser = argparse.ArgumentParser(description="Sync Wealthsimple holdings via SnapTrade")
+    parser = argparse.ArgumentParser(description="Sync brokerage holdings via SnapTrade")
     parser.add_argument(
         "--no-refresh",
         action="store_true",
@@ -35,7 +35,7 @@ async def main() -> None:
 
     repo = Repo(settings.database_url, ssl=settings.db_ssl)
     try:
-        summary = await sync_wealthsimple_positions(
+        summary = await sync_brokerage_positions(
             repo, settings=settings, refresh=not args.no_refresh
         )
     finally:

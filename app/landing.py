@@ -863,8 +863,9 @@ _HOME_BODY = """
     <p>No. Cirvia is informational only. It explains and contextualizes; it does not
     tell you to buy or sell.</p></details>
     <details data-reveal-item><summary>Which brokerages work?</summary>
-    <p>Wealthsimple today, via SnapTrade. More brokerages that SnapTrade supports
-    may be added over time.</p></details>
+    <p>Any brokerage SnapTrade supports — including Wealthsimple, Questrade, and
+    most major North American brokers. You pick yours in the secure connection
+    portal.</p></details>
     <details data-reveal-item><summary>How is my data protected?</summary>
     <p>Brokerage credentials stay with your bank, connection secrets are encrypted,
     and every account is isolated by row-level security. See our
@@ -1272,7 +1273,7 @@ _PRICING_BODY = f"""
 
 LANDING_HTML = _layout(
     "Cirvia — AI portfolio analyst for Canadian investors",
-    "Connect Wealthsimple, get a daily digest, macro alerts, and on-demand answers about your "
+    "Connect your brokerage, get a daily digest, macro alerts, and on-demand answers about your "
     "real holdings. Read-only. No trade execution.",
     _HOME_BODY,
     active="home",

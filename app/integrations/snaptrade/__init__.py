@@ -1,6 +1,6 @@
-"""SnapTrade integration for syncing Wealthsimple holdings."""
+"""SnapTrade integration for syncing brokerage holdings."""
 
 from app.integrations.snaptrade.client import SnapTradeService
-from app.integrations.snaptrade.sync import sync_wealthsimple_positions
+from app.integrations.snaptrade.sync import sync_brokerage_positions
 
-__all__ = ["SnapTradeService", "sync_wealthsimple_positions"]
+__all__ = ["SnapTradeService", "sync_brokerage_positions"]

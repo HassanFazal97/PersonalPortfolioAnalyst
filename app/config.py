@@ -139,7 +139,7 @@ class Settings(BaseSettings):
     discord_client_id: str = Field(default="", alias="DISCORD_CLIENT_ID")
     discord_client_secret: str = Field(default="", alias="DISCORD_CLIENT_SECRET")
 
-    # SnapTrade — Wealthsimple portfolio sync (https://snaptrade.com).
+    # SnapTrade — brokerage portfolio sync (https://snaptrade.com).
     snaptrade_client_id: str = Field(default="", alias="SNAPTRADE_CLIENT_ID")
     snaptrade_consumer_key: str = Field(default="", alias="SNAPTRADE_CONSUMER_KEY")
     snaptrade_user_id: str = Field(default="portfolio-owner", alias="SNAPTRADE_USER_ID")

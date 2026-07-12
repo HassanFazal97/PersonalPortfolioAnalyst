@@ -43,7 +43,7 @@ from app.integrations.snaptrade.onboarding import (
     register_snaptrade_user,
     service_for_user,
 )
-from app.integrations.snaptrade.sync import sync_wealthsimple_positions
+from app.integrations.snaptrade.sync import sync_brokerage_positions
 from app.landing import (
     CONTACT_HTML,
     LANDING_HTML,
@@ -687,7 +687,7 @@ def create_app() -> FastAPI:
         }
 
 
-    # ---- Wealthsimple sync (SnapTrade) ---------------------------------
+    # ---- Brokerage sync (SnapTrade) ------------------------------------
 
     @app.post("/portfolio/snaptrade/register")
     async def portfolio_register(request: Request) -> dict:
@@ -701,7 +701,7 @@ def create_app() -> FastAPI:
 
     @app.get("/portfolio/connect-url")
     async def portfolio_connect_url(request: Request) -> dict:
-        """Return a SnapTrade Connection Portal URL for linking Wealthsimple."""
+        """Return a SnapTrade Connection Portal URL for linking a brokerage."""
         repo = _require_repo(app)
         user_id = _user_id(request)
         try:
@@ -718,10 +718,10 @@ def create_app() -> FastAPI:
 
     @app.post("/portfolio/sync")
     async def portfolio_sync(request: Request) -> dict:
-        """Pull live Wealthsimple holdings from SnapTrade into positions."""
+        """Pull live brokerage holdings from SnapTrade into positions."""
         repo = _require_repo(app)
         try:
-            return await sync_wealthsimple_positions(repo, user_id=_user_id(request))
+            return await sync_brokerage_positions(repo, user_id=_user_id(request))
         except (SnapTradeError, RuntimeError) as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
 

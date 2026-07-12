@@ -44,15 +44,15 @@ cp .env.example .env
 | `PUBLIC_BASE_URL` | Public origin, e.g. `https://app.example.com` (Twilio webhook signatures) |
 | `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` / `TWILIO_FROM_NUMBER` | SMS channel (all three required) |
 | `RESEND_API_KEY` / `EMAIL_FROM` | Email channel (both required) |
-| `SNAPTRADE_CLIENT_ID` / `SNAPTRADE_CONSUMER_KEY` | SnapTrade API keys (Wealthsimple sync) |
+| `SNAPTRADE_CLIENT_ID` / `SNAPTRADE_CONSUMER_KEY` | SnapTrade API keys (brokerage sync) |
 | `SNAPTRADE_USER_ID` / `SNAPTRADE_USER_SECRET` | Commercial keys only — leave empty for Personal dashboard keys |
 | `SNAPTRADE_AUTH_MODE` | `auto` (default), `personal`, or `commercial` |
 
 Generate a token: `python -c "import secrets; print(secrets.token_urlsafe(32))"`
 
-## Connect Wealthsimple (SnapTrade)
+## Connect a brokerage (SnapTrade)
 
-This app syncs your live Wealthsimple holdings through [SnapTrade](https://snaptrade.com) — the same third-party API used by apps like Blossom. No Wealthsimple password is stored in this repo; you authenticate once through SnapTrade's Connection Portal.
+This app syncs your live brokerage holdings (Wealthsimple, Questrade, and any other brokerage SnapTrade supports) through [SnapTrade](https://snaptrade.com) — the same third-party API used by apps like Blossom. No brokerage password is stored in this repo; you authenticate once through SnapTrade's Connection Portal.
 
 ### 1. Get SnapTrade API keys
 
@@ -63,15 +63,15 @@ This app syncs your live Wealthsimple holdings through [SnapTrade](https://snapt
    SNAPTRADE_CONSUMER_KEY=...
    ```
 
-### 2. Connect Wealthsimple
+### 2. Connect your brokerage
 
 ```bash
-python scripts/connect_wealthsimple.py
+python scripts/connect_brokerage.py
 ```
 
 **Personal keys** (what you get from the dashboard SDK flow): only `CLIENT_ID` and
 `CONSUMER_KEY` are needed — leave `SNAPTRADE_USER_ID` and `SNAPTRADE_USER_SECRET`
-empty. The script prints a browser URL; open it, log into Wealthsimple, and
+empty. The script prints a browser URL; open it, pick your brokerage, log in, and
 authorize read access.
 
 **Commercial keys** (multi-user apps): the first run registers a SnapTrade user
@@ -86,10 +86,10 @@ curl -s localhost:8000/portfolio/connect-url -H "Authorization: Bearer $TOKEN"
 ### 3. Sync holdings
 
 ```bash
-python scripts/sync_wealthsimple.py
+python scripts/sync_brokerage.py
 ```
 
-This pulls positions from all linked Wealthsimple accounts (TFSA, RRSP, non-registered), maps tickers to Yahoo format, and upserts into the `positions` table. Stale rows are removed.
+This pulls positions from all linked brokerage accounts (TFSA, RRSP, non-registered), maps tickers to Yahoo format, and upserts into the `positions` table. Stale rows are removed.
 
 ```bash
 curl -s -X POST localhost:8000/portfolio/sync -H "Authorization: Bearer $TOKEN"
@@ -116,7 +116,7 @@ Applies numbered SQL in `app/db/migrations/` and tracks them in
 
 ## Seed your portfolio
 
-See **Connect Wealthsimple (SnapTrade)** below for the recommended path. To enter
+See **Connect a brokerage (SnapTrade)** below for the recommended path. To enter
 holdings manually instead:
 
 ## Run the API
@@ -191,7 +191,7 @@ collides on the `digests.digest_date` unique constraint.
    `scripts/migrate.py` on boot, then `uvicorn`.
 3. **Env vars** (set on the host, never committed): `ANTHROPIC_API_KEY`,
    `FINNHUB_API_KEY`, `DATABASE_URL`, `DB_SSL=true`, `API_TOKEN`,
-   `TZ=America/Toronto`, and the `SNAPTRADE_*` keys if syncing Wealthsimple.
+   `TZ=America/Toronto`, and the `SNAPTRADE_*` keys if syncing a brokerage.
 4. **Smoke test** once deployed (replace `$HOST`/`$TOKEN`):
    ```bash
    curl -s $HOST/health                                   # public, no token

@@ -5,12 +5,12 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from app.config import DEFAULT_USER_ID
-from app.integrations.snaptrade.sync import sync_wealthsimple_positions
+from app.integrations.snaptrade.sync import sync_brokerage_positions
 from tests.fakes import FakeRepo
 
 
 @pytest.mark.asyncio
-async def test_sync_wealthsimple_positions_upserts_and_prunes(monkeypatch):
+async def test_sync_brokerage_positions_upserts_and_prunes(monkeypatch):
     repo = FakeRepo()
     # Seed a stale row that should be removed.
     await repo.upsert_position(
@@ -46,7 +46,7 @@ async def test_sync_wealthsimple_positions_upserts_and_prunes(monkeypatch):
         AsyncMock(return_value=mock_service),
     )
 
-    summary = await sync_wealthsimple_positions(
+    summary = await sync_brokerage_positions(
         repo, user_id=uuid.UUID(DEFAULT_USER_ID), settings=MagicMock()
     )
 
@@ -89,7 +89,7 @@ async def test_sync_merges_accounts_that_share_a_bucket(monkeypatch):
         AsyncMock(return_value=mock_service),
     )
 
-    summary = await sync_wealthsimple_positions(
+    summary = await sync_brokerage_positions(
         repo, user_id=uuid.UUID(DEFAULT_USER_ID), settings=MagicMock()
     )
 

@@ -22,9 +22,6 @@ import httpx
 from app.config import Settings
 
 BASE_URL = "https://api.snaptrade.com/api/v1"
-WEALTHSIMPLE_BROKER = "WEALTHSIMPLETRADE"
-
-
 class PersonalSnapTradeError(RuntimeError):
     pass
 
@@ -98,12 +95,14 @@ class PersonalSnapTradeClient:
             return None
         return response.json()
 
-    def connection_portal_url(self, *, broker: str = WEALTHSIMPLE_BROKER) -> str:
+    def connection_portal_url(self, *, broker: str | None = None) -> str:
+        # No broker → the portal shows SnapTrade's full brokerage picker.
         body = {
-            "broker": broker,
             "connectionType": "read",
             "connectionPortalVersion": "v4",
         }
+        if broker:
+            body["broker"] = broker
         data = self._request("POST", "/snapTrade/login", body=body)
         if isinstance(data, dict):
             url = data.get("redirectURI") or data.get("redirect_uri")

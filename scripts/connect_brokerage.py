@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Print the SnapTrade Connection Portal URL to link Wealthsimple.
+"""Print the SnapTrade Connection Portal URL to link a brokerage.
 
 Usage:
-  python scripts/connect_wealthsimple.py
+  python scripts/connect_brokerage.py
 
 Prerequisites:
   1. Create a SnapTrade account at https://dashboard.snaptrade.com
@@ -28,7 +28,7 @@ from app.integrations.snaptrade.client import (  # noqa: E402
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Connect Wealthsimple via SnapTrade")
+    parser = argparse.ArgumentParser(description="Connect a brokerage via SnapTrade")
     parser.add_argument(
         "--register-only",
         action="store_true",
@@ -68,9 +68,9 @@ def main() -> None:
     except SnapTradeError as exc:
         raise SystemExit(str(exc)) from exc
 
-    print("Open this URL in your browser to link Wealthsimple (expires in ~5 minutes):\n")
+    print("Open this URL in your browser to link your brokerage (expires in ~5 minutes):\n")
     print(url)
-    print("\nAfter connecting, run:  python scripts/sync_wealthsimple.py")
+    print("\nAfter connecting, run:  python scripts/sync_brokerage.py")
 
 
 if __name__ == "__main__":

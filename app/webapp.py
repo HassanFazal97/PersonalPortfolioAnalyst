@@ -867,7 +867,7 @@ _ONBOARDING_BODY = """
   <div class="ob-rail" aria-label="Setup progress">
     <div class="ob-step active" id="step-1">
       <span class="n">1</span><span class="t">Connect your brokerage</span>
-      <span class="d">Link Wealthsimple through SnapTrade's secure portal.</span>
+      <span class="d">Link your brokerage through SnapTrade's secure portal.</span>
     </div>
     <div class="ob-step" id="step-2">
       <span class="n">2</span><span class="t">Sync your holdings</span>
@@ -890,12 +890,12 @@ _ONBOARDING_BODY = """
 
   <div class="step-panel" id="panel-connect">
     <h2>Connect your brokerage</h2>
-    <p>Link Wealthsimple through SnapTrade's secure portal. Read-only: Cirvia can
+    <p>Link your brokerage through SnapTrade's secure portal. Read-only: Cirvia can
     never trade or move money, and your brokerage password is never shared with us.</p>
     <div class="status-line" id="connect-status" style="display:none;">
       <span class="spinner"></span><span id="connect-status-text">Waiting for connection…</span>
     </div>
-    <button class="btn full" id="connect-btn">Connect Wealthsimple</button>
+    <button class="btn full" id="connect-btn">Connect brokerage</button>
     <button class="btn ghost full" id="connected-btn" style="display:none;">I've finished connecting</button>
     <div class="error-box" id="connect-error"></div>
     <p class="muted-note">A new tab will open. Come back here when you're done.</p>
@@ -1881,7 +1881,7 @@ async function loadConnection() {
         ? 'Last synced ' + new Date(s.last_sync_at).toLocaleString() + '.'
         : 'Not synced yet.';
       summary.innerHTML = '<p class="muted-note" style="margin-top:0.5rem;">' +
-        'Wealthsimple, linked read-only through SnapTrade. ' + esc(synced) + '</p>';
+        'Brokerage linked read-only through SnapTrade. ' + esc(synced) + '</p>';
       actions.style.display = 'block';
     } else if (s.registered) {
       chip.innerHTML = '<span class="chip-warn">not connected</span>';

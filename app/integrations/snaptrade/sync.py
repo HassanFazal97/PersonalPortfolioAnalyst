@@ -1,4 +1,4 @@
-"""Sync Wealthsimple holdings from SnapTrade into the positions table."""
+"""Sync brokerage holdings from SnapTrade into the positions table."""
 
 from __future__ import annotations
 
@@ -17,14 +17,14 @@ from app.integrations.snaptrade.mapper import (
 from app.integrations.snaptrade.onboarding import service_for_user
 
 
-async def sync_wealthsimple_positions(
+async def sync_brokerage_positions(
     repo: Repo,
     *,
     user_id: uuid.UUID | None = None,
     settings: Settings | None = None,
     refresh: bool = True,
 ) -> dict[str, Any]:
-    """Pull Wealthsimple positions via SnapTrade and upsert into Postgres.
+    """Pull brokerage positions via SnapTrade and upsert into Postgres.
 
     Scoped to ``user_id`` so each tenant's book stays isolated. Positions no
     longer reported by SnapTrade are pruned for that user only.
@@ -50,7 +50,7 @@ async def sync_wealthsimple_positions(
     if not accounts:
         raise RuntimeError(
             "No investment accounts found. Open the connect URL and link "
-            "Wealthsimple first."
+            "your brokerage first."
         )
 
     mapped: list[MappedPosition] = []
