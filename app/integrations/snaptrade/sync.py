@@ -72,8 +72,33 @@ async def sync_wealthsimple_positions(
             }
         )
 
-    keep: set[tuple[str, str]] = set()
+    # Distinct brokerage accounts can collapse into the same (ticker, account)
+    # bucket — e.g. VFV held in both an RRSP and an FHSA. upsert_position
+    # replaces rather than adds, so merge those rows first (sum quantities,
+    # weighted-average the cost) or the last account synced would win.
+    merged: dict[tuple[str, str], MappedPosition] = {}
     for row in mapped:
+        key = (row.ticker, row.account)
+        prev = merged.get(key)
+        if prev is None:
+            merged[key] = row
+            continue
+        total = prev.quantity + row.quantity
+        avg = (
+            (prev.avg_cost * prev.quantity + row.avg_cost * row.quantity) / total
+            if total > 0
+            else prev.avg_cost
+        )
+        merged[key] = MappedPosition(
+            ticker=row.ticker,
+            quantity=total,
+            avg_cost=avg,
+            currency=prev.currency,
+            account=row.account,
+        )
+
+    keep: set[tuple[str, str]] = set()
+    for row in merged.values():
         keep.add((row.ticker, row.account))
         await repo.upsert_position(
             ticker=row.ticker,
@@ -95,7 +120,7 @@ async def sync_wealthsimple_positions(
 
     return {
         "accounts_synced": len(account_summaries),
-        "positions_upserted": len(mapped),
+        "positions_upserted": len(merged),
         "positions_removed": removed,
         "refresh_skipped": refresh_skipped,
         "accounts": account_summaries,

@@ -59,3 +59,44 @@ async def test_sync_wealthsimple_positions_upserts_and_prunes(monkeypatch):
     assert len(rows) == 1
     assert rows[0].ticker == "NVDA"
     assert rows[0].account == "TFSA"
+
+
+@pytest.mark.asyncio
+async def test_sync_merges_accounts_that_share_a_bucket(monkeypatch):
+    # RRSP and FHSA both map to the "RRSP" bucket; the same ticker held in
+    # both must be summed, not overwritten by whichever account syncs last.
+    repo = FakeRepo()
+    rrsp = {"id": "acct-1", "raw_type": "RRSP", "name": "RRSP",
+            "account_category": "INVESTMENT"}
+    fhsa = {"id": "acct-2", "raw_type": "FHSA", "name": "FHSA",
+            "account_category": "INVESTMENT"}
+
+    def _pos(units, cost):
+        return {
+            "instrument": {"kind": "stock", "symbol": "VFV", "currency": "CAD"},
+            "units": units, "price": "150", "cost_basis": cost, "currency": "CAD",
+        }
+
+    mock_service = MagicMock()
+    mock_service.list_connections.return_value = []
+    mock_service.list_accounts.return_value = [rrsp, fhsa]
+    mock_service.get_account_positions.side_effect = lambda aid: (
+        [_pos("10", "100")] if aid == "acct-1" else [_pos("30", "120")]
+    )
+
+    monkeypatch.setattr(
+        "app.integrations.snaptrade.sync.service_for_user",
+        AsyncMock(return_value=mock_service),
+    )
+
+    summary = await sync_wealthsimple_positions(
+        repo, user_id=uuid.UUID(DEFAULT_USER_ID), settings=MagicMock()
+    )
+
+    assert summary["positions_upserted"] == 1
+    rows = await repo.list_positions()
+    assert len(rows) == 1
+    assert rows[0].account == "RRSP"
+    assert rows[0].quantity == Decimal("40")
+    # Weighted average cost: (10*100 + 30*120) / 40 = 115
+    assert rows[0].avg_cost == Decimal("115")
