@@ -479,7 +479,12 @@ form.addEventListener('submit', async (ev) => {
   const password = document.getElementById('password').value;
   try {
     if (mode === 'signup') {
-      const { data, error } = await sb.auth.signUp({ email, password });
+      // Without emailRedirectTo, Supabase sends the confirmation link to the
+      // project-wide Site URL — wrong origin for every other environment.
+      const { data, error } = await sb.auth.signUp({
+        email, password,
+        options: { emailRedirectTo: location.origin + '/app' },
+      });
       if (error) throw error;
       if (data.session) { await routeAfterAuth(); return; }
       noticeBox.textContent = 'Check your email to confirm your account, then sign in.';
