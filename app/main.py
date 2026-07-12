@@ -81,6 +81,13 @@ async def lifespan(app: FastAPI):
     # Which channels this deployment can send (drives verification + UI).
     app.state.delivery_adapters = build_adapters(settings)
 
+    if not (settings.supabase_url or settings.supabase_jwt_secret):
+        logging.getLogger(__name__).warning(
+            "Supabase auth is not configured — running in single-owner mode. "
+            "Browser sign-in is disabled; only API_TOKEN auth works. "
+            "Do not expose this deployment publicly in this state."
+        )
+
     if repo is not None:
         async def _run_digest() -> None:
             await run_digests_for_all(repo)
@@ -508,26 +515,42 @@ def create_app() -> FastAPI:
             "is_owner": user_id == _OWNER_USER_ID,
         }
 
+    # One in-flight chat per user: the usage-limit check reads recorded cost
+    # before the run starts, so parallel requests could all pass it at once
+    # (check-then-act race) and blow past the Free caps. In-process is enough —
+    # the app runs as a single process (see DeliveryScheduler et al.).
+    active_chats: set[uuid.UUID] = set()
+
     @app.post("/chat")
     async def chat(req: ChatRequest, request: Request) -> dict:
         settings = get_settings()
         repo = _require_repo(app)
         user_id = _user_id(request)
-        await _enforce_usage_limits(repo, user_id, settings)
-        budget = Budget(
-            max_iterations=settings.chat_max_iterations,
-            max_cost_usd=settings.chat_max_cost_usd,
-            model=settings.model,
-        )
-        result = await run_agent(
-            req.message,
-            trigger="chat",
-            system_prompt=CHAT_SYSTEM_PROMPT,
-            tools=CHAT_TOOLS,
-            budget=budget,
-            db=repo,
-            user_id=user_id,
-        )
+        if user_id in active_chats:
+            raise HTTPException(
+                status_code=429,
+                detail="A chat is already running for this account; wait for it to finish.",
+            )
+        # Claim before the first await so two racing requests can't both pass.
+        active_chats.add(user_id)
+        try:
+            await _enforce_usage_limits(repo, user_id, settings)
+            budget = Budget(
+                max_iterations=settings.chat_max_iterations,
+                max_cost_usd=settings.chat_max_cost_usd,
+                model=settings.model,
+            )
+            result = await run_agent(
+                req.message,
+                trigger="chat",
+                system_prompt=CHAT_SYSTEM_PROMPT,
+                tools=CHAT_TOOLS,
+                budget=budget,
+                db=repo,
+                user_id=user_id,
+            )
+        finally:
+            active_chats.discard(user_id)
         return {
             "run_id": str(result.run_id),
             "answer": result.answer,

@@ -566,14 +566,16 @@ const resetHash = new URLSearchParams(location.hash.replace(/^#/, ''));
 if (resetHash.get('error')) {
   showLinkInvalid();
 } else {
-  // Fallback: if no auth event lands shortly, check for a session once more,
-  // then declare the link invalid.
-  setTimeout(async () => {
+  // Fallback: if no auth event lands, poll for a session a few times (slow
+  // networks can take several seconds) before declaring the link invalid.
+  const checkSession = async (triesLeft) => {
     if (recoveryReady) return;
     const { data } = await sb.auth.getSession();
     if (data.session) showResetForm();
+    else if (triesLeft > 0) setTimeout(() => checkSession(triesLeft - 1), 2500);
     else showLinkInvalid();
-  }, 2500);
+  };
+  setTimeout(() => checkSession(3), 2500);
 }
 
 resetForm.addEventListener('submit', async (ev) => {
@@ -869,9 +871,10 @@ _ONBOARDING_BODY = """
 
   <div class="step-panel" id="panel-sync" style="display:none;">
     <h2>Syncing your holdings</h2>
-    <div class="status-line"><span class="spinner"></span>
+    <div class="status-line" id="sync-status-line"><span class="spinner"></span>
     <span id="sync-status-text">Pulling your positions…</span></div>
     <div class="error-box" id="sync-error"></div>
+    <button class="btn full" id="sync-retry-btn" style="display:none;">Try again</button>
   </div>
 
   <div class="step-panel" id="panel-watchlist" style="display:none;">
@@ -1044,6 +1047,10 @@ document.getElementById('watchlist-btn').addEventListener('click', async () => {
 
 async function runSync(attempt = 0) {
   showPanel('panel-sync');
+  // Reset from a previous failed attempt (retry path).
+  document.getElementById('sync-status-line').style.display = '';
+  document.getElementById('sync-retry-btn').style.display = 'none';
+  document.getElementById('sync-error').style.display = 'none';
   try {
     const resp = await api('/portfolio/sync', { method: 'POST' });
     if (!resp.ok) {
@@ -1064,9 +1071,14 @@ async function runSync(attempt = 0) {
       result.accounts_synced + ' accounts.';
     setTimeout(afterSync, 900);
   } catch (e) {
+    // Stop the spinner and offer a retry so a transient failure isn't a dead end.
+    document.getElementById('sync-status-line').style.display = 'none';
+    document.getElementById('sync-retry-btn').style.display = '';
     showError('sync-error', e.message);
   }
 }
+
+document.getElementById('sync-retry-btn').addEventListener('click', () => runSync());
 
 document.getElementById('connect-btn').addEventListener('click', async () => {
   const btn = document.getElementById('connect-btn');
@@ -1268,7 +1280,9 @@ let portfolioTickers = [];
 const dashWlSelected = new Set();
 
 function esc(s) {
-  const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML;
+  // Quotes must be escaped too: values land inside HTML attributes.
+  const d = document.createElement('div'); d.textContent = s ?? '';
+  return d.innerHTML.replaceAll('"', '&quot;').replaceAll("'", '&#39;');
 }
 function fmtMoney(v) {
   return v == null ? '—' : v.toLocaleString('en-CA', { style: 'currency', currency: 'CAD' });
@@ -1317,7 +1331,10 @@ function renderNewsItems(el, items, emptyMsg) {
     if (item.category) meta.push(item.category);
     if (item.source) meta.push(item.source);
     if (item.created_at) meta.push(new Date(item.created_at).toLocaleDateString());
-    const link = item.url
+    // News URLs come from external providers; only ever link http(s).
+    const low = (item.url ?? '').toLowerCase();
+    const urlOk = low.startsWith('http://') || low.startsWith('https://');
+    const link = urlOk
       ? ' <a href="' + esc(item.url) + '" target="_blank" rel="noopener">Read</a>' : '';
     return '<div class="news-item">' +
       '<div class="head">' + esc(item.headline) + link + '</div>' +
@@ -1903,7 +1920,9 @@ document.getElementById('delete-yes').addEventListener('click', async () => {
 });
 
 function esc(s) {
-  const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML;
+  // Quotes must be escaped too: values land inside HTML attributes.
+  const d = document.createElement('div'); d.textContent = s ?? '';
+  return d.innerHTML.replaceAll('"', '&quot;').replaceAll("'", '&#39;');
 }
 
 async function loadDeliveryOverview() {
@@ -2034,7 +2053,9 @@ let meProfile = null;
 const CHANNEL_NAMES = { sms: 'Text message', email: 'Email', discord: 'Discord' };
 
 function esc(s) {
-  const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML;
+  // Quotes must be escaped too: values land inside HTML attributes.
+  const d = document.createElement('div'); d.textContent = s ?? '';
+  return d.innerHTML.replaceAll('"', '&quot;').replaceAll("'", '&#39;');
 }
 
 async function loadDelivery() {

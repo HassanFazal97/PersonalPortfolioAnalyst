@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import time
 import traceback
 import uuid
@@ -36,6 +37,8 @@ from app.tools import portfolio
 from app.tools.registry import ToolContext
 
 _OWNER_USER_ID = uuid.UUID(DEFAULT_USER_ID)
+
+logger = logging.getLogger(__name__)
 
 
 def _get_client(client: Any) -> Any:
@@ -258,13 +261,21 @@ async def run_macro_scans_for_all(db: Repo, *, client: Any = None) -> list[dict[
         return results
 
     for uid in recipients:
-        if uid != _OWNER_USER_ID:
-            user = await db.get_user(uid)
-            plan = getattr(user, "plan", "free") if user is not None else "free"
-            if await db.monthly_cost_usd(uid) >= monthly_cost_cap(plan, settings):
-                results.append({"user_id": str(uid), "status": "skipped_cost_cap"})
-                continue
-        results.append(await synthesize_for_user(db, client=client, user_id=uid, events=events))
+        # One user's failure (e.g. a transient DB error in the cost-cap read)
+        # must not abort the rest of the batch — same shape as run_digests_for_all.
+        try:
+            if uid != _OWNER_USER_ID:
+                user = await db.get_user(uid)
+                plan = getattr(user, "plan", "free") if user is not None else "free"
+                if await db.monthly_cost_usd(uid) >= monthly_cost_cap(plan, settings):
+                    results.append({"user_id": str(uid), "status": "skipped_cost_cap"})
+                    continue
+            results.append(
+                await synthesize_for_user(db, client=client, user_id=uid, events=events)
+            )
+        except Exception:  # noqa: BLE001 - per-user isolation in the fan-out
+            logger.exception("macro synthesis failed for user %s", uid)
+            results.append({"user_id": str(uid), "status": "error"})
     return results
 
 
