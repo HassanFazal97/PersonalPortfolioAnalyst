@@ -217,6 +217,7 @@ tr:last-child td { border-bottom: none; }
 .holdings-row { cursor: pointer; transition: background 0.15s var(--ease); }
 .holdings-row:hover { background: var(--surface-2); }
 .holdings-row.selected { background: oklch(30% 0.1 295 / 0.35); }
+.acct-count { font-size: 0.72rem; color: var(--ink-3); margin-left: 0.5rem; }
 .watchlist-badge { font-size: 0.68rem; font-weight: 650; color: var(--accent-text);
   border: 1px solid var(--accent); border-radius: 999px; padding: 0.1rem 0.45rem;
   margin-left: 0.4rem; vertical-align: middle; }
@@ -1442,14 +1443,38 @@ async function loadHoldings() {
             totals.total_unrealized_pnl_pct.toFixed(1) + '%'
           : '');
     }
-    let rows = '';
+    // One row per ticker: the same instrument held in several accounts
+    // (TFSA + RRSP, say) arrives as separate positions, but this table has
+    // no account column, so ungrouped it reads as a duplicate-row bug.
+    const byTicker = new Map();
     for (const p of pf.positions) {
-      const sel = p.ticker === selectedTicker ? ' selected' : '';
-      const badge = watchlist.has(p.ticker) ? '<span class="watchlist-badge">watchlist</span>' : '';
-      rows += `<tr class="holdings-row${sel}" data-ticker="${esc(p.ticker)}">` +
-        `<td><strong>${esc(p.ticker)}</strong>${badge}</td>` +
-        `<td>${p.quantity}</td><td>${fmtMoney(p.market_value)}</td>` +
-        pctCell(p.day_change_pct) + pctCell(p.unrealized_pnl_pct) + '</tr>';
+      const g = byTicker.get(p.ticker);
+      if (!g) {
+        byTicker.set(p.ticker, {
+          ...p, accounts: 1, cost: p.quantity * p.avg_cost,
+        });
+        continue;
+      }
+      g.accounts += 1;
+      g.quantity += p.quantity;
+      g.cost += p.quantity * p.avg_cost;
+      if (p.market_value != null) g.market_value = (g.market_value ?? 0) + p.market_value;
+      if (g.day_change_pct == null) g.day_change_pct = p.day_change_pct;
+    }
+    let rows = '';
+    for (const g of byTicker.values()) {
+      if (g.accounts > 1 && g.market_value != null && g.cost > 0) {
+        // Re-derive the total return across accounts (cost-weighted).
+        g.unrealized_pnl_pct = (g.market_value / g.cost - 1) * 100;
+      }
+      const sel = g.ticker === selectedTicker ? ' selected' : '';
+      const badge = watchlist.has(g.ticker) ? '<span class="watchlist-badge">watchlist</span>' : '';
+      const acct = g.accounts > 1
+        ? `<span class="acct-count">${g.accounts} accounts</span>` : '';
+      rows += `<tr class="holdings-row${sel}" data-ticker="${esc(g.ticker)}">` +
+        `<td><strong>${esc(g.ticker)}</strong>${badge}${acct}</td>` +
+        `<td>${Number(g.quantity.toFixed(6))}</td><td>${fmtMoney(g.market_value)}</td>` +
+        pctCell(g.day_change_pct) + pctCell(g.unrealized_pnl_pct) + '</tr>';
     }
     el.innerHTML = '<table><thead><tr><th>Ticker</th><th>Qty</th><th>Value</th>' +
       '<th>Day</th><th>Total</th></tr></thead><tbody>' + rows + '</tbody></table>';

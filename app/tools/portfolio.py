@@ -7,6 +7,7 @@ reported alongside.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from app.tools import market
@@ -39,9 +40,10 @@ async def get_portfolio(payload: dict[str, Any], ctx: Any = None) -> dict[str, A
         return {"positions": [], "totals": {}, "note": "No positions on record."}
 
     tickers = sorted({p.ticker for p in positions})
-    quote_result = await market.get_quote({"tickers": tickers})
+    quote_result, usdcad = await asyncio.gather(
+        market.get_quote({"tickers": tickers}), _usdcad_rate()
+    )
     quotes = {q["ticker"]: q for q in quote_result["quotes"]}
-    usdcad = await _usdcad_rate()
 
     out_positions: list[dict[str, Any]] = []
     total_mv_cad = 0.0

@@ -144,23 +144,39 @@ async def get_quote(payload: dict[str, Any], ctx: Any = None) -> dict[str, Any]:
         raise ValueError("tickers must be a non-empty array of strings")
     normalized = normalize_tickers(tickers)
 
-    quotes: list[dict[str, Any]] = []
-    errors: list[dict[str, str]] = []
     now = _clock()
-
+    results: dict[str, dict[str, Any]] = {}
+    misses: list[str] = []
     for ticker in normalized:
         cached = _quote_cache.get(ticker)
         if cached and now - cached[0] < QUOTE_TTL_SECONDS:
-            quotes.append(cached[1])
-            continue
+            results[ticker] = cached[1]
+        else:
+            misses.append(ticker)
+
+    # Cache misses fetch concurrently — serially, a cold portfolio of a dozen
+    # tickers stacks a dozen network round-trips into a 10s+ page load.
+    async def _fetch_one(ticker: str) -> tuple[str, dict[str, Any] | None, str | None]:
         try:
             raw = await asyncio.to_thread(_fetch_quote_raw, ticker)
-            quote = _normalize_quote(ticker, raw)
-            _quote_cache[ticker] = (_clock(), quote)
-            quotes.append(quote)
         except Exception as exc:  # noqa: BLE001 - surfaced to the model
-            errors.append({"ticker": ticker, "error": str(exc)})
+            return ticker, None, str(exc)
+        quote = _normalize_quote(ticker, raw)
+        _quote_cache[ticker] = (_clock(), quote)
+        return ticker, quote, None
 
+    fetch_errors: dict[str, str] = {}
+    for ticker, quote, error in await asyncio.gather(*map(_fetch_one, misses)):
+        if quote is not None:
+            results[ticker] = quote
+        else:
+            fetch_errors[ticker] = error
+
+    # Assemble in requested order, quotes first shape unchanged.
+    quotes = [results[t] for t in normalized if t in results]
+    errors = [
+        {"ticker": t, "error": fetch_errors[t]} for t in normalized if t in fetch_errors
+    ]
     return {"quotes": quotes, "errors": errors}
 
 

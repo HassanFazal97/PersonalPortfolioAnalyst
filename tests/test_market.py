@@ -1,3 +1,7 @@
+import time
+
+import pytest
+
 import app.tools.market as market
 from app.tools.market import (
     annualized_volatility_pct,
@@ -85,3 +89,25 @@ async def test_get_price_history_computes_metrics(monkeypatch):
     assert out["bars_returned"] == 3
     assert out["period_return_pct"] == -10.0
     assert out["max_drawdown_pct"] == -25.0
+
+
+@pytest.mark.asyncio
+async def test_get_quote_fetches_misses_concurrently(monkeypatch):
+    # A dozen cold tickers must not stack their network latency serially —
+    # that turned dashboard loads into 10s+ waits.
+    market.cache_clear()
+    delay = 0.15
+
+    def slow_fetch(ticker):
+        time.sleep(delay)
+        return {"last_price": 10.0, "previous_close": 9.0, "volume": 1}
+
+    monkeypatch.setattr(market, "_fetch_quote_raw", slow_fetch)
+    tickers = [f"T{i}" for i in range(8)]
+    start = time.monotonic()
+    result = await market.get_quote({"tickers": tickers})
+    elapsed = time.monotonic() - start
+    assert len(result["quotes"]) == 8
+    assert result["errors"] == []
+    # Serial would be ~1.2s; allow generous headroom for slow CI.
+    assert elapsed < delay * 8 / 2
