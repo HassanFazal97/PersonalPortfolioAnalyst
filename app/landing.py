@@ -639,7 +639,7 @@ def _nav(active: str) -> str:
         '<a class="logo" href="/">Cir<span>via</span></a>'
         f'<div class="nav-links">{links}'
         '<a class="keep" href="/app" data-auth="signin">Sign in</a>'
-        '<a class="btn" href="/app" data-auth="cta">Get started</a>'
+        '<a class="btn" href="/app#signup" data-auth="cta">Get started</a>'
         "</div></div></nav>"
     )
 
@@ -773,7 +773,7 @@ _HOME_BODY = """
     <h1 data-hero>Know what matters before the market opens.</h1>
     <p class="lead" data-hero>Your holdings. Your brief. Every morning.</p>
     <div class="cta-row" data-hero>
-      <a class="btn lg" href="/app" data-auth="cta">Get started free</a>
+      <a class="btn lg" href="/app#signup" data-auth="cta">Get started free</a>
       <a class="quiet" href="#how">See how it works</a>
     </div>
   </div>
@@ -903,7 +903,7 @@ _HOME_BODY = """
 <div class="cta-final" data-reveal>
   <h2>Know your portfolio by 7:45.</h2>
   <p>Start free. Connected in under three minutes.</p>
-  <a class="btn lg" href="/app" data-auth="cta">Get started free</a>
+  <a class="btn lg" href="/app#signup" data-auth="cta">Get started free</a>
 </div>
 """
 
@@ -1253,7 +1253,7 @@ _PRICING_BODY = f"""
         <li>Weekly digest on up to 3 holdings</li>
         <li>5 chat questions per day</li>
       </ul>
-      <a class="btn ghost" href="/app">Start free</a>
+      <a class="btn ghost" href="/app#signup">Start free</a>
     </div>
     <div class="plan featured" data-reveal-item>
       <div class="plan-tag">Pro</div>
@@ -1265,7 +1265,7 @@ _PRICING_BODY = f"""
         <li>Macro alerts when the world moves</li>
         <li>Unlimited chat</li>
       </ul>
-      <a class="btn ghost" href="/app">Start free, upgrade later</a>
+      <a class="btn ghost" href="/app#signup">Start free, upgrade later</a>
       <p class="price-note" style="margin-top:0.75rem;">Pro billing is coming soon.
       Every new account starts on the Free plan.</p>
     </div>
@@ -1293,7 +1293,7 @@ _PRICING_BODY = f"""
 <div class="cta-final" data-reveal>
   <h2>Ready when you are.</h2>
   <p>Start free. Upgrade any time.</p>
-  <a class="btn lg" href="/app" data-auth="cta">Get started free</a>
+  <a class="btn lg" href="/app#signup" data-auth="cta">Get started free</a>
 </div>
 """
 

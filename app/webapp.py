@@ -31,11 +31,14 @@ nav {
   line-height: 1.25; max-width: none; margin: 0; }
 .app-wrap h2 { font-size: 1.25rem; font-weight: 650; letter-spacing: -0.01em; }
 .app-wrap h3 { font-size: 1rem; font-weight: 600; margin-bottom: 0; }
-/* auth: full-viewport split, brand panel left, form right */
-.auth-split { display: grid; grid-template-columns: minmax(400px, 44%) 1fr;
+/* auth: full-viewport split — sign in puts the form left and the brand panel
+   right; .mode-signup flips them (JS slides the columns with a FLIP swap) */
+.auth-split { display: grid; grid-template-columns: 1fr minmax(400px, 44%);
   min-height: 100dvh; }
-.auth-brand { display: flex; flex-direction: column; justify-content: space-between;
-  gap: 2.5rem; margin: 1rem 0 1rem 1rem; padding: 2.25rem 2.25rem 2rem;
+.auth-split.mode-signup { grid-template-columns: minmax(400px, 44%) 1fr; }
+.auth-split.mode-signup .auth-brand { order: 0; margin: 1rem 0 1rem 1rem; }
+.auth-brand { order: 2; display: flex; flex-direction: column; justify-content: space-between;
+  gap: 2.5rem; margin: 1rem 1rem 1rem 0; padding: 2.25rem 2.25rem 2rem;
   border: 1px solid var(--line); border-radius: var(--r-l); overflow: hidden;
   background:
     radial-gradient(120% 85% at 50% -25%, oklch(45% 0.16 295 / 0.6), transparent 72%),
@@ -67,7 +70,7 @@ nav {
 .forgot-row { text-align: right; margin-top: 0.45rem; }
 .forgot-row .link-btn { font-size: 0.84rem; }
 @media (max-width: 880px) {
-  .auth-split { grid-template-columns: 1fr; }
+  .auth-split, .auth-split.mode-signup { grid-template-columns: 1fr; }
   .auth-brand { display: none; }
   .auth-form .form-logo { display: inline-block; }
   .auth-form-col { padding: 3.5rem 1.5rem; align-items: flex-start; }
@@ -423,9 +426,9 @@ _LOGIN_BODY = """
   <aside class="auth-brand">
     <a class="logo" href="/">Cir<span>via</span></a>
     <div>
-      <h2>Know what matters to your portfolio before the market opens.</h2>
-      <p class="brand-sub">Three steps and your first morning digest is on its way.</p>
-      <div class="auth-steps">
+      <h2 id="brand-title">Welcome back.</h2>
+      <p class="brand-sub" id="brand-sub">Sign in to catch up on your digest, alerts, and holdings.</p>
+      <div class="auth-steps" id="brand-steps" style="display:none;">
         <div class="auth-step active"><span class="n">1</span> Create your account</div>
         <div class="auth-step"><span class="n">2</span> Connect your brokerage</div>
         <div class="auth-step"><span class="n">3</span> Get your morning digest</div>
@@ -470,8 +473,27 @@ const errBox = document.getElementById('auth-error');
 const noticeBox = document.getElementById('auth-notice');
 const btn = document.getElementById('auth-btn');
 
-document.getElementById('switch-btn').addEventListener('click', () => {
-  mode = mode === 'signin' ? 'signup' : 'signin';
+// FLIP swap: measure both columns, flip the grid via .mode-signup, then
+// slide each column from its old position to its new one.
+function setSplitSides(animate) {
+  const split = document.querySelector('.auth-split');
+  const cols = [document.querySelector('.auth-brand'),
+                document.querySelector('.auth-form-col')];
+  cols.forEach((el) => el.getAnimations().forEach((a) => a.cancel()));
+  const first = cols.map((el) => el.getBoundingClientRect().left);
+  split.classList.toggle('mode-signup', mode === 'signup');
+  if (!animate || REDUCED || !window.Motion) return;
+  cols.forEach((el, i) => {
+    const dx = first[i] - el.getBoundingClientRect().left;
+    if (Math.abs(dx) < 1) return;  // mobile: brand hidden, nothing moves
+    Motion.animate(el,
+      { transform: ['translateX(' + dx + 'px)', 'translateX(0px)'] },
+      { duration: 0.55, ease: EASE });
+  });
+  riseIn(document.querySelector('.auth-brand > div'), 0.45);
+}
+
+function applyMode(animate) {
   const signin = mode === 'signin';
   document.getElementById('auth-title').textContent =
     signin ? 'Sign in' : 'Create your account';
@@ -487,8 +509,27 @@ document.getElementById('switch-btn').addEventListener('click', () => {
   document.getElementById('forgot-row').style.display = signin ? 'block' : 'none';
   document.getElementById('password').setAttribute('autocomplete',
     signin ? 'current-password' : 'new-password');
+  // The brand aside pitches the 3-step setup only to new users; returning
+  // users get a plain welcome instead.
+  document.getElementById('brand-title').textContent = signin
+    ? 'Welcome back.'
+    : 'Know what matters to your portfolio before the market opens.';
+  document.getElementById('brand-sub').textContent = signin
+    ? 'Sign in to catch up on your digest, alerts, and holdings.'
+    : 'Three steps and your first morning digest is on its way.';
+  document.getElementById('brand-steps').style.display = signin ? 'none' : '';
   errBox.style.display = 'none'; noticeBox.style.display = 'none';
+  setSplitSides(animate);
+}
+
+document.getElementById('switch-btn').addEventListener('click', () => {
+  mode = mode === 'signin' ? 'signup' : 'signin';
+  applyMode(true);
 });
+
+// Marketing CTAs deep-link to /app#signup so new visitors start on the
+// create-account view instead of the sign-in form.
+if (location.hash === '#signup') { mode = 'signup'; applyMode(false); }
 
 document.getElementById('forgot-btn').addEventListener('click', async () => {
   errBox.style.display = 'none'; noticeBox.style.display = 'none';
@@ -582,7 +623,36 @@ getToken().then((t) => {
   if (precheckHid) showRedirecting(false);
 });
 
-riseIn(document.querySelector('.auth-form'), 0.28);
+// Entrance: same motion language as the landing page — brand copy rises in a
+// stagger, the form follows. Skipped for reduced motion, a dead Motion CDN,
+// or when a live session is about to redirect away anyway.
+(function () {
+  if (REDUCED || !window.Motion || precheckHid) return;
+  const items = Array.from(document.querySelectorAll(
+    '.auth-brand .logo, #brand-title, #brand-sub, .auth-step, .brand-note'
+  )).filter((el) => el.offsetParent !== null);  // skip hidden steps / mobile aside
+  const card = document.querySelector('.auth-form');
+  const all = items.concat([card]);
+  all.forEach((el) => {
+    el.style.opacity = '0'; el.style.transform = 'translateY(14px)';
+  });
+  // Conceal now (before first paint), but start the clock only on the first
+  // rendered frame: WAAPI timelines are clock-based, so on a slow load the
+  // animation would otherwise finish behind a still-blank screen.
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    if (items.length) {
+      Motion.animate(items, { opacity: 1, transform: 'translateY(0px)' },
+        { duration: 0.7, delay: Motion.stagger(0.09), ease: EASE });
+    }
+    Motion.animate(card, { opacity: 1, transform: 'translateY(0px)' },
+      { duration: 0.7, delay: 0.25, ease: EASE });
+  }));
+  // Safety net (same idea as the landing page's revealAll): never leave the
+  // page concealed if an animation gets interrupted.
+  setTimeout(() => {
+    all.forEach((el) => { el.style.opacity = ''; el.style.transform = ''; });
+  }, 2500);
+})();
 """
 
 
