@@ -18,9 +18,12 @@ from typing import Any
 from app.tools.tickers import normalize_ticker, normalize_tickers
 
 QUOTE_TTL_SECONDS = 60.0
+INTRADAY_TTL_SECONDS = 60.0
 
 # ticker -> (monotonic_timestamp, normalized_quote_dict)
 _quote_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+# ticker -> (monotonic_timestamp, intraday bar rows)
+_intraday_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
 
 
 def _clock() -> float:
@@ -28,8 +31,9 @@ def _clock() -> float:
 
 
 def cache_clear() -> None:
-    """Test/utility helper to reset the quote cache."""
+    """Test/utility helper to reset the quote and intraday caches."""
     _quote_cache.clear()
+    _intraday_cache.clear()
 
 
 # --------------------------------------------------------------------------
@@ -75,6 +79,32 @@ def _fetch_history_raw(ticker: str, days: int) -> list[dict[str, Any]]:
                 "low": float(row["Low"]),
                 "close": float(row["Close"]),
                 "volume": int(row["Volume"]),
+            }
+        )
+    return rows
+
+
+def _fetch_intraday_raw(ticker: str) -> list[dict[str, Any]]:
+    """Return today's 5-minute bars (oldest first) via yfinance.
+
+    The in-progress bar often carries NaN close/volume — those rows are
+    dropped here so downstream math never sees them."""
+    import math as _math
+
+    import yfinance as yf
+
+    df = yf.Ticker(ticker).history(period="1d", interval="5m", auto_adjust=False)
+    rows: list[dict[str, Any]] = []
+    for idx, row in df.iterrows():
+        close = float(row["Close"])
+        if _math.isnan(close):
+            continue
+        volume = row["Volume"]
+        rows.append(
+            {
+                "date": idx.isoformat(),
+                "close": close,
+                "volume": 0 if _math.isnan(volume) else int(volume),
             }
         )
     return rows
@@ -178,6 +208,28 @@ async def get_quote(payload: dict[str, Any], ctx: Any = None) -> dict[str, Any]:
         {"ticker": t, "error": fetch_errors[t]} for t in normalized if t in fetch_errors
     ]
     return {"quotes": quotes, "errors": errors}
+
+
+async def get_intraday(raw_ticker: str) -> dict[str, Any]:
+    """Today's 5-minute bars for the web chart's 1D view, 60s TTL cached so a
+    polling browser tab costs at most one Yahoo call per minute per ticker.
+    Same payload shape as get_price_history (ohlcv/close) plus intraday=True."""
+    ticker = normalize_ticker(raw_ticker)
+    cached = _intraday_cache.get(ticker)
+    if cached and _clock() - cached[0] < INTRADAY_TTL_SECONDS:
+        rows = cached[1]
+    else:
+        rows = await asyncio.to_thread(_fetch_intraday_raw, ticker)
+        _intraday_cache[ticker] = (_clock(), rows)
+    closes = [r["close"] for r in rows]
+    return {
+        "ticker": ticker,
+        "intraday": True,
+        "interval": "5m",
+        "bars_returned": len(rows),
+        "period_return_pct": period_return_pct(closes),
+        "ohlcv": rows,
+    }
 
 
 async def get_price_history(payload: dict[str, Any], ctx: Any = None) -> dict[str, Any]:

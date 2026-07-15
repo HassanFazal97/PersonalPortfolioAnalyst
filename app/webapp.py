@@ -290,7 +290,15 @@ tr:last-child td { border-bottom: none; }
   transition: border-color 0.15s var(--ease), color 0.15s var(--ease); }
 .chart-controls button.active { background: var(--accent-deep);
   color: var(--accent-text); border-color: var(--accent); }
-#chart svg { display: block; width: 100%; height: auto; margin-top: 0.75rem; }
+#chart { position: relative; }
+/* pan-y keeps vertical page scroll alive while a horizontal drag traces */
+#chart svg { display: block; width: 100%; height: auto; margin-top: 0.75rem;
+  touch-action: pan-y; cursor: crosshair; }
+.chart-tip { position: absolute; top: 0.9rem; display: none; pointer-events: none;
+  transform: translateX(-50%); background: var(--surface-3);
+  border: 1px solid var(--line-strong); border-radius: var(--r-s);
+  padding: 0.22rem 0.55rem; font-size: 0.8rem; color: var(--ink);
+  font-variant-numeric: tabular-nums; white-space: nowrap; z-index: 5; }
 .range-bar { position: relative; height: 4px; border-radius: 999px;
   background: var(--surface-3); margin: 0.9rem 0 0.35rem; }
 .range-bar .dot { position: absolute; top: 50%; width: 10px; height: 10px;
@@ -1886,6 +1894,7 @@ _STOCK_BODY = """
   <div class="dash-card">
     <h3>Price
       <span class="chart-controls" id="chart-controls">
+        <button data-days="1">1D</button>
         <button data-days="30">1M</button>
         <button data-days="182" class="active">6M</button>
         <button data-days="365">1Y</button>
@@ -2159,10 +2168,23 @@ async function loadDetail() {
 
 // --- chart (inline SVG, no libraries) ------------------------------------------
 
-function renderChart(el, bars) {
+let chartDays = 182;
+let chartTimer = null;
+
+function barLabel(dateStr, intraday) {
+  if (intraday) {
+    return new Date(dateStr).toLocaleTimeString('en-CA',
+      { hour: '2-digit', minute: '2-digit' });
+  }
+  return dateStr;
+}
+
+function renderChart(el, bars, intraday) {
   const closes = bars.map((b) => b.close);
   if (closes.length < 2) {
-    el.innerHTML = '<p class="muted-note">Not enough history to chart.</p>';
+    el.innerHTML = '<p class="muted-note">' + (intraday
+      ? 'No trades yet today — the 1D view fills in once the session opens.'
+      : 'Not enough history to chart.') + '</p>';
     return;
   }
   const W = 640, H = 220, P = 12;
@@ -2177,34 +2199,80 @@ function renderChart(el, bars) {
   const first = bars[0].date, last = bars[bars.length - 1].date;
   el.innerHTML =
     `<svg viewBox="0 0 ${W} ${H}" role="img">` +
-    `<title>${esc(TICKER)} closing prices, ${first} to ${last}</title>` +
+    `<title>${esc(TICKER)} prices, ${first} to ${last}</title>` +
     `<polygon points="${area}" fill="${stroke}" opacity="0.08"></polygon>` +
     `<polyline points="${pts}" fill="none" stroke="${stroke}" stroke-width="1.8"></polyline>` +
+    `<line id="chart-xhair" y1="${P}" y2="${H - P}" stroke="var(--line-strong)" ` +
+    `stroke-width="1" visibility="hidden"></line>` +
+    `<circle id="chart-dot" r="3.2" fill="${stroke}" visibility="hidden"></circle>` +
     `<text x="${P}" y="12" fill="var(--ink-3)" font-size="10">${max.toFixed(2)}</text>` +
     `<text x="${P}" y="${H - 2}" fill="var(--ink-3)" font-size="10">${min.toFixed(2)}</text>` +
     `<text x="${W - P}" y="${H - 2}" text-anchor="end" fill="var(--ink-3)" ` +
-    `font-size="10">${last}</text>` +
-    '</svg>';
-  riseIn(el.querySelector('svg'));
+    `font-size="10">${barLabel(last, intraday)}</text>` +
+    '</svg><div class="chart-tip" id="chart-tip"></div>';
+
+  // Crosshair: pointer events cover mouse, touch drag, and pen. Geometry
+  // stays in viewBox units (the SVG scales with the card); only the tooltip
+  // needs pixel math.
+  const svg = el.querySelector('svg');
+  const xhair = el.querySelector('#chart-xhair');
+  const dot = el.querySelector('#chart-dot');
+  const tip = el.querySelector('#chart-tip');
+  const trace = (ev) => {
+    const rect = svg.getBoundingClientRect();
+    const frac = Math.min(1, Math.max(0, (ev.clientX - rect.left) / rect.width));
+    const i = Math.round(frac * (closes.length - 1));
+    const vx = x(i);
+    xhair.setAttribute('x1', vx); xhair.setAttribute('x2', vx);
+    xhair.setAttribute('visibility', 'visible');
+    dot.setAttribute('cx', vx); dot.setAttribute('cy', y(closes[i]));
+    dot.setAttribute('visibility', 'visible');
+    tip.textContent = closes[i].toFixed(2) + ' · ' + barLabel(bars[i].date, intraday);
+    const px = vx / W * rect.width;
+    tip.style.left = Math.min(rect.width - 8, Math.max(8, px)) + 'px';
+    tip.style.display = 'block';
+  };
+  const clear = () => {
+    xhair.setAttribute('visibility', 'hidden');
+    dot.setAttribute('visibility', 'hidden');
+    tip.style.display = 'none';
+  };
+  svg.addEventListener('pointermove', trace);
+  svg.addEventListener('pointerdown', trace);
+  svg.addEventListener('pointerleave', clear);
+  svg.addEventListener('pointercancel', clear);
+  riseIn(svg);
 }
 
 async function loadChart(days) {
+  chartDays = days;
   const el = document.getElementById('chart');
   try {
     const data = await (
       await api('/stocks/' + encodeURIComponent(TICKER) + '/history?days=' + days)
     ).json();
-    renderChart(el, data.ohlcv || []);
+    if (days !== chartDays) return; // a later toggle superseded this fetch
+    renderChart(el, data.ohlcv || [], Boolean(data.intraday));
   } catch (e) {
     el.innerHTML = '<p class="muted-note">Could not load price history.</p>';
   }
+}
+
+// The 1D view re-fetches once a minute (matching the server's intraday cache
+// TTL) while the tab is visible; historical views are static by nature.
+function scheduleChartRefresh() {
+  if (chartTimer) { clearInterval(chartTimer); chartTimer = null; }
+  if (chartDays !== 1) return;
+  chartTimer = setInterval(() => {
+    if (document.visibilityState === 'visible' && chartDays === 1) loadChart(1);
+  }, 60000);
 }
 
 document.querySelectorAll('#chart-controls button').forEach((btn) => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('#chart-controls button').forEach((b) =>
       b.classList.toggle('active', b === btn));
-    loadChart(parseInt(btn.dataset.days, 10));
+    loadChart(parseInt(btn.dataset.days, 10)).then(scheduleChartRefresh);
   });
 });
 

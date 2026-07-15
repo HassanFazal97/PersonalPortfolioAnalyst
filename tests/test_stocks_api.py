@@ -201,6 +201,22 @@ async def test_stock_history_wraps_tool(monkeypatch, repo):
     assert client.get("/stocks/NVDA/history?days=4", headers=_AUTH).status_code == 400
 
 
+async def test_stock_history_days_1_serves_intraday(monkeypatch, repo):
+    _seed_market(monkeypatch)
+    rows = [
+        {"date": "2026-07-15T09:30:00-04:00", "close": 100.0, "volume": 10},
+        {"date": "2026-07-15T09:35:00-04:00", "close": 101.0, "volume": 12},
+    ]
+    monkeypatch.setattr(market, "_fetch_intraday_raw", lambda t: rows)
+    body = _client(monkeypatch, repo).get(
+        "/stocks/NVDA/history?days=1", headers=_AUTH
+    ).json()
+    assert body["intraday"] is True
+    assert body["interval"] == "5m"
+    assert body["bars_returned"] == 2
+    assert body["ohlcv"][0]["date"].startswith("2026-07-15T09:30")
+
+
 async def test_metrics_requires_auth(monkeypatch, repo):
     assert _client(monkeypatch, repo).get("/portfolio/metrics").status_code == 401
     assert _client(monkeypatch, repo).get("/stocks/NVDA").status_code == 401

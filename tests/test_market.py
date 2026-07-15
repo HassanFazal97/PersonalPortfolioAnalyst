@@ -91,6 +91,47 @@ async def test_get_price_history_computes_metrics(monkeypatch):
     assert out["max_drawdown_pct"] == -25.0
 
 
+async def test_get_intraday_caches_and_computes_return(monkeypatch):
+    market.cache_clear()
+    calls = {"n": 0}
+    rows = [
+        {"date": "2026-07-15T09:30:00-04:00", "close": 100.0, "volume": 10},
+        {"date": "2026-07-15T09:35:00-04:00", "close": 102.0, "volume": 12},
+    ]
+
+    def fake_fetch(ticker):
+        calls["n"] += 1
+        return rows
+
+    monkeypatch.setattr(market, "_fetch_intraday_raw", fake_fetch)
+    out = await market.get_intraday("nvda")
+    assert out["ticker"] == "NVDA"
+    assert out["intraday"] is True
+    assert out["bars_returned"] == 2
+    assert out["period_return_pct"] == 2.0
+    # Second call inside the TTL is served from cache — a polling browser tab
+    # costs at most one Yahoo call per minute.
+    await market.get_intraday("NVDA")
+    assert calls["n"] == 1
+
+
+async def test_get_intraday_cache_expires(monkeypatch):
+    market.cache_clear()
+    t = {"now": 1000.0}
+    calls = {"n": 0}
+    monkeypatch.setattr(market, "_clock", lambda: t["now"])
+
+    def fake_fetch(ticker):
+        calls["n"] += 1
+        return []
+
+    monkeypatch.setattr(market, "_fetch_intraday_raw", fake_fetch)
+    await market.get_intraday("AAPL")
+    t["now"] += market.INTRADAY_TTL_SECONDS + 1
+    await market.get_intraday("AAPL")
+    assert calls["n"] == 2
+
+
 @pytest.mark.asyncio
 async def test_get_quote_fetches_misses_concurrently(monkeypatch):
     # A dozen cold tickers must not stack their network latency serially —

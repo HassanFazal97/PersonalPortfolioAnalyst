@@ -1279,8 +1279,12 @@ def create_app() -> FastAPI:
 
     @app.get("/stocks/{ticker}/history")
     async def stock_history(ticker: str, request: Request, days: int = 182) -> dict:
-        """Daily OHLCV for the detail-page chart (wraps the agent tool)."""
+        """OHLCV for the detail-page chart: days=1 is today's 5-minute bars
+        (60s cached, polled by the 1D view); anything else wraps the daily
+        agent tool."""
         t = _validated_ticker(ticker)
+        if days == 1:
+            return await market.get_intraday(t)
         try:
             return await market.get_price_history({"ticker": t, "days": days})
         except ValueError as exc:

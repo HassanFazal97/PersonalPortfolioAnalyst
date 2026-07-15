@@ -69,6 +69,11 @@ def test_stock_page_renders_with_ticker_config(client):
     assert 'id="position"' in resp.text
     assert 'id="stock-news"' in resp.text
     assert 'href="/app/dashboard"' in resp.text
+    # 1D intraday view with polling refresh, and the crosshair tooltip.
+    assert 'data-days="1"' in resp.text
+    assert "scheduleChartRefresh" in resp.text
+    assert "chart-tip" in resp.text
+    assert "pointermove" in resp.text
 
 
 def test_stock_page_normalizes_and_validates_ticker(client):
