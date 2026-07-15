@@ -36,6 +36,7 @@ from app.db.models import (
     OutboundMessage,
     Position,
     SnaptradeCredentials,
+    TickerFundamentals,
     ToolCall,
     Transaction,
     User,
@@ -198,11 +199,8 @@ class Repo:
 
     async def list_anomaly_recipients(self) -> list[uuid.UUID]:
         """Recipients for scheduled price-anomaly alerts: the macro (Pro)
-        audience plus the owner, who is always included so the feature is
-        dogfooded pre-launch even with zero Pro users."""
-        recipients = set(await self.list_macro_recipients())
-        recipients.add(_OWNER_USER_ID)
-        return sorted(recipients)
+        audience."""
+        return sorted(await self.list_macro_recipients())
 
     async def monthly_cost_usd(self, user_id: uuid.UUID) -> float:
         """Sum of this user's agent-run cost so far this calendar month (UTC)."""
@@ -1232,3 +1230,43 @@ class Repo:
         async with self._session() as s:
             result = await s.execute(select(JobHeartbeat))
             return list(result.scalars().all())
+
+    # ---- ticker fundamentals (global per-ticker cache, all tenants) -------
+
+    async def get_ticker_fundamentals(
+        self, tickers: list[str]
+    ) -> dict[str, TickerFundamentals]:
+        async with self._session() as s:
+            result = await s.execute(
+                select(TickerFundamentals).where(TickerFundamentals.ticker.in_(tickers))
+            )
+            return {row.ticker: row for row in result.scalars().all()}
+
+    async def upsert_ticker_fundamentals(
+        self,
+        *,
+        ticker: str,
+        quote_type: str | None,
+        data: dict,
+        fetch_error: str | None = None,
+    ) -> None:
+        now = datetime.now(timezone.utc)
+        async with self._session() as s:
+            stmt = pg_insert(TickerFundamentals).values(
+                ticker=ticker,
+                quote_type=quote_type,
+                data=data,
+                fetched_at=now,
+                fetch_error=fetch_error,
+            )
+            stmt = stmt.on_conflict_do_update(
+                index_elements=[TickerFundamentals.ticker],
+                set_={
+                    "quote_type": quote_type,
+                    "data": data,
+                    "fetched_at": now,
+                    "fetch_error": fetch_error,
+                },
+            )
+            await s.execute(stmt)
+            await s.commit()

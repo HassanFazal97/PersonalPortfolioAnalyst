@@ -164,6 +164,17 @@ async def test_job_health_disabled_jobs_and_unknown():
     assert health["anomaly_scan"] == {"state": "disabled"}
     assert health["morning_digest"]["state"] == "unknown"
     assert health["delivery_dispatch"]["state"] == "unknown"
+    # fundamentals_refresh has a default cron -> enabled, never run -> unknown.
+    assert health["fundamentals_refresh"]["state"] == "unknown"
+    disabled = job_health({}, _settings(FUNDAMENTALS_REFRESH_CRON=""))
+    assert disabled["fundamentals_refresh"] == {"state": "disabled"}
+
+
+async def test_job_health_fundamentals_refresh_live_after_success():
+    repo = FakeRepo()
+    await repo.record_job_result("fundamentals_refresh", ok=True)
+    health = job_health(repo.job_heartbeats, _settings())
+    assert health["fundamentals_refresh"]["state"] == "live"
 
 
 async def test_job_health_live_after_success():

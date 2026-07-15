@@ -43,14 +43,18 @@ logger = logging.getLogger(__name__)
 
 async def scan_global_anomalies(
     db: Repo,
+    *,
+    recipients: list[uuid.UUID] | None = None,
 ) -> tuple[uuid.UUID, dict[str, list[AnomalyFlag]]]:
-    """Run the detectors once over every distinct held ticker.
+    """Run the detectors once over every distinct ticker held by ``recipients``
+    (default: the scheduled anomaly audience).
 
     Model-free (cost 0), but still recorded as an owner-attributed run so
     every scan is auditable in /runs alongside macro scans."""
     settings = get_settings()
     started = time.monotonic()
-    recipients = await db.list_anomaly_recipients()
+    if recipients is None:
+        recipients = await db.list_anomaly_recipients()
     tickers = await db.list_distinct_tickers(recipients)
     run_id = await db.create_run(
         trigger="anomaly",
@@ -238,7 +242,7 @@ async def run_anomaly_scan(
     synthesis for this user. Scheduled fan-out uses ``run_anomaly_scans_for_all``."""
     uid = user_id or _OWNER_USER_ID
     client = _get_client(client)
-    scan_run_id, flags_by_ticker = await scan_global_anomalies(db)
+    scan_run_id, flags_by_ticker = await scan_global_anomalies(db, recipients=[uid])
     result = await synthesize_anomalies_for_user(
         db, client=client, user_id=uid, flags_by_ticker=flags_by_ticker
     )
@@ -253,13 +257,13 @@ async def run_anomaly_scans_for_all(
     db: Repo, *, client: Any = None
 ) -> list[dict[str, Any]]:
     """Scheduled entry point: detectors run ONCE, then a cheap per-user
-    narration for each recipient (Pro users + the owner) under their cap."""
+    narration for each recipient (Pro users) under their cap."""
     settings = get_settings()
     recipients = await db.list_anomaly_recipients()
     if not recipients:
         return []
 
-    scan_run_id, flags_by_ticker = await scan_global_anomalies(db)
+    scan_run_id, flags_by_ticker = await scan_global_anomalies(db, recipients=recipients)
     results: list[dict[str, Any]] = [
         {"scan_run_id": str(scan_run_id), "tickers_flagged": len(flags_by_ticker)}
     ]
@@ -271,12 +275,11 @@ async def run_anomaly_scans_for_all(
         # One user's failure must not abort the rest of the batch — same
         # shape as run_macro_scans_for_all / run_digests_for_all.
         try:
-            if uid != _OWNER_USER_ID:
-                user = await db.get_user(uid)
-                plan = getattr(user, "plan", "free") if user is not None else "free"
-                if await db.monthly_cost_usd(uid) >= monthly_cost_cap(plan, settings):
-                    results.append({"user_id": str(uid), "status": "skipped_cost_cap"})
-                    continue
+            user = await db.get_user(uid)
+            plan = getattr(user, "plan", "free") if user is not None else "free"
+            if await db.monthly_cost_usd(uid) >= monthly_cost_cap(plan, settings):
+                results.append({"user_id": str(uid), "status": "skipped_cost_cap"})
+                continue
             results.append(
                 await synthesize_anomalies_for_user(
                     db, client=client, user_id=uid, flags_by_ticker=flags_by_ticker

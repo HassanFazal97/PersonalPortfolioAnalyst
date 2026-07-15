@@ -132,6 +132,27 @@ class Settings(BaseSettings):
     # Budget for the per-user narration call (Haiku).
     anomaly_max_cost_usd: float = Field(default=0.10, alias="ANOMALY_MAX_COST_USD")
 
+    # ---- Per-ticker fundamentals cache (ticker_fundamentals table) --------
+    # Fundamentals change slowly; rows older than this are refreshed in the
+    # background (stale-while-revalidate) or by the nightly job.
+    fundamentals_ttl_hours: int = Field(default=24, alias="FUNDAMENTALS_TTL_HOURS")
+    # Failed fetches (crypto, delisted tickers) retry on this shorter TTL so
+    # they neither hammer Yahoo nor stay broken for a full day.
+    fundamentals_error_ttl_hours: int = Field(
+        default=1, alias="FUNDAMENTALS_ERROR_TTL_HOURS"
+    )
+    # Cron for the nightly pre-warm of all held tickers (after the TSX/NYSE
+    # close, in TZ). "" disables the in-process job — the lazy read path still
+    # keeps data fresh.
+    fundamentals_refresh_cron: str = Field(
+        default="30 18 * * 1-5", alias="FUNDAMENTALS_REFRESH_CRON"
+    )
+    # Benchmark for the computed-beta fallback when Yahoo has no beta
+    # (common for .TO tickers and ETFs).
+    fundamentals_beta_benchmark: str = Field(
+        default="^GSPC", alias="FUNDAMENTALS_BETA_BENCHMARK"
+    )
+
     chat_max_iterations: int = Field(default=10, alias="CHAT_MAX_ITERATIONS")
     chat_max_cost_usd: float = Field(default=0.50, alias="CHAT_MAX_COST_USD")
     digest_max_iterations: int = Field(default=25, alias="DIGEST_MAX_ITERATIONS")

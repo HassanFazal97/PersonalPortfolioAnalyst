@@ -42,8 +42,43 @@ def test_dashboard_has_news_sections(client):
     resp = client.get("/app/dashboard")
     assert resp.status_code == 200
     assert 'id="general-news"' in resp.text
-    assert 'id="holding-news"' in resp.text
+    # Per-holding news moved to the stock detail pages.
+    assert 'id="holding-news"' not in resp.text
     assert 'id="watchlist-card"' in resp.text
+
+
+def test_dashboard_has_metric_columns_and_stock_links(client):
+    resp = client.get("/app/dashboard")
+    text = resp.text
+    for header in ("<th>Weight</th>", "<th>Fwd P/E</th>", "<th>Yield</th>",
+                   "<th>Off high</th>", "<th>Earnings</th>"):
+        assert header in text
+    assert "/portfolio/metrics" in text
+    assert "ticker-link" in text
+    assert "/app/stock/" in text
+    assert "skl-inline" in text
+
+
+def test_stock_page_renders_with_ticker_config(client):
+    resp = client.get("/app/stock/NVDA")
+    assert resp.status_code == 200
+    assert "text/html" in resp.headers.get("content-type", "")
+    # Ticker travels through the JSON config blob, not markup interpolation.
+    assert '"ticker": "NVDA"' in resp.text
+    assert 'id="chart"' in resp.text
+    assert 'id="position"' in resp.text
+    assert 'id="stock-news"' in resp.text
+    assert 'href="/app/dashboard"' in resp.text
+
+
+def test_stock_page_normalizes_and_validates_ticker(client):
+    # Lowercase input normalizes to Yahoo format.
+    resp = client.get("/app/stock/shop.to")
+    assert resp.status_code == 200
+    assert '"ticker": "SHOP.TO"' in resp.text
+    # Anything outside the symbol alphabet is rejected before rendering.
+    assert client.get("/app/stock/%3Cscript%3E").status_code == 404
+    assert client.get("/app/stock/AAAAAAAAAAAAAAAAAAAA").status_code == 404
 
 
 def test_onboarding_has_watchlist_panel(client):

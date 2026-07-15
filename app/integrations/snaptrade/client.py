@@ -17,6 +17,7 @@ from app.integrations.snaptrade.personal_client import (
     _is_refresh_unavailable,
 )
 
+
 @dataclass(frozen=True)
 class SnapTradeUserCredentials:
     """Per-user SnapTrade identity (commercial mode)."""

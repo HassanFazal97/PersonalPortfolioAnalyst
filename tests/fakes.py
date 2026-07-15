@@ -35,6 +35,7 @@ class FakeRepo:
         self._news_items: list[SimpleNamespace] = []
         self._news_fingerprints: set[tuple] = set()
         self.job_heartbeats: dict[str, SimpleNamespace] = {}
+        self.ticker_fundamentals: dict[str, SimpleNamespace] = {}
 
     def seed_user(self, user_id, *, plan="free", digest_enabled=True, email=None,
                   digest_tickers=None):
@@ -137,11 +138,7 @@ class FakeRepo:
         )
 
     async def list_anomaly_recipients(self):
-        from app.config import DEFAULT_USER_ID
-
-        recipients = set(await self.list_macro_recipients())
-        recipients.add(uuid.UUID(DEFAULT_USER_ID))
-        return sorted(recipients)
+        return sorted(await self.list_macro_recipients())
 
     async def monthly_cost_usd(self, user_id):
         if user_id in self._cost_override:
@@ -550,6 +547,24 @@ class FakeRepo:
 
     async def get_job_heartbeats(self):
         return list(self.job_heartbeats.values())
+
+    # ---- ticker fundamentals (mirrors app/db/repo.py) --------------------
+
+    async def get_ticker_fundamentals(self, tickers):
+        return {
+            t: row for t, row in self.ticker_fundamentals.items() if t in tickers
+        }
+
+    async def upsert_ticker_fundamentals(
+        self, *, ticker, quote_type, data, fetch_error=None
+    ):
+        self.ticker_fundamentals[ticker] = SimpleNamespace(
+            ticker=ticker,
+            quote_type=quote_type,
+            data=data,
+            fetched_at=datetime.now(timezone.utc),
+            fetch_error=fetch_error,
+        )
 
     # ---- notification channels (mirrors app/db/repo.py) -----------------
 

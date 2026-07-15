@@ -677,6 +677,31 @@ def _auth_nav_js() -> str:
 """ % ref
 
 
+def _auth_redirect_js() -> str:
+    """Send already-signed-in visitors straight to the dashboard.
+
+    Same localStorage session check as ``_auth_nav_js``, but emitted in
+    ``<head>`` so the landing page never paints before the redirect. Only
+    the home page gets this — signed-in users can still deliberately visit
+    pricing/contact/legal pages."""
+    supabase_url = get_settings().supabase_url
+    if not supabase_url:
+        return ""
+    ref = urlparse(supabase_url).hostname.split(".")[0]
+    return """
+(function () {
+  try {
+    if (location.hash) return; /* keep /#how and /#faq reachable when signed in */
+    var raw = localStorage.getItem('sb-%s-auth-token');
+    if (!raw) return;
+    var s = JSON.parse(raw);
+    if (!s || !(s.refresh_token || (s.expires_at && s.expires_at * 1000 > Date.now()))) return;
+    location.replace('/app/dashboard');
+  } catch (e) { /* signed-out rendering is the safe default */ }
+})();
+""" % ref
+
+
 _FOOTER = (
     '<footer><div class="foot-inner">'
     '<div class="foot-col"><div class="logo">Cir<span>via</span></div>'
@@ -701,10 +726,12 @@ _FOOTER = (
 def _layout(title: str, description: str, body: str, active: str = "", path: str = "/") -> str:
     base = _public_base_url()
     og_image = f"{base}/static/og.png"
+    redirect_js = _auth_redirect_js() if path == "/" else ""
     return (
         '<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n'
         '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
-        f"<title>{title}</title>\n"
+        + (f"<script>{redirect_js}</script>\n" if redirect_js else "")
+        + f"<title>{title}</title>\n"
         f'<meta name="description" content="{description}">\n'
         + ICON_LINKS
         + f'<meta property="og:title" content="{title}">\n'

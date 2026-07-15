@@ -351,6 +351,25 @@ class JobHeartbeat(Base):
     )
 
 
+class TickerFundamentals(Base):
+    """Global per-ticker fundamentals cache (system table, not tenant data).
+
+    One yfinance ``.info`` snapshot per ticker shared across all users,
+    written by ``app/tools/fundamentals.py`` (nightly refresh job + lazy
+    stale-while-revalidate on read). ``data`` holds the normalized payload —
+    JSONB so adding a metric is a code change, not a migration."""
+
+    __tablename__ = "ticker_fundamentals"
+
+    ticker: Mapped[str] = mapped_column(Text, primary_key=True)
+    quote_type: Mapped[str | None] = mapped_column(Text)
+    data: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'"))
+    fetched_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    fetch_error: Mapped[str | None] = mapped_column(Text)
+
+
 class SchemaMigration(Base):
     """Tracks which numbered migration files have been applied."""
 

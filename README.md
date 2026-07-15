@@ -39,6 +39,7 @@ cp .env.example .env
 | `DIGEST_MAX_ITERATIONS` / `DIGEST_MAX_COST_USD` | Digest run budget |
 | `MAX_TOOL_OUTPUT_TOKENS` | Per-tool output cap (~6000) |
 | `DIGEST_CRON` | Cron for the morning digest (`45 7 * * 1-5`) |
+| `FUNDAMENTALS_REFRESH_CRON` | Nightly pre-warm of per-ticker fundamentals (`30 18 * * 1-5`; empty = lazy refresh only) |
 | `TZ` | `America/Toronto` |
 | `DELIVERY_INTERVAL_SECONDS` | Outbound dispatcher poll interval (0 disables) |
 | `PUBLIC_BASE_URL` | Public origin, e.g. `https://app.example.com` (Twilio webhook signatures) |
@@ -171,6 +172,24 @@ Fetch today's digest:
 curl -s localhost:8000/digest/latest -H "Authorization: Bearer $TOKEN" | jq
 # 404 until today's digest has been generated
 ```
+
+## Fundamentals & stock detail pages
+
+The dashboard holdings table shows per-holding metrics (portfolio weight,
+forward P/E, dividend yield, % off the 52-week high, next earnings date), and
+clicking a holding opens `/app/stock/<ticker>` — price chart, valuation /
+growth / financial-health cards (or fund cards for ETFs), analyst targets,
+your aggregated position, and stored news for that ticker.
+
+Data comes from one yfinance `.info` snapshot per ticker per day, cached in
+the global `ticker_fundamentals` table (24h TTL, stale-while-revalidate on
+read, nightly pre-warm via `FUNDAMENTALS_REFRESH_CRON`). Derived metrics that
+yfinance reports inconsistently are computed in-house: PEG (forward P/E ÷
+earnings growth), dividend yield (rate ÷ live price), P/FCF, % off 52-week
+high, and a cov/var beta vs `FUNDAMENTALS_BETA_BENCHMARK` when Yahoo has no
+beta (common for `.TO` tickers). `GET /portfolio` is untouched — metrics
+arrive on a second `GET /portfolio/metrics` call so the holdings table renders
+instantly.
 
 ## Price-anomaly alerts (statistical, model-free)
 

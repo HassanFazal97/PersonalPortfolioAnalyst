@@ -138,7 +138,7 @@ async def test_client_exception_falls_back_and_still_alerts(monkeypatch):
     assert len(repo.outbound) == 1
 
 
-async def test_fanout_includes_owner_and_pro_skips_free_and_capped(monkeypatch):
+async def test_fanout_covers_pro_skips_free_capped_and_owner(monkeypatch):
     repo = FakeRepo()
     pro = uuid.uuid4()
     capped = uuid.uuid4()
@@ -152,21 +152,23 @@ async def test_fanout_includes_owner_and_pro_skips_free_and_capped(monkeypatch):
     await _seed_positions(repo, capped, ["NVDA"])
     await _seed_positions(repo, free, ["NVDA"])
     _patch_scan(monkeypatch, {"NVDA": [_flag("NVDA")]})
-    client = ScriptedAnthropic([_narration(), _narration()])  # owner + pro
+    client = ScriptedAnthropic([_narration()])  # pro only
 
     results = await orch.run_anomaly_scans_for_all(repo, client=client)
 
     by_user = {r["user_id"]: r for r in results if "user_id" in r}
-    assert by_user[str(OWNER)]["status"] == "completed"
     assert by_user[str(pro)]["status"] == "completed"
     assert by_user[str(capped)]["status"] == "skipped_cost_cap"
     assert str(free) not in by_user  # free tier is not a recipient
-    assert len(repo.outbound) == 2
+    assert str(OWNER) not in by_user  # owner is no longer force-included
+    assert len(repo.outbound) == 1
 
 
 async def test_no_flags_skips_synthesis_entirely(monkeypatch):
     repo = FakeRepo()
-    await _seed_positions(repo, OWNER, ["NVDA"])
+    pro = uuid.uuid4()
+    repo.seed_user(pro, plan="pro")
+    await _seed_positions(repo, pro, ["NVDA"])
     _patch_scan(monkeypatch, {})
     client = ScriptedAnthropic([])
 

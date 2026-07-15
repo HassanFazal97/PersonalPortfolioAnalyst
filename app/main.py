@@ -10,11 +10,13 @@ from __future__ import annotations
 import asyncio
 import hmac
 import logging
+import re
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, time
 from pathlib import Path
 from urllib.parse import parse_qsl
+from zoneinfo import ZoneInfo
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
@@ -55,8 +57,9 @@ from app.landing import (
 )
 from app.plans import max_digest_holdings
 from app.scheduler import DeliveryScheduler, DigestScheduler, IntervalScheduler
-from app.tools import portfolio
+from app.tools import fundamentals, market, portfolio
 from app.tools.registry import CHAT_TOOLS, ToolContext
+from app.tools.tickers import normalize_ticker
 from app.webapp import (
     NOT_CONFIGURED_HTML,
     dashboard_page,
@@ -65,6 +68,7 @@ from app.webapp import (
     onboarding_page,
     reset_page,
     settings_page,
+    stock_page,
 )
 
 
@@ -80,6 +84,7 @@ async def lifespan(app: FastAPI):
     app.state.scheduler = None
     app.state.macro_scheduler = None
     app.state.anomaly_scheduler = None
+    app.state.fundamentals_scheduler = None
     app.state.delivery_scheduler = None
     # Which channels this deployment can send (drives verification + UI).
     app.state.delivery_adapters = build_adapters(settings)
@@ -130,6 +135,20 @@ async def lifespan(app: FastAPI):
             anomaly_scheduler.start()
             app.state.anomaly_scheduler = anomaly_scheduler
 
+        if settings.fundamentals_refresh_cron:
+            async def _run_fundamentals_refresh() -> None:
+                await fundamentals.run_fundamentals_refresh(repo, settings)
+
+            fundamentals_scheduler = DigestScheduler(
+                heartbeat_wrapped("fundamentals_refresh", repo, _run_fundamentals_refresh),
+                cron=settings.fundamentals_refresh_cron,
+                timezone=settings.tz,
+                job_id="fundamentals_refresh",
+                misfire_grace_seconds=settings.digest_misfire_grace_seconds,
+            )
+            fundamentals_scheduler.start()
+            app.state.fundamentals_scheduler = fundamentals_scheduler
+
         if settings.delivery_interval_seconds > 0:
             dispatcher = Dispatcher(
                 repo,
@@ -152,6 +171,8 @@ async def lifespan(app: FastAPI):
     finally:
         if app.state.delivery_scheduler is not None:
             app.state.delivery_scheduler.shutdown()
+        if app.state.fundamentals_scheduler is not None:
+            app.state.fundamentals_scheduler.shutdown()
         if app.state.anomaly_scheduler is not None:
             app.state.anomaly_scheduler.shutdown()
         if app.state.macro_scheduler is not None:
@@ -236,7 +257,12 @@ async def require_auth(
          per-user identity, provisioned on first sight.
     The resolved user_id is stashed on the request and in the ContextVar the DB
     layer reads to scope RLS."""
-    if request.url.path in _AUTH_EXEMPT_PATHS:
+    # /app/stock/{ticker} is dynamic, so it can't live in the exact-match set.
+    # Like the other /app shells it's static HTML; the API calls it makes are
+    # what carry the Supabase JWT.
+    if request.url.path in _AUTH_EXEMPT_PATHS or request.url.path.startswith(
+        "/app/stock/"
+    ):
         return
     settings = get_settings()
     supplied = creds.credentials if creds and creds.scheme.lower() == "bearer" else ""
@@ -285,6 +311,21 @@ def _require_repo(app: FastAPI) -> Repo:
     if repo is None:
         raise HTTPException(status_code=503, detail="database not configured")
     return repo
+
+
+# Tickers arrive in URL paths on the stock endpoints/pages; anything outside
+# Yahoo's symbol alphabet is rejected before it reaches yfinance or markup.
+_TICKER_PATH_RE = re.compile(r"^[A-Z0-9.\-^=]{1,12}$")
+
+
+def _validated_ticker(raw: str) -> str:
+    try:
+        ticker = normalize_ticker(raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="unknown ticker") from exc
+    if not _TICKER_PATH_RE.fullmatch(ticker):
+        raise HTTPException(status_code=404, detail="unknown ticker")
+    return ticker
 
 
 def _fmt_time(value) -> str | None:
@@ -483,6 +524,12 @@ def create_app() -> FastAPI:
     async def app_dashboard() -> HTMLResponse:
         """Holdings, digest, alerts, and chat."""
         return _webapp_html(dashboard_page)
+
+    @app.get("/app/stock/{ticker}", response_class=HTMLResponse)
+    async def app_stock(ticker: str) -> HTMLResponse:
+        """Full-page view of one holding: chart, fundamentals, position, news."""
+        t = _validated_ticker(ticker)  # 404s anything outside the symbol alphabet
+        return _webapp_html(lambda url, key: stock_page(t, url, key))
 
     @app.get("/app/settings", response_class=HTMLResponse)
     async def app_settings() -> HTMLResponse:
@@ -1103,6 +1150,141 @@ def create_app() -> FastAPI:
         repo = _require_repo(app)
         ctx = ToolContext(settings=get_settings(), repo=repo, user_id=_user_id(request))
         return await portfolio.get_portfolio({}, ctx)
+
+    @app.get("/portfolio/metrics")
+    async def portfolio_metrics(request: Request) -> dict:
+        """Fundamental metrics for the caller's held tickers — the dashboard's
+        second call, so /portfolio itself stays fast. Worst case (all tickers
+        cold) this blocks on yfinance; the holdings table is already on screen."""
+        repo = _require_repo(app)
+        settings = get_settings()
+        positions = await repo.list_positions(user_id=_user_id(request))
+        tickers = sorted({p.ticker for p in positions})
+        if not tickers:
+            return {"metrics": {}}
+        funds, quote_result = await asyncio.gather(
+            fundamentals.get_fundamentals(tickers, repo=repo, settings=settings),
+            market.get_quote({"tickers": tickers}),  # warm — /portfolio just ran
+        )
+        quotes = {q["ticker"]: q for q in quote_result["quotes"]}
+        today = datetime.now(ZoneInfo(settings.tz)).date()
+        metrics = {
+            t: fundamentals.core_metrics(
+                data, (quotes.get(t) or {}).get("last_price"), today
+            )
+            for t, data in funds.items()
+        }
+        return {"metrics": metrics}
+
+    @app.get("/stocks/{ticker}")
+    async def stock_detail(ticker: str, request: Request) -> dict:
+        """Everything the stock detail page needs except history and news.
+
+        404 for tickers the user doesn't hold — the page is only reachable
+        from the holdings table, and the gate bounds fetch cost."""
+        t = _validated_ticker(ticker)
+        repo = _require_repo(app)
+        settings = get_settings()
+        ctx = ToolContext(settings=settings, repo=repo, user_id=_user_id(request))
+        pf = await portfolio.get_portfolio({}, ctx)
+        rows = [p for p in pf.get("positions", []) if p["ticker"] == t]
+        if not rows:
+            raise HTTPException(status_code=404, detail="not in your holdings")
+
+        funds = await fundamentals.get_fundamentals([t], repo=repo, settings=settings)
+        data = funds.get(t) or {}
+        stored = await repo.get_ticker_fundamentals([t])
+        fetched_at = stored[t].fetched_at.isoformat() if t in stored else None
+
+        last_price = rows[0]["last_price"]
+        quantity = sum(r["quantity"] for r in rows)
+        cost_basis = sum(r["quantity"] * r["avg_cost"] for r in rows)
+        market_value = (
+            sum(r["market_value"] for r in rows)
+            if all(r["market_value"] is not None for r in rows)
+            else None
+        )
+        currency = rows[0]["currency"]
+        totals = pf.get("totals", {})
+        usdcad = totals.get("usdcad_rate")
+        total_mv_cad = totals.get("total_market_value_cad")
+        weight_pct = None
+        if market_value is not None and total_mv_cad:
+            mv_cad = portfolio._to_cad(market_value, currency, usdcad)
+            if mv_cad is not None:
+                weight_pct = round(mv_cad / total_mv_cad * 100, 2)
+
+        dividends = dict(data.get("dividends") or {})
+        dividends["dividend_yield_pct"] = fundamentals.dividend_yield_pct(
+            dividends.get("dividend_rate"), last_price
+        )
+        price_action = dict(data.get("price_action") or {})
+        price_action["pct_from_52w_high"] = fundamentals.pct_from_52w_high(
+            last_price, price_action.get("high_52w")
+        )
+        today = datetime.now(ZoneInfo(settings.tz)).date()
+
+        profile = dict(data.get("profile") or {})
+        profile["ticker"] = t
+        profile["quote_type"] = data.get("quote_type")
+
+        return {
+            "profile": profile,
+            "quote": {
+                "last_price": last_price,
+                "day_change_pct": rows[0]["day_change_pct"],
+            },
+            "valuation": data.get("valuation"),
+            "growth": data.get("growth"),
+            "profitability": data.get("profitability"),
+            "financial_health": data.get("financial_health"),
+            "dividends": dividends,
+            "price_action": price_action,
+            "earnings": {
+                "next_earnings_date": fundamentals.next_earnings_date(
+                    data.get("earnings_dates"), today
+                ),
+                "ex_dividend_date": dividends.get("ex_dividend_date"),
+            },
+            "etf": data.get("etf"),
+            "position": {
+                "quantity": quantity,
+                "avg_cost": round(cost_basis / quantity, 4) if quantity else None,
+                "cost_basis": round(cost_basis, 2),
+                "market_value": round(market_value, 2) if market_value is not None else None,
+                "currency": currency,
+                "unrealized_pnl": (
+                    round(market_value - cost_basis, 2) if market_value is not None else None
+                ),
+                "unrealized_pnl_pct": (
+                    round((market_value / cost_basis - 1) * 100, 2)
+                    if market_value is not None and cost_basis
+                    else None
+                ),
+                "weight_pct": weight_pct,
+                "annual_dividend_income": fundamentals.annual_dividend_income(
+                    quantity, dividends.get("dividend_rate")
+                ),
+                "accounts": [
+                    {
+                        "account": r["account"],
+                        "quantity": r["quantity"],
+                        "market_value": r["market_value"],
+                    }
+                    for r in rows
+                ],
+            },
+            "fetched_at": fetched_at,
+        }
+
+    @app.get("/stocks/{ticker}/history")
+    async def stock_history(ticker: str, request: Request, days: int = 182) -> dict:
+        """Daily OHLCV for the detail-page chart (wraps the agent tool)."""
+        t = _validated_ticker(ticker)
+        try:
+            return await market.get_price_history({"ticker": t, "days": days})
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return app
 
