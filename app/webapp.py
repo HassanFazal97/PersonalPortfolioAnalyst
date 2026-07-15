@@ -167,7 +167,7 @@ th { text-align: left; color: var(--ink-3); font-weight: 600; font-size: 0.72rem
   border-bottom: 1px solid var(--line-strong); }
 td { padding: 0.55rem 0.5rem; border-bottom: 1px solid var(--line); }
 tr:last-child td { border-bottom: none; }
-.pos { color: var(--gain); } .neg { color: var(--loss); }
+.pos { color: var(--gain); } .neg { color: var(--loss); } .mid { color: var(--warn); }
 .digest-body { white-space: pre-wrap; color: var(--ink-2); font-size: 0.95rem;
   margin-top: 0.75rem; line-height: 1.6; }
 .alert-item { padding: 0.75rem 0; border-bottom: 1px solid var(--line); }
@@ -1971,6 +1971,28 @@ function rows(pairs) {
   return out || '<p class="muted-note">No data available.</p>';
 }
 
+// Rule-of-thumb grading (green / yellow / red) for the metrics that drive
+// buy/sell judgment. Only metrics with defensible universal bands get a
+// color — sector-relative ones (P/S, P/B, EV/EBITDA, gross margin) stay
+// neutral. Bands are deliberately generous: this is a glance cue, not a
+// verdict. `good`/`bad` are the thresholds nearest green and red; direction
+// (higher- vs lower-is-better) is inferred from their order.
+function grade(v, text, good, bad) {
+  if (v == null) return text;
+  const higherIsBetter = good > bad;
+  const cls = higherIsBetter
+    ? (v >= good ? 'pos' : v >= bad ? 'mid' : 'neg')
+    : (v <= good ? 'pos' : v <= bad ? 'mid' : 'neg');
+  return `<span class="${cls}">${text}</span>`;
+}
+
+// P/E needs its own guard: negative means unprofitable, which the plain
+// lower-is-better scale would happily paint green.
+function gradePE(v, text) {
+  if (v != null && v < 0) return `<span class="neg">${text}</span>`;
+  return grade(v, text, 18, 35);
+}
+
 // --- header + cards ----------------------------------------------------------
 
 function fillHeader(d) {
@@ -2022,24 +2044,24 @@ function fillEquityCards(d) {
     fh = d.financial_health || {};
   document.getElementById('card-a').innerHTML = rows([
     ['P/E (trailing)', fmtNum(v.trailing_pe, 1)],
-    ['P/E (forward)', fmtNum(v.forward_pe, 1)],
-    ['PEG', fmtNum(v.peg)],
+    ['P/E (forward)', gradePE(v.forward_pe, fmtNum(v.forward_pe, 1))],
+    ['PEG', grade(v.peg, fmtNum(v.peg), 1, 2)],
     ['Price / sales', fmtNum(v.price_to_sales, 1)],
     ['Price / book', fmtNum(v.price_to_book, 1)],
     ['EV / EBITDA', fmtNum(v.ev_to_ebitda, 1)],
-    ['Price / FCF', fmtNum(v.price_to_fcf, 1)],
+    ['Price / FCF', grade(v.price_to_fcf, fmtNum(v.price_to_fcf, 1), 25, 50)],
   ]);
   document.getElementById('card-b').innerHTML = rows([
-    ['Revenue growth', fmtPct(g.revenue_growth_pct)],
-    ['Earnings growth', fmtPct(g.earnings_growth_pct)],
+    ['Revenue growth', grade(g.revenue_growth_pct, fmtPct(g.revenue_growth_pct), 10, 0)],
+    ['Earnings growth', grade(g.earnings_growth_pct, fmtPct(g.earnings_growth_pct), 10, 0)],
     ['Gross margin', fmtPct(pr.gross_margin_pct)],
     ['Operating margin', fmtPct(pr.operating_margin_pct)],
-    ['Net margin', fmtPct(pr.net_margin_pct)],
-    ['Return on equity', fmtPct(pr.roe_pct)],
+    ['Net margin', grade(pr.net_margin_pct, fmtPct(pr.net_margin_pct), 15, 5)],
+    ['Return on equity', grade(pr.roe_pct, fmtPct(pr.roe_pct), 15, 8)],
   ]);
   document.getElementById('card-c').innerHTML = rows([
-    ['Debt / equity', fmtNum(fh.debt_to_equity)],
-    ['Current ratio', fmtNum(fh.current_ratio)],
+    ['Debt / equity', grade(fh.debt_to_equity, fmtNum(fh.debt_to_equity), 1, 2)],
+    ['Current ratio', grade(fh.current_ratio, fmtNum(fh.current_ratio), 1.5, 1)],
     ['Market cap', fmtBig((d.profile || {}).market_cap)],
   ]);
 }
@@ -2048,7 +2070,7 @@ function fillEtfCards(d) {
   const etf = d.etf || {};
   document.getElementById('card-a-title').textContent = 'Fund';
   document.getElementById('card-a').innerHTML = rows([
-    ['Expense ratio', fmtPct(etf.expense_ratio_pct)],
+    ['Expense ratio', grade(etf.expense_ratio_pct, fmtPct(etf.expense_ratio_pct), 0.2, 0.6)],
     ['Assets', fmtBig(etf.total_assets)],
     ['Category', etf.category ? esc(etf.category) : '—'],
     ['Fund family', etf.fund_family ? esc(etf.fund_family) : '—'],
@@ -2095,9 +2117,9 @@ function fillPriceAction(d) {
     ['200-day average', fmtNum(pa.avg_200d)],
     ['Analyst target', target],
     ['Analyst rating', rating],
-    ['Short % of float', fmtPct(pa.short_pct_of_float)],
+    ['Short % of float', grade(pa.short_pct_of_float, fmtPct(pa.short_pct_of_float), 5, 15)],
     ['Dividend yield', fmtPct(div.dividend_yield_pct)],
-    ['Payout ratio', fmtPct(div.payout_ratio_pct)],
+    ['Payout ratio', grade(div.payout_ratio_pct, fmtPct(div.payout_ratio_pct), 60, 90)],
   ]);
 }
 
