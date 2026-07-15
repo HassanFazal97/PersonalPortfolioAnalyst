@@ -33,6 +33,10 @@ class SnapTradeError(RuntimeError):
     # clientId (e.g. test keys swapped for prod) — the remote user does
     # not exist in this environment.
     STALE_USER_CODE = "1083"
+    # 400/1010: registering a userId SnapTrade already knows. Paired with a
+    # missing local secret this means an orphaned remote user (the secret is
+    # only ever issued at registration and cannot be re-fetched).
+    USER_EXISTS_CODE = "1010"
 
     def __init__(
         self,
@@ -48,6 +52,10 @@ class SnapTradeError(RuntimeError):
     @property
     def stale_user(self) -> bool:
         return self.code == self.STALE_USER_CODE
+
+    @property
+    def user_exists(self) -> bool:
+        return self.code == self.USER_EXISTS_CODE
 
 
 def _api_error(exc: ApiException, *, action: str) -> SnapTradeError:
@@ -177,10 +185,14 @@ class _CommercialBackend:
                 return False
             raise
 
-    def delete_user(self) -> bool:
-        """Delete the SnapTrade user, severing every brokerage connection."""
+    def delete_user(self, user_id: str | None = None) -> bool:
+        """Delete a SnapTrade user, severing every brokerage connection.
+
+        Deletion needs no userSecret (the request is consumer-key signed), so
+        an explicit ``user_id`` can remove an orphaned remote user whose
+        secret was lost."""
         response = self._client.authentication.delete_snap_trade_user(
-            user_id=self.user_id
+            user_id=user_id or self.user_id
         )
         _require_ok(response, action="delete_snap_trade_user")
         return True
@@ -283,7 +295,7 @@ class SnapTradeService:
         except ApiException as exc:
             raise _api_error(exc, action="refresh_connection") from exc
 
-    def delete_user(self) -> bool:
+    def delete_user(self, user_id: str | None = None) -> bool:
         """Delete the SnapTrade user remotely (commercial mode only).
 
         Personal dashboard keys have no per-user deletion — returns False so
@@ -291,7 +303,7 @@ class SnapTradeService:
         if self.personal_mode or not isinstance(self._backend, _CommercialBackend):
             return False
         try:
-            return self._backend.delete_user()
+            return self._backend.delete_user(user_id)
         except ApiException as exc:
             raise _api_error(exc, action="delete_user") from exc
 

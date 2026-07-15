@@ -61,6 +61,98 @@ async def test_register_snaptrade_user_persists_encrypted_secret(monkeypatch):
     assert decrypt_secret(_FERNET_KEY, row.user_secret_enc) == "plain-secret"
 
 
+def _commercial_mode(monkeypatch, service):
+    monkeypatch.setattr(
+        "app.integrations.snaptrade.onboarding.SnapTradeService",
+        lambda *a, **k: service,
+    )
+    monkeypatch.setattr(
+        "app.integrations.snaptrade.onboarding.is_personal_key_mode",
+        lambda s: False,
+    )
+    monkeypatch.setattr(
+        "app.integrations.snaptrade.onboarding._REREGISTER_DELAY_SECONDS", 0
+    )
+
+
+def _user_exists_error():
+    return SnapTradeError(
+        "register_user failed with HTTP 400: user already exists",
+        status=400,
+        code="1010",
+    )
+
+
+@pytest.mark.asyncio
+async def test_register_recovers_orphaned_remote_user(monkeypatch):
+    # SnapTrade knows the userId but we hold no secret (disconnect cleared it
+    # or the stale-credential self-heal dropped the row). The secret is only
+    # issued at registration, so recovery = delete remote user + re-register.
+    repo = FakeRepo()
+    settings = MagicMock()
+    settings.broker_secrets_key = _FERNET_KEY
+    settings.snaptrade_user_secret = ""
+    user = uuid.uuid4()
+
+    service = MagicMock()
+    service.register_user.side_effect = [
+        _user_exists_error(),
+        {"userId": f"user-{user}", "userSecret": "fresh-secret"},
+    ]
+    _commercial_mode(monkeypatch, service)
+
+    result = await register_snaptrade_user(repo, user, settings)
+
+    service.delete_user.assert_called_once_with(f"user-{user}")
+    assert result["registered"] is True
+    row = await repo.get_snaptrade_credentials(user)
+    assert decrypt_secret(_FERNET_KEY, row.user_secret_enc) == "fresh-secret"
+
+
+@pytest.mark.asyncio
+async def test_register_retries_while_remote_deletion_queues(monkeypatch):
+    # SnapTrade deletes users asynchronously: a register fired right after the
+    # delete can bounce with 1010 again before eventually succeeding.
+    repo = FakeRepo()
+    settings = MagicMock()
+    settings.broker_secrets_key = _FERNET_KEY
+    settings.snaptrade_user_secret = ""
+    user = uuid.uuid4()
+
+    service = MagicMock()
+    service.register_user.side_effect = [
+        _user_exists_error(),
+        _user_exists_error(),
+        _user_exists_error(),
+        {"userId": f"user-{user}", "userSecret": "fresh-secret"},
+    ]
+    _commercial_mode(monkeypatch, service)
+
+    result = await register_snaptrade_user(repo, user, settings)
+    assert result["registered"] is True
+    assert service.register_user.call_count == 4
+
+
+@pytest.mark.asyncio
+async def test_register_other_errors_propagate_without_deleting(monkeypatch):
+    # Only the orphaned-user case may delete remote state; anything else
+    # (rate limits, bad keys) must surface untouched.
+    repo = FakeRepo()
+    settings = MagicMock()
+    settings.broker_secrets_key = _FERNET_KEY
+    settings.snaptrade_user_secret = ""
+
+    service = MagicMock()
+    service.register_user.side_effect = SnapTradeError(
+        "register_user failed with HTTP 429: slow down", status=429
+    )
+    _commercial_mode(monkeypatch, service)
+
+    with pytest.raises(SnapTradeError):
+        await register_snaptrade_user(repo, uuid.uuid4(), settings)
+    service.delete_user.assert_not_called()
+
+
 @pytest.mark.asyncio
 async def test_register_is_idempotent(monkeypatch):
     repo = FakeRepo()

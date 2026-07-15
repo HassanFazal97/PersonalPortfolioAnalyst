@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import datetime
 from typing import Any
@@ -65,6 +66,12 @@ async def resolve_credentials(
     return None
 
 
+# SnapTrade queues user deletion asynchronously, so a register issued right
+# after deleting an orphaned user can still bounce with "already exists".
+_REREGISTER_ATTEMPTS = 4
+_REREGISTER_DELAY_SECONDS = 1.5
+
+
 async def register_snaptrade_user(
     repo: Repo,
     user_id: uuid.UUID,
@@ -81,7 +88,30 @@ async def register_snaptrade_user(
 
     st_user_id = snaptrade_user_id_for(user_id)
     service = SnapTradeService(settings, credentials=None)
-    result = service.register_user(st_user_id)
+    try:
+        result = service.register_user(st_user_id)
+    except SnapTradeError as exc:
+        if not exc.user_exists:
+            raise
+        # Orphaned remote user: SnapTrade knows this userId but we hold no
+        # secret (a disconnect cleared it, or the stale-credential self-heal
+        # dropped the row) — and the secret is only ever issued at
+        # registration. The user is unusable as-is, so delete it remotely and
+        # register fresh; the caller re-connects their brokerage right after
+        # this anyway.
+        service.delete_user(st_user_id)
+        result = None
+        for attempt in range(_REREGISTER_ATTEMPTS):
+            if attempt:
+                await asyncio.sleep(_REREGISTER_DELAY_SECONDS)
+            try:
+                result = service.register_user(st_user_id)
+                break
+            except SnapTradeError as retry_exc:
+                # Deletion is queued on SnapTrade's side; give it a moment.
+                if not retry_exc.user_exists or attempt == _REREGISTER_ATTEMPTS - 1:
+                    raise
+        assert result is not None
     secret = result["userSecret"]
     enc = encrypt_secret(settings.broker_secrets_key, secret)
     await repo.save_snaptrade_credentials(
