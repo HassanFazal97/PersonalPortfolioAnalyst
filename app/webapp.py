@@ -1934,7 +1934,7 @@ _STOCK_BODY = """
       <div class="skl"></div><div class="skl short"></div></div></div></div>
   <div class="dash-card"><h3>Key dates</h3>
     <div class="metric-list" id="key-dates"></div></div>
-  <div class="dash-card"><h3>News</h3>
+  <div class="dash-card"><h3>News &amp; digests</h3>
     <div class="news-feed" id="stock-news"><div aria-hidden="true">
       <div class="skl"></div><div class="skl short"></div></div></div></div>
 </aside>
@@ -2281,11 +2281,13 @@ document.querySelectorAll('#chart-controls button').forEach((btn) => {
 async function loadNews() {
   const el = document.getElementById('stock-news');
   try {
-    const params = new URLSearchParams({ ticker: TICKER, kind: 'holding,alert' });
+    // All three kinds: articles tagged to this ticker, alerts naming it, and
+    // morning digests whose text mentions it.
+    const params = new URLSearchParams({ ticker: TICKER, kind: 'digest,holding,alert' });
     const data = await (await api('/news?' + params)).json();
     if (!data.items || data.items.length === 0) {
-      el.innerHTML = '<p class="muted-note">No stored news for ' + esc(TICKER) +
-        ' yet. Your next digest may surface articles here.</p>';
+      el.innerHTML = '<p class="muted-note">Nothing stored for ' + esc(TICKER) +
+        ' yet. Digests, alerts, and articles that mention it will appear here.</p>';
       return;
     }
     el.innerHTML = data.items.map((item) => {

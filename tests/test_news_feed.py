@@ -5,6 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.config import DEFAULT_USER_ID, get_settings
+from app.db.repo import digest_mentions_ticker
 from app.main import create_app
 from tests.fakes import FakeRepo
 
@@ -93,3 +94,47 @@ async def test_news_filters_by_ticker(monkeypatch):
     assert not any(
         i["kind"] == "alert" and i.get("tickers") == ["XOM"] for i in items
     )
+
+
+def test_digest_mentions_ticker_word_boundaries():
+    assert digest_mentions_ticker("NVDA -2.1% on export news", "NVDA")
+    # Exchange-suffixed tickers match on the root the prose actually uses.
+    assert digest_mentions_ticker("SHOP fell 4% after earnings", "SHOP.TO")
+    assert digest_mentions_ticker("SHOP.TO fell 4%", "SHOP.TO")
+    # Word boundaries + case sensitivity: TE must not match 'tech' or 'Te'.
+    assert not digest_mentions_ticker("Big tech rallied broadly", "TE")
+    assert digest_mentions_ticker("TE gained on new contracts", "TE")
+    assert not digest_mentions_ticker(None, "NVDA")
+    assert not digest_mentions_ticker("Quiet day across the book", "NVDA")
+
+
+@pytest.mark.asyncio
+async def test_ticker_filtered_feed_includes_mentioning_digests(monkeypatch):
+    # The stock detail page asks for digest,holding,alert with a ticker —
+    # digests that mention the ticker appear, others are dropped.
+    repo = FakeRepo()
+    repo.seed_user(_OWNER, plan="pro")
+    run_id = uuid.uuid4()
+    await repo.upsert_digest(
+        run_id=run_id,
+        body="NVDA slid 3% premarket; rest of the book flat.",
+        digest_date=date(2026, 7, 14),
+        user_id=_OWNER,
+    )
+    await repo.upsert_digest(
+        run_id=run_id,
+        body="Quiet macro day, nothing actionable.",
+        digest_date=date(2026, 7, 15),
+        user_id=_OWNER,
+    )
+
+    client = _client(monkeypatch, repo)
+    items = client.get(
+        "/news?ticker=NVDA&kind=digest,holding,alert", headers=_AUTH
+    ).json()["items"]
+    digests = [i for i in items if i["kind"] == "digest"]
+    assert len(digests) == 1
+    assert "NVDA" in digests[0]["body"]
+    # Unfiltered feed still returns both digests.
+    all_items = client.get("/news?kind=digest", headers=_AUTH).json()["items"]
+    assert len([i for i in all_items if i["kind"] == "digest"]) == 2

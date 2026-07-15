@@ -330,16 +330,20 @@ class FakeRepo:
         self, user_id, *, ticker=None, kind="all", since=None,
         severity=None, category=None, limit=50,
     ):
+        from app.db.repo import digest_mentions_ticker
+
         kinds = {k.strip() for k in kind.split(",") if k.strip()} or {"all"}
         if "all" in kinds:
             kinds = {"all"}
         out = []
-        include_digest = ("all" in kinds or "digest" in kinds) and ticker is None
+        include_digest = "all" in kinds or "digest" in kinds
         include_alert = "all" in kinds or "alert" in kinds
         include_holding = "all" in kinds or "holding" in kinds
 
         if include_digest:
             for d in await self.list_recent_digests(user_id=user_id, since=since, limit=limit):
+                if ticker is not None and not digest_mentions_ticker(d.body, ticker):
+                    continue
                 out.append({
                     "id": str(d.id),
                     "kind": "digest",

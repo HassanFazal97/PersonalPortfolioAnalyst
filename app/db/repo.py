@@ -7,6 +7,7 @@ functions. The agent loop, tools, and API routes depend only on this surface.
 from __future__ import annotations
 
 import hashlib
+import re
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -47,6 +48,19 @@ from app.delivery.channels import CHANNELS
 # Owner (user #1) attribution until per-user auth lands. Every tenant-scoped
 # read/write defaults to this user; pass user_id to scope to another.
 _OWNER_USER_ID = uuid.UUID(DEFAULT_USER_ID)
+
+
+def digest_mentions_ticker(body: str | None, ticker: str) -> bool:
+    """Whether a digest's prose mentions a ticker. Digests aren't ticker-tagged
+    rows, so the ticker-filtered news feed (the stock detail page) matches on
+    the text: the full Yahoo symbol or its exchange-less root (SHOP.TO → SHOP),
+    case-sensitive with word boundaries so a ticker like TE doesn't match
+    'tech'."""
+    if not body:
+        return False
+    root = ticker.split(".")[0]
+    pattern = rf"\b({re.escape(ticker)}|{re.escape(root)})\b"
+    return re.search(pattern, body) is not None
 
 
 @event.listens_for(Session, "after_begin")
@@ -773,7 +787,7 @@ class Repo:
         if "all" in kinds:
             kinds = {"all"}
         out: list[dict[str, Any]] = []
-        include_digest = ("all" in kinds or "digest" in kinds) and ticker is None
+        include_digest = "all" in kinds or "digest" in kinds
         include_alert = "all" in kinds or "alert" in kinds
         include_holding = "all" in kinds or "holding" in kinds
 
@@ -781,6 +795,10 @@ class Repo:
             for d in await self.list_recent_digests(
                 user_id=user_id, since=since, limit=limit
             ):
+                # Ticker-filtered feeds keep only digests whose prose mentions
+                # the ticker (digests aren't ticker-tagged rows).
+                if ticker is not None and not digest_mentions_ticker(d.body, ticker):
+                    continue
                 created = d.created_at or datetime.now(timezone.utc)
                 out.append(
                     {
