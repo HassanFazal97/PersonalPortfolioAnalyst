@@ -23,6 +23,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from app.agent.anomaly.orchestrator import run_anomaly_scan, run_anomaly_scans_for_all
 from app.agent.budget import Budget
 from app.agent.digest_pipeline import run_digest_pipeline, run_digests_for_all
 from app.agent.loop import run_agent
@@ -44,6 +45,7 @@ from app.integrations.snaptrade.onboarding import (
     service_for_user,
 )
 from app.integrations.snaptrade.sync import sync_brokerage_positions
+from app.jobs import heartbeat_wrapped, job_health
 from app.landing import (
     CONTACT_HTML,
     LANDING_HTML,
@@ -77,6 +79,7 @@ async def lifespan(app: FastAPI):
     app.state.repo = repo
     app.state.scheduler = None
     app.state.macro_scheduler = None
+    app.state.anomaly_scheduler = None
     app.state.delivery_scheduler = None
     # Which channels this deployment can send (drives verification + UI).
     app.state.delivery_adapters = build_adapters(settings)
@@ -93,7 +96,10 @@ async def lifespan(app: FastAPI):
             await run_digests_for_all(repo)
 
         scheduler = DigestScheduler(
-            _run_digest, cron=settings.digest_cron, timezone=settings.tz
+            heartbeat_wrapped("morning_digest", repo, _run_digest),
+            cron=settings.digest_cron,
+            timezone=settings.tz,
+            misfire_grace_seconds=settings.digest_misfire_grace_seconds,
         )
         scheduler.start()
         app.state.scheduler = scheduler
@@ -103,12 +109,26 @@ async def lifespan(app: FastAPI):
                 await run_macro_scans_for_all(repo)
 
             macro_scheduler = IntervalScheduler(
-                _run_macro,
+                heartbeat_wrapped("macro_scan", repo, _run_macro),
                 minutes=settings.macro_scan_interval_minutes,
                 timezone=settings.tz,
             )
             macro_scheduler.start()
             app.state.macro_scheduler = macro_scheduler
+
+        if settings.anomaly_scan_cron:
+            async def _run_anomaly() -> None:
+                await run_anomaly_scans_for_all(repo)
+
+            anomaly_scheduler = DigestScheduler(
+                heartbeat_wrapped("anomaly_scan", repo, _run_anomaly),
+                cron=settings.anomaly_scan_cron,
+                timezone=settings.tz,
+                job_id="anomaly_scan",
+                misfire_grace_seconds=settings.digest_misfire_grace_seconds,
+            )
+            anomaly_scheduler.start()
+            app.state.anomaly_scheduler = anomaly_scheduler
 
         if settings.delivery_interval_seconds > 0:
             dispatcher = Dispatcher(
@@ -120,7 +140,7 @@ async def lifespan(app: FastAPI):
                 ),
             )
             delivery_scheduler = DeliveryScheduler(
-                dispatcher.tick,
+                heartbeat_wrapped("delivery_dispatch", repo, dispatcher.tick),
                 seconds=settings.delivery_interval_seconds,
                 timezone=settings.tz,
             )
@@ -132,6 +152,8 @@ async def lifespan(app: FastAPI):
     finally:
         if app.state.delivery_scheduler is not None:
             app.state.delivery_scheduler.shutdown()
+        if app.state.anomaly_scheduler is not None:
+            app.state.anomaly_scheduler.shutdown()
         if app.state.macro_scheduler is not None:
             app.state.macro_scheduler.shutdown()
         if app.state.scheduler is not None:
@@ -491,12 +513,29 @@ def create_app() -> FastAPI:
         delivery_ok = bool(
             delivery_scheduler and getattr(delivery_scheduler, "running", False)
         )
+        # Job-completion staleness (schedulers "running" says nothing about
+        # whether jobs finish). Advisory: a stale digest must not flap the
+        # deploy liveness probe, so "ok" stays db-only and jobs get their own
+        # keys. Best-effort — a heartbeat-table problem degrades to {} rather
+        # than 500ing the probe.
+        jobs: dict = {}
+        if repo is not None:
+            try:
+                heartbeats = {h.job_name: h for h in await repo.get_job_heartbeats()}
+                jobs = job_health(heartbeats, get_settings())
+            except Exception:
+                logging.getLogger(__name__).warning(
+                    "job heartbeat read failed", exc_info=True
+                )
+        jobs_ok = all(j.get("state") != "offline" for j in jobs.values())
         return {
             "ok": db_ok,
             "db": db_ok,
             "scheduler": scheduler_ok,
             "macro_scheduler": macro_scheduler_ok,
             "delivery_scheduler": delivery_ok,
+            "jobs": jobs,
+            "jobs_ok": jobs_ok,
         }
 
     @app.get("/auth/whoami")
@@ -665,6 +704,18 @@ def create_app() -> FastAPI:
             results = await run_macro_scans_for_all(repo)
             return {"scans": results}
         return await run_macro_scan(repo, user_id=user_id)
+
+    @app.post("/anomaly/scan")
+    async def anomaly_scan(request: Request) -> dict:
+        """Run the price-anomaly detectors for the authenticated user (or all
+        recipients via service token). Detector math is model-free; only the
+        per-user narration costs anything."""
+        repo = _require_repo(app)
+        user_id = _user_id(request)
+        if user_id == _OWNER_USER_ID and request.headers.get("X-Anomaly-Scan-All") == "1":
+            results = await run_anomaly_scans_for_all(repo)
+            return {"scans": results}
+        return await run_anomaly_scan(repo, user_id=user_id)
 
     @app.get("/alerts")
     async def list_alerts(request: Request, limit: int = 20) -> dict:

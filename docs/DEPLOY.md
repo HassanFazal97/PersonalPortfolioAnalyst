@@ -115,7 +115,9 @@ use different connections.
      postgresql+asyncpg://portfolio_app.<ref>:<STRONG_PASSWORD>@aws-0-us-east-1.pooler.supabase.com:5432/postgres
      ```
    Redeploy.
-4. **Verify:** `GET /health` → `db:true`; owner `/chat` still returns your
+4. **Verify:** `GET /health` → `db:true` and, once the schedulers have run,
+   `jobs.morning_digest.state` is `live` (a `degraded`/`offline` job means it
+   stopped completing — check `last_error`); owner `/chat` still returns your
    positions; a Supabase user `/chat` returns "No positions on record". If
    `db:false`, the role can't connect or is missing a grant — revert
    `DATABASE_URL` to the owner URL and re-check the grants.

@@ -331,6 +331,26 @@ class NewsItem(Base):
     )
 
 
+class JobHeartbeat(Base):
+    """Per-scheduled-job liveness accounting (system table, not tenant data).
+
+    Written by the heartbeat wrapper in ``app/jobs.py``; read by GET /health
+    to derive live/degraded/offline from staleness."""
+
+    __tablename__ = "job_heartbeats"
+
+    job_name: Mapped[str] = mapped_column(Text, primary_key=True)
+    last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(Text)
+    consecutive_failures: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class SchemaMigration(Base):
     """Tracks which numbered migration files have been applied."""
 

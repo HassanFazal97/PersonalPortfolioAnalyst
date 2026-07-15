@@ -13,6 +13,7 @@ from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import delete, event, func, select, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -28,6 +29,7 @@ from app.db.models import (
     AgentRun,
     Alert,
     Digest,
+    JobHeartbeat,
     ModelCall,
     NewsItem,
     NotificationChannel,
@@ -193,6 +195,14 @@ class Repo:
                 )
             )
             return sorted(result.scalars().all())
+
+    async def list_anomaly_recipients(self) -> list[uuid.UUID]:
+        """Recipients for scheduled price-anomaly alerts: the macro (Pro)
+        audience plus the owner, who is always included so the feature is
+        dogfooded pre-launch even with zero Pro users."""
+        recipients = set(await self.list_macro_recipients())
+        recipients.add(_OWNER_USER_ID)
+        return sorted(recipients)
 
     async def monthly_cost_usd(self, user_id: uuid.UUID) -> float:
         """Sum of this user's agent-run cost so far this calendar month (UTC)."""
@@ -633,6 +643,35 @@ class Repo:
                 .limit(limit)
             )
             return list(result.scalars().all())
+
+    async def recent_alerts_by_category(
+        self, user_id: uuid.UUID, *, category: str, since: datetime
+    ) -> list[Alert]:
+        """This user's alerts of one category created since ``since``.
+
+        Powers the anomaly cooldown: a ticker appearing in a recent
+        price_anomaly alert stays quiet for the cooldown window."""
+        async with self._session() as s:
+            result = await s.execute(
+                select(Alert).where(
+                    Alert.user_id == user_id,
+                    Alert.category == category,
+                    Alert.created_at >= since,
+                )
+            )
+            return list(result.scalars().all())
+
+    async def list_distinct_tickers(
+        self, user_ids: list[uuid.UUID] | None = None
+    ) -> list[str]:
+        """Distinct tickers across positions (optionally limited to some
+        users) — the global anomaly scan runs once per ticker, not per user."""
+        async with self._session() as s:
+            q = select(Position.ticker).distinct()
+            if user_ids is not None:
+                q = q.where(Position.user_id.in_(user_ids))
+            result = await s.execute(q)
+            return sorted(result.scalars().all())
 
     async def list_recent_digests(
         self,
@@ -1142,3 +1181,54 @@ class Repo:
                 query = query.where(VerificationCode.user_id == user_id)
             result = await s.execute(query)
             return int(result.scalar_one() or 0)
+
+    # ---- job heartbeats (scheduled-job liveness, read by /health) ---------
+
+    async def record_job_attempt(self, job_name: str) -> None:
+        now = datetime.now(timezone.utc)
+        async with self._session() as s:
+            stmt = pg_insert(JobHeartbeat).values(
+                job_name=job_name, last_attempt_at=now, updated_at=now
+            )
+            stmt = stmt.on_conflict_do_update(
+                index_elements=[JobHeartbeat.job_name],
+                set_={"last_attempt_at": now, "updated_at": now},
+            )
+            await s.execute(stmt)
+            await s.commit()
+
+    async def record_job_result(
+        self, job_name: str, *, ok: bool, error: str | None = None
+    ) -> None:
+        now = datetime.now(timezone.utc)
+        async with self._session() as s:
+            if ok:
+                values = {
+                    "last_success_at": now,
+                    "last_error": None,
+                    "consecutive_failures": 0,
+                    "updated_at": now,
+                }
+                update = dict(values)
+            else:
+                values = {
+                    "last_error": error,
+                    "consecutive_failures": 1,
+                    "updated_at": now,
+                }
+                update = {
+                    "last_error": error,
+                    "consecutive_failures": JobHeartbeat.consecutive_failures + 1,
+                    "updated_at": now,
+                }
+            stmt = pg_insert(JobHeartbeat).values(job_name=job_name, **values)
+            stmt = stmt.on_conflict_do_update(
+                index_elements=[JobHeartbeat.job_name], set_=update
+            )
+            await s.execute(stmt)
+            await s.commit()
+
+    async def get_job_heartbeats(self) -> list[JobHeartbeat]:
+        async with self._session() as s:
+            result = await s.execute(select(JobHeartbeat))
+            return list(result.scalars().all())

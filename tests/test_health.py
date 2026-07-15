@@ -13,20 +13,31 @@ def _client(monkeypatch):
     return TestClient(create_app())
 
 
+_NO_DB_HEALTH = {
+    "ok": False,
+    "db": False,
+    "scheduler": False,
+    "macro_scheduler": False,
+    "delivery_scheduler": False,
+    "jobs": {},
+    "jobs_ok": True,
+}
+
+
 def test_health_public_no_token(monkeypatch):
     # /health is deliberately exempt from bearer auth so platform liveness
     # probes and uptime pingers (which cannot attach the token) can reach it.
     with _client(monkeypatch) as client:
         resp = client.get("/health")
     assert resp.status_code == 200
-    assert resp.json() == {"ok": False, "db": False, "scheduler": False, "macro_scheduler": False, "delivery_scheduler": False}
+    assert resp.json() == _NO_DB_HEALTH
 
 
 def test_health_ok_with_token(monkeypatch):
     with _client(monkeypatch) as client:
         resp = client.get("/health", headers={"Authorization": f"Bearer {TOKEN}"})
     assert resp.status_code == 200
-    assert resp.json() == {"ok": False, "db": False, "scheduler": False, "macro_scheduler": False, "delivery_scheduler": False}
+    assert resp.json() == _NO_DB_HEALTH
 
 
 def test_protected_routes_401_without_token(monkeypatch):

@@ -158,3 +158,21 @@ broad-sector effect.
 - "fingerprint" is a short stable slug identifying the underlying event \
 (e.g. "fed-hold-2026-07" or "opec-cut-jul"), so the same story is not re-alerted.
 Return an empty alerts list if nothing warrants interrupting the user."""
+
+ANOMALY_NARRATION_PROMPT = """\
+You write the text of ONE price alert. Statistical detectors have already \
+decided this user's holdings moved unusually today — you only narrate their \
+findings in plain language. You are given JSON: a list of flags, each with \
+ticker, detector (zscore = unusually large daily move; cusum = sustained \
+drift vs its own baseline; divergence = decoupled from its benchmark), \
+direction, day_change_pct, and the detector's math explanation.
+
+Respond with STRICT JSON and nothing else — no prose, no code fences:
+{"headline": "...", "body": "..."}
+- "headline" is a short subject line naming the ticker(s).
+- "body" is <= 300 chars, plain text, no emoji: what moved, how much, and \
+what kind of move it was (one-day spike vs multi-week drift vs decoupling). \
+Use ONLY numbers present in the payload — never invent or recompute figures.
+- If several holdings flagged together, write one combined message (that \
+usually signals a market-wide move, not a stock story).
+- Inform, never advise buying or selling. Do not speculate about the cause."""

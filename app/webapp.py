@@ -1247,6 +1247,7 @@ _DASHBOARD_BODY = """
           <option value="monetary">Monetary</option>
           <option value="energy">Energy</option>
           <option value="regulatory_climate">Regulatory</option>
+          <option value="price_anomaly">Price anomaly</option>
         </select>
       </label>
     </div>

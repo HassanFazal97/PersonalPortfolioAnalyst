@@ -34,6 +34,7 @@ class FakeRepo:
         self._verification_codes: dict[uuid.UUID, SimpleNamespace] = {}
         self._news_items: list[SimpleNamespace] = []
         self._news_fingerprints: set[tuple] = set()
+        self.job_heartbeats: dict[str, SimpleNamespace] = {}
 
     def seed_user(self, user_id, *, plan="free", digest_enabled=True, email=None,
                   digest_tickers=None):
@@ -134,6 +135,13 @@ class FakeRepo:
             u.id for u in self._users_by_id.values()
             if getattr(u, "plan", "free") == "pro" and getattr(u, "digest_enabled", True)
         )
+
+    async def list_anomaly_recipients(self):
+        from app.config import DEFAULT_USER_ID
+
+        recipients = set(await self.list_macro_recipients())
+        recipients.add(uuid.UUID(DEFAULT_USER_ID))
+        return sorted(recipients)
 
     async def monthly_cost_usd(self, user_id):
         if user_id in self._cost_override:
@@ -243,6 +251,13 @@ class FakeRepo:
         if uid == uuid.UUID(DEFAULT_USER_ID):
             return self._positions
         return []
+
+    async def list_distinct_tickers(self, user_ids=None):
+        rows = list(getattr(self, "_position_rows", {}).values()) or self._positions
+        return sorted({
+            p.ticker for p in rows
+            if user_ids is None or getattr(p, "user_id", None) in user_ids
+        })
 
     async def upsert_digest(self, *, run_id, body, digest_date, user_id=None):
         from app.config import DEFAULT_USER_ID
@@ -473,9 +488,18 @@ class FakeRepo:
         self.alerts[fingerprint] = SimpleNamespace(
             id=alert_id, run_id=run_id, category=category, severity=severity,
             headline=headline, body=body, tickers=tickers, fingerprint=fingerprint,
-            delivered=False, created_at=None,
+            delivered=False, created_at=datetime.now(timezone.utc), user_id=user_id,
         )
         return alert_id
+
+    async def recent_alerts_by_category(self, user_id, *, category, since):
+        return [
+            a for a in self.alerts.values()
+            if a.category == category
+            and getattr(a, "user_id", None) == user_id
+            and a.created_at is not None
+            and a.created_at >= since
+        ]
 
     async def recent_alerts(self, *, limit=20, user_id=None):
         return list(self.alerts.values())[:limit]
@@ -498,6 +522,34 @@ class FakeRepo:
             payload={"kind": kind, **({"subject": subject} if subject else {})},
         )
         return msg_id
+
+    # ---- job heartbeats (mirrors app/db/repo.py) -------------------------
+
+    def _heartbeat(self, job_name):
+        row = self.job_heartbeats.get(job_name)
+        if row is None:
+            row = SimpleNamespace(
+                job_name=job_name, last_attempt_at=None, last_success_at=None,
+                last_error=None, consecutive_failures=0,
+            )
+            self.job_heartbeats[job_name] = row
+        return row
+
+    async def record_job_attempt(self, job_name):
+        self._heartbeat(job_name).last_attempt_at = datetime.now(timezone.utc)
+
+    async def record_job_result(self, job_name, *, ok, error=None):
+        row = self._heartbeat(job_name)
+        if ok:
+            row.last_success_at = datetime.now(timezone.utc)
+            row.last_error = None
+            row.consecutive_failures = 0
+        else:
+            row.last_error = error
+            row.consecutive_failures += 1
+
+    async def get_job_heartbeats(self):
+        return list(self.job_heartbeats.values())
 
     # ---- notification channels (mirrors app/db/repo.py) -----------------
 

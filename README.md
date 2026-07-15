@@ -172,6 +172,39 @@ curl -s localhost:8000/digest/latest -H "Authorization: Bearer $TOKEN" | jq
 # 404 until today's digest has been generated
 ```
 
+## Price-anomaly alerts (statistical, model-free)
+
+Deterministic detectors (ported from Shizen) run over each holding's daily log
+returns — a rolling z-score for one-day spikes, CUSUM for slow sustained drifts,
+and an optional correlation-divergence check against a benchmark ETF
+(`ANOMALY_BENCHMARK_TICKER`). **Math decides, the LLM only narrates**: flagged
+holdings are aggregated per user (noisy-OR), one cheap Haiku call writes the
+alert body (deterministic fallback if it fails), and the alert lands in the
+normal `alerts` + delivery pipeline as category `price_anomaly`. Detection
+itself costs $0. Recipients: Pro users + the owner. A 3-day per-ticker cooldown
+plus daily fingerprints keep a volatile week from spamming.
+
+```bash
+curl -s -X POST localhost:8000/anomaly/scan -H "Authorization: Bearer $TOKEN" | jq
+# scheduled: set ANOMALY_SCAN_CRON="30 16 * * 1-5" (after the TSX/NYSE close)
+```
+
+Thresholds were chosen with `python scripts/calibrate_detectors.py` (cached
+real 5-year history; `--sweep` for the grid, `--refresh` to re-download):
+
+| Detector | Scenario | FP/yr | Median lag (days) | Misses |
+|---|---|---:|---:|---:|
+| zscore(W=60, k=3.0) | spike | 3.89 | 1 | 2/18 |
+| zscore(W=60, k=3.0) | level_shift | 3.89 | 15 | 4/18 |
+| zscore(W=60, k=3.0) | variance_burst | 3.89 | 2 | 0/18 |
+| cusum(warmup=60, δ=0.5, h=8.0) | spike | 2.73 | 13 | 7/18 |
+| cusum(warmup=60, δ=0.5, h=8.0) | level_shift | 2.73 | 11 | 1/18 |
+| cusum(warmup=60, δ=0.5, h=8.0) | variance_burst | 2.73 | 5 | 0/18 |
+
+(FP/yr = organic flags per 252 trading days on unmodified history; lag from
+synthetic injections scaled to each ticker's trailing σ. CUSUM h=8 over h=6
+halves false alarms at identical drift lag — spikes are zscore's job.)
+
 ## Deploy to the cloud (production)
 
 The morning digest is driven by an **in-process** APScheduler, so the server must
@@ -200,6 +233,13 @@ collides on the `digests.digest_date` unique constraint.
    curl -s -X POST $HOST/digest/run -H "Authorization: Bearer $TOKEN"
    curl -s $HOST/digest/latest -H "Authorization: Bearer $TOKEN"
    ```
+
+`/health` also reports per-job completion staleness under `"jobs"` (each
+scheduled job — `morning_digest`, `macro_scan`, `anomaly_scan`,
+`delivery_dispatch` — records heartbeats to the `job_heartbeats` table):
+`live`/`degraded`/`offline` derived from missed fires, `disabled` when a job
+is off. `"ok"` stays db-only so a stale digest never flaps the platform
+liveness probe; watch `"jobs_ok"` on your uptime dashboard instead.
 
 **Belt-and-suspenders scheduling (recommended):** rather than trusting the host
 to stay warm, add an external cron (Supabase `pg_cron`, cron-job.org, or a

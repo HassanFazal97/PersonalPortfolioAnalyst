@@ -96,6 +96,42 @@ class Settings(BaseSettings):
     # Owner attribution until per-user auth lands (roadmap Phase 2).
     default_user_id: str = Field(default=DEFAULT_USER_ID, alias="DEFAULT_USER_ID")
 
+    # ---- Price-anomaly detector scan (statistical, model-free) ------------
+    # Cron for the daily scan (detector math is free; one Haiku call per user
+    # with a flagged holding). "" disables the in-process job — still
+    # triggerable via POST /anomaly/scan. Suggested: "30 16 * * 1-5" (after
+    # the TSX/NYSE close, in TZ).
+    anomaly_scan_cron: str = Field(default="", alias="ANOMALY_SCAN_CRON")
+    # Calendar days of history fetched per ticker (~0.7x trading days).
+    anomaly_history_days: int = Field(default=180, alias="ANOMALY_HISTORY_DAYS")
+    # Detector thresholds operate on daily LOG RETURNS. Defaults chosen from
+    # scripts/calibrate_detectors.py on 5y of real history (see README table):
+    # zscore k=3 → ~3.9 FP/yr/ticker, 1-day spike lag; cusum h=8 → ~2.7
+    # FP/yr/ticker, 11-day drift lag (h=6 doubled the FPs for no lag gain).
+    # Re-run the calibration script before changing these.
+    anomaly_zscore_window: int = Field(default=60, alias="ANOMALY_ZSCORE_WINDOW")
+    anomaly_zscore_k: float = Field(default=3.0, alias="ANOMALY_ZSCORE_K")
+    anomaly_cusum_warmup: int = Field(default=60, alias="ANOMALY_CUSUM_WARMUP")
+    anomaly_cusum_delta: float = Field(default=0.5, alias="ANOMALY_CUSUM_DELTA")
+    anomaly_cusum_h: float = Field(default=8.0, alias="ANOMALY_CUSUM_H")
+    # Divergence (correlation break vs a benchmark) is off until a benchmark
+    # ticker is set (e.g. XIU.TO or SPY); thresholds are the least
+    # transferable from Shizen, so enable only after calibrating.
+    anomaly_benchmark_ticker: str = Field(default="", alias="ANOMALY_BENCHMARK_TICKER")
+    anomaly_divergence_window: int = Field(default=30, alias="ANOMALY_DIVERGENCE_WINDOW")
+    anomaly_divergence_calibration: int = Field(
+        default=120, alias="ANOMALY_DIVERGENCE_CALIBRATION"
+    )
+    anomaly_divergence_threshold: float = Field(
+        default=3.5, alias="ANOMALY_DIVERGENCE_THRESHOLD"
+    )
+    # Flags below this severity are dropped before aggregation.
+    anomaly_min_severity: float = Field(default=0.5, alias="ANOMALY_MIN_SEVERITY")
+    # Days a ticker stays quiet after appearing in a price_anomaly alert.
+    anomaly_cooldown_days: int = Field(default=3, alias="ANOMALY_COOLDOWN_DAYS")
+    # Budget for the per-user narration call (Haiku).
+    anomaly_max_cost_usd: float = Field(default=0.10, alias="ANOMALY_MAX_COST_USD")
+
     chat_max_iterations: int = Field(default=10, alias="CHAT_MAX_ITERATIONS")
     chat_max_cost_usd: float = Field(default=0.50, alias="CHAT_MAX_COST_USD")
     digest_max_iterations: int = Field(default=25, alias="DIGEST_MAX_ITERATIONS")
@@ -113,6 +149,18 @@ class Settings(BaseSettings):
 
     digest_cron: str = Field(default="45 7 * * 1-5", alias="DIGEST_CRON")
     tz: str = Field(default="America/Toronto", alias="TZ")
+
+    # ---- Scheduled-job health (job_heartbeats + /health staleness) --------
+    # Interval jobs (delivery, macro) report degraded/offline after this many
+    # missed intervals since the last success.
+    job_degraded_factor: float = Field(default=3.0, alias="JOB_DEGRADED_FACTOR")
+    job_offline_factor: float = Field(default=10.0, alias="JOB_OFFLINE_FACTOR")
+    # A cron fire (digest, anomaly scan) only counts as missed once it is this
+    # old; also passed to APScheduler so a fire up to this late still runs
+    # instead of being silently skipped (the default grace is 1 second).
+    digest_misfire_grace_seconds: int = Field(
+        default=3600, alias="DIGEST_MISFIRE_GRACE_SECONDS"
+    )
 
     # ---- Multi-channel delivery (dispatcher + provider adapters) ----------
     # How often the dispatcher drains the outbound queue. 0 disables it.
