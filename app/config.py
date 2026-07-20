@@ -154,22 +154,56 @@ class Settings(BaseSettings):
     )
 
     chat_max_iterations: int = Field(default=10, alias="CHAT_MAX_ITERATIONS")
+    # Prior Q&A pairs replayed into each chat run for follow-up questions
+    # (0 disables memory). Each pair costs ~input tokens on every iteration.
+    chat_history_turns: int = Field(default=3, alias="CHAT_HISTORY_TURNS")
+    # Per-run chat budget for the owner/service context; per-plan budgets below
+    # bound what a single Free/Pro question can spend (the loop degrades to a
+    # tools-off summary turn when exhausted, so users still get an answer).
     chat_max_cost_usd: float = Field(default=0.50, alias="CHAT_MAX_COST_USD")
+    free_chat_max_cost_usd: float = Field(default=0.10, alias="FREE_CHAT_MAX_COST_USD")
+    pro_chat_max_cost_usd: float = Field(default=0.30, alias="PRO_CHAT_MAX_COST_USD")
     digest_max_iterations: int = Field(default=25, alias="DIGEST_MAX_ITERATIONS")
     digest_max_cost_usd: float = Field(default=1.50, alias="DIGEST_MAX_COST_USD")
 
     max_tool_output_tokens: int = Field(default=6000, alias="MAX_TOOL_OUTPUT_TOKENS")
     tool_timeout_seconds: float = Field(default=10.0, alias="TOOL_TIMEOUT_SECONDS")
 
-    # Plan gating + per-user monthly Anthropic cost caps (USD). Enforced against
-    # agent_runs.cost_usd so a heavy user can't exceed their plan's economics.
-    free_monthly_cost_cap_usd: float = Field(default=0.75, alias="FREE_MONTHLY_COST_CAP_USD")
-    pro_monthly_cost_cap_usd: float = Field(default=6.00, alias="PRO_MONTHLY_COST_CAP_USD")
-    free_daily_chat_limit: int = Field(default=5, alias="FREE_DAILY_CHAT_LIMIT")
+    # No-card Pro trial for new signups, in days. 0 disables (new accounts
+    # start straight on Free). When a trial lapses undecided, digests pause
+    # until the user picks paid Pro or Free (see app/plans.py).
+    trial_days: int = Field(default=7, alias="TRIAL_DAYS")
+
+    # Plan gating. The chat-question quotas are the limit users see (rolling
+    # windows: Free per 7 days, Pro per 24 hours). The monthly cost caps are a
+    # fair-use backstop enforced against agent_runs.cost_usd, sized so the full
+    # question quota fits with margin to spare (Pro floor margin ~35% of the
+    # $15/mo price even at the cap; realistic spend is a fraction of it).
+    free_weekly_chat_limit: int = Field(default=3, alias="FREE_WEEKLY_CHAT_LIMIT")
+    pro_daily_chat_limit: int = Field(default=10, alias="PRO_DAILY_CHAT_LIMIT")
+    free_monthly_cost_cap_usd: float = Field(default=1.50, alias="FREE_MONTHLY_COST_CAP_USD")
+    pro_monthly_cost_cap_usd: float = Field(default=9.00, alias="PRO_MONTHLY_COST_CAP_USD")
     free_max_digest_holdings: int = Field(default=3, alias="FREE_MAX_DIGEST_HOLDINGS")
 
     digest_cron: str = Field(default="45 7 * * 1-5", alias="DIGEST_CRON")
     tz: str = Field(default="America/Toronto", alias="TZ")
+
+    # ---- Daily holding-news refresh (news_items feed) ----------------------
+    # Runs 7 days a week (unlike the weekday digest) so weekend news lands on
+    # the day it happens instead of arriving as a Monday backlog. Scheduled
+    # shortly before DIGEST_CRON so the digest reuses the still-warm news
+    # cache (NEWS_TTL_SECONDS). "" disables the in-process job — still
+    # triggerable via POST /news/refresh.
+    news_refresh_cron: str = Field(default="35 7 * * *", alias="NEWS_REFRESH_CRON")
+    # Max articles persisted per ticker per run, importance-ranked.
+    news_max_per_ticker: int = Field(default=2, alias="NEWS_MAX_PER_TICKER")
+    # An article is kept when its classified signal is non-neutral OR its
+    # salience is at least this (see app/tools/classify.py).
+    news_min_salience: float = Field(default=0.5, alias="NEWS_MIN_SALIENCE")
+    # Ceiling for the batched Haiku importance calls in one refresh run.
+    news_refresh_max_cost_usd: float = Field(
+        default=0.05, alias="NEWS_REFRESH_MAX_COST_USD"
+    )
 
     # ---- Scheduled-job health (job_heartbeats + /health staleness) --------
     # Interval jobs (delivery, macro) report degraded/offline after this many
@@ -208,6 +242,19 @@ class Settings(BaseSettings):
     discord_client_id: str = Field(default="", alias="DISCORD_CLIENT_ID")
     discord_client_secret: str = Field(default="", alias="DISCORD_CLIENT_SECRET")
 
+    # ---- Stripe billing (Checkout + Customer Portal + webhook) ------------
+    # Billing is off until secret key, monthly price, and PUBLIC_BASE_URL are
+    # all set (success/cancel/portal URLs are built from the public origin).
+    stripe_secret_key: str = Field(default="", alias="STRIPE_SECRET_KEY")
+    # Signing secret of the /webhooks/stripe endpoint (whsec_...).
+    stripe_webhook_secret: str = Field(default="", alias="STRIPE_WEBHOOK_SECRET")
+    # Recurring price IDs (price_...). Annual is optional — empty hides the
+    # yearly option in the UI.
+    stripe_price_pro_monthly: str = Field(default="", alias="STRIPE_PRICE_PRO_MONTHLY")
+    stripe_price_pro_annual: str = Field(default="", alias="STRIPE_PRICE_PRO_ANNUAL")
+    # Stripe Tax at checkout. Off until GST/HST registration warrants it.
+    stripe_automatic_tax: bool = Field(default=False, alias="STRIPE_AUTOMATIC_TAX")
+
     # SnapTrade — brokerage portfolio sync (https://snaptrade.com).
     snaptrade_client_id: str = Field(default="", alias="SNAPTRADE_CLIENT_ID")
     snaptrade_consumer_key: str = Field(default="", alias="SNAPTRADE_CONSUMER_KEY")
@@ -225,6 +272,15 @@ def monthly_cost_cap(plan: str, settings: Settings) -> float:
         settings.pro_monthly_cost_cap_usd
         if plan == "pro"
         else settings.free_monthly_cost_cap_usd
+    )
+
+
+def chat_run_budget(plan: str, settings: Settings) -> float:
+    """The per-run USD budget for one chat question on a plan."""
+    return (
+        settings.pro_chat_max_cost_usd
+        if plan == "pro"
+        else settings.free_chat_max_cost_usd
     )
 
 

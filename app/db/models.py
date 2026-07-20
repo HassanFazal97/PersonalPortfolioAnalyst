@@ -74,7 +74,34 @@ class User(Base):
     digest_tickers: Mapped[list] = mapped_column(
         JSONB, nullable=False, server_default=text("'[]'")
     )
+    # No-card Pro trial (migration 017). Future = trial active (Pro
+    # experience); past + plan 'free' = digests paused pending the user's
+    # upgrade-or-free decision; NULL = resolved or never had one.
+    trial_ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Stripe billing linkage (migration 015). Customer id survives a
+    # downgrade so a re-subscribe reuses the same Stripe customer.
+    stripe_customer_id: Mapped[str | None] = mapped_column(Text, unique=True)
+    stripe_subscription_id: Mapped[str | None] = mapped_column(Text)
+    plan_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    stripe_current_period_end: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    stripe_cancel_at_period_end: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
     created_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class StripeEvent(Base):
+    """Processed-webhook ledger for idempotent Stripe delivery (migration 015)."""
+
+    __tablename__ = "stripe_events"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)  # evt_...
+    type: Mapped[str] = mapped_column(Text, nullable=False)
+    received_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
 

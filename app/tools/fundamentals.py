@@ -465,6 +465,42 @@ async def get_fundamentals(
     return results
 
 
+async def get_fundamentals_tool(payload: dict[str, Any], ctx: Any) -> dict[str, Any]:
+    """Chat-tool wrapper over ``get_fundamentals``: the stored payload per
+    ticker, trimmed for the model (raw ``earnings_dates`` history collapses to
+    the single upcoming date; error-row tickers surface as ``unavailable``)."""
+    if ctx is None or getattr(ctx, "repo", None) is None:
+        raise RuntimeError("get_fundamentals requires database access")
+    tickers = normalize_tickers(payload["tickers"])[:8]
+    data = await get_fundamentals(tickers, repo=ctx.repo, settings=ctx.settings)
+    today = datetime.now(timezone.utc).date()
+    out: dict[str, Any] = {}
+    for ticker, d in data.items():
+        trimmed = {
+            key: d.get(key)
+            for key in (
+                "quote_type",
+                "profile",
+                "valuation",
+                "growth",
+                "profitability",
+                "financial_health",
+                "dividends",
+                "price_action",
+            )
+        }
+        trimmed["next_earnings_date"] = next_earnings_date(
+            d.get("earnings_dates"), today
+        )
+        if d.get("etf"):
+            trimmed["etf"] = d["etf"]
+        out[ticker] = trimmed
+    return {
+        "fundamentals": out,
+        "unavailable": [t for t in tickers if t not in out],
+    }
+
+
 async def run_fundamentals_refresh(repo: Any, settings: Any) -> dict[str, Any]:
     """Nightly job body: re-fetch fundamentals for every held ticker, serially
     with spacing — the one place we deliberately trade latency for not getting

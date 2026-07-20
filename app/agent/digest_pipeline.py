@@ -28,7 +28,12 @@ from app.auth.context import set_current_user_id
 from app.config import DEFAULT_USER_ID, Settings, get_settings, monthly_cost_cap
 from app.db.repo import Repo
 from app.observability.logging import Observer
-from app.plans import digest_cadence_due, max_digest_holdings
+from app.plans import (
+    digest_cadence_due,
+    max_digest_holdings,
+    trial_decision_pending,
+    user_plan_and_tz,
+)
 from app.tools import market, news, portfolio
 from app.tools.registry import CHAT_TOOLS, ToolContext
 
@@ -43,16 +48,6 @@ def _get_client(client: Any) -> Any:
     from anthropic import AsyncAnthropic
 
     return AsyncAnthropic(api_key=get_settings().anthropic_api_key)
-
-
-def _user_plan_and_tz(
-    user: Any | None, *, user_id: uuid.UUID, settings: Settings
-) -> tuple[str, str]:
-    if user_id == _OWNER_USER_ID and user is None:
-        return "pro", settings.tz
-    if user is None:
-        return "free", settings.tz
-    return getattr(user, "plan", "free"), getattr(user, "timezone", settings.tz)
 
 
 def _trim_positions(
@@ -151,10 +146,18 @@ async def run_digest_pipeline(
     settings = get_settings()
     uid = user_id or _OWNER_USER_ID
     user = await db.get_user(uid)
-    plan, tz = _user_plan_and_tz(user, user_id=uid, settings=settings)
+    plan, tz = user_plan_and_tz(user, user_id=uid, settings=settings)
     local_today = datetime.now(ZoneInfo(tz)).date()
 
     if not force:
+        # A lapsed trial pauses digests entirely (neither cadence) until the
+        # user logs in and picks paid Pro or Free.
+        if trial_decision_pending(user):
+            return {
+                "user_id": str(uid),
+                "status": "skipped_trial_decision",
+                "plan": plan,
+            }
         if not digest_cadence_due(plan, local_today):
             return {
                 "user_id": str(uid),
@@ -215,7 +218,9 @@ async def run_digest_pipeline(
             p["ticker"] for p in json.loads(market_context).get("positions", [])
         ]
         await news.prefetch_news_for_tickers(tickers)
-        await _persist_prefetched_news(db, uid, anchor_run_id, tickers)
+        await _persist_prefetched_news(
+            db, uid, anchor_run_id, tickers, client=client, budget=budget
+        )
 
         results: list[dict[str, str]] = []
         for inv in investigations:
@@ -290,15 +295,19 @@ async def _persist_prefetched_news(
     run_id: uuid.UUID,
     tickers: list[str],
     *,
-    max_per_ticker: int = 5,
+    client: Any = None,
+    budget: Budget | None = None,
 ) -> None:
-    """Store top prefetched articles so the dashboard can show received news."""
-    items: list[dict[str, Any]] = []
-    for ticker in tickers:
-        for article in news.get_cached_news_for_ticker(ticker)[:max_per_ticker]:
-            items.append({**article, "ticker": ticker})
-    if items:
-        await db.insert_news_items_if_new(user_id, items, run_id=run_id)
+    """Store the important prefetched articles for the dashboard feed.
+
+    Usually a no-op: the daily news_refresh job persisted the same articles
+    earlier (fingerprint dedup). Kept so news still flows on digest days when
+    NEWS_REFRESH_CRON is disabled."""
+    from app.agent.news_refresh import persist_important_news
+
+    await persist_important_news(
+        db, user_id, tickers, client=client, run_id=run_id, budget=budget
+    )
 
 
 async def run_digests_for_all(db: Repo, *, client: Any = None) -> list[dict[str, Any]]:

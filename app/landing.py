@@ -1236,9 +1236,10 @@ _TERMS_BODY = f"""
 _PRICING_BODY = f"""
 <section class="hero" style="padding-bottom:0;">
   <div class="hero-copy">
-    <h1 data-hero>Start free. Go Pro when you're ready.</h1>
-    <p class="lead" data-hero>Read-only on every plan. Your brokerage password
-    never leaves your bank.</p>
+    <h1 data-hero>Start with a week of Pro, free.</h1>
+    <p class="lead" data-hero>Every new account gets the full Pro experience for
+    7 days &mdash; no card required. Read-only on every plan; your brokerage
+    password never leaves your bank.</p>
   </div>
 </section>
 
@@ -1251,23 +1252,23 @@ _PRICING_BODY = f"""
       <ul>
         <li>1 connected account</li>
         <li>Weekly digest on up to 3 holdings</li>
-        <li>5 chat questions per day</li>
+        <li>3 chat questions per week</li>
       </ul>
       <a class="btn ghost" href="/app#signup">Start free</a>
     </div>
     <div class="plan featured" data-reveal-item>
       <div class="plan-tag">Pro</div>
-      <div class="price">$12<span class="per"> /mo</span></div>
-      <p class="price-note">or $120/yr, two months free.</p>
+      <div class="price">$15<span class="per"> /mo USD</span></div>
+      <p class="price-note">or $120/yr USD &mdash; 4 months free.</p>
       <ul>
         <li>Unlimited connected accounts</li>
         <li>Daily weekday digest across all holdings</li>
         <li>Macro alerts when the world moves</li>
-        <li>Unlimited chat</li>
+        <li>10 chat questions per day</li>
       </ul>
-      <a class="btn ghost" href="/app#signup">Start free, upgrade later</a>
-      <p class="price-note" style="margin-top:0.75rem;">Pro billing is coming soon.
-      Every new account starts on the Free plan.</p>
+      <a class="btn ghost" href="/app/settings?billing=upgrade">Go Pro</a>
+      <p class="price-note" style="margin-top:0.75rem;">New here? Signing up
+      starts a 7-day Pro trial &mdash; no card required.</p>
     </div>
   </div>
 </section>
@@ -1276,14 +1277,19 @@ _PRICING_BODY = f"""
   <h2 data-reveal>Questions about plans</h2>
   <div class="faq" data-reveal-group>
     <details data-reveal-item><summary>Can I cancel anytime?</summary>
-    <p>Yes. Cancel whenever you like; your Pro features stay active until the end of
-    the current billing period.</p></details>
+    <p>Yes. Cancel whenever you like from Settings &rarr; Manage billing; your Pro
+    features stay active until the end of the current billing period.</p></details>
     <details data-reveal-item><summary>Is there a yearly option?</summary>
-    <p>Yes. Pro is $12/mo or $120/yr, which works out to two months free versus
-    paying monthly.</p></details>
+    <p>Yes. Pro is $15/mo USD or $120/yr USD, which works out to four months free
+    versus paying monthly.</p></details>
+    <details data-reveal-item><summary>How does the free trial work?</summary>
+    <p>Every new account gets 7 days of full Pro &mdash; daily digests, macro
+    alerts, and Pro chat limits &mdash; with no card on file. When it ends, your
+    digests pause until you choose: upgrade to Pro, or continue on Free. Nothing
+    is ever charged automatically.</p></details>
     <details data-reveal-item><summary>What happens on the Free plan?</summary>
     <p>You keep one connected account, a weekly digest on up to three holdings, and
-    five chat questions a day. Free, indefinitely.</p></details>
+    three chat questions a week. Free, indefinitely.</p></details>
     <details data-reveal-item><summary>Do you offer refunds?</summary>
     <p>Reach out and we'll make it right. Email us at
     <a href="mailto:{CONTACT_EMAIL}">{CONTACT_EMAIL}</a>.</p></details>
@@ -1309,8 +1315,9 @@ LANDING_HTML = _layout(
 
 PRICING_HTML = _layout(
     "Pricing — Cirvia",
-    "Cirvia pricing: start free with a weekly digest and daily chat, or go Pro at $12/mo "
-    "($120/yr) for unlimited accounts, daily digests, macro alerts, and unlimited chat.",
+    "Cirvia pricing: start free with a weekly digest and chat questions, or go Pro at "
+    "$15/mo USD ($120/yr) for unlimited accounts, daily digests, macro alerts, and 10 "
+    "chat questions a day.",
     _PRICING_BODY,
     active="pricing",
     path="/pricing",

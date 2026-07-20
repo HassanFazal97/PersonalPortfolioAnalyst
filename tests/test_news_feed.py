@@ -1,5 +1,5 @@
 import uuid
-from datetime import date
+from datetime import date, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -94,6 +94,44 @@ async def test_news_filters_by_ticker(monkeypatch):
     assert not any(
         i["kind"] == "alert" and i.get("tickers") == ["XOM"] for i in items
     )
+
+
+@pytest.mark.asyncio
+async def test_news_feed_orders_by_publish_time_with_created_fallback(monkeypatch):
+    # A Monday batch insert must not collapse onto one day: holding items sort
+    # by published_at; digests (published_at=None) fall back to created_at.
+    repo = FakeRepo()
+    repo.seed_user(_OWNER, plan="pro")
+    run_id = uuid.uuid4()
+    await repo.upsert_digest(
+        run_id=run_id, body="Digest body", digest_date=date.today(), user_id=_OWNER
+    )
+    digest_created = repo._digests_by_user[(_OWNER, date.today())].created_at
+    await repo.insert_news_items_if_new(
+        _OWNER,
+        [
+            {"ticker": "NVDA", "headline": "old weekend story", "summary": "x",
+             "published_at": (digest_created - timedelta(days=2)).isoformat()},
+            {"ticker": "NVDA", "headline": "newer than digest", "summary": "x",
+             "published_at": (digest_created + timedelta(hours=1)).isoformat()},
+            {"ticker": "NVDA", "headline": "no publish date", "summary": "x"},
+        ],
+        run_id=run_id,
+    )
+
+    client = _client(monkeypatch, repo)
+    items = client.get("/news", headers=_AUTH).json()["items"]
+    headlines = [i["headline"] for i in items]
+    digest_headline = "Morning digest — " + date.today().isoformat()
+    assert headlines.index("newer than digest") < headlines.index(digest_headline)
+    # The null-published item was inserted after the digest, so its
+    # created_at fallback places it at/above the digest, and the two-day-old
+    # weekend story sorts below everything despite being inserted last.
+    assert headlines[-1] == "old weekend story"
+    ordered = [
+        datetime.fromisoformat(i["published_at"] or i["created_at"]) for i in items
+    ]
+    assert ordered == sorted(ordered, reverse=True)
 
 
 def test_digest_mentions_ticker_word_boundaries():

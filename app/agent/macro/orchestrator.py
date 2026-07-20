@@ -33,6 +33,7 @@ from app.auth.context import set_current_user_id
 from app.config import DEFAULT_USER_ID, get_settings, monthly_cost_cap
 from app.db.repo import Repo
 from app.observability.logging import Observer
+from app.plans import effective_plan
 from app.tools import portfolio
 from app.tools.registry import ToolContext
 
@@ -266,7 +267,9 @@ async def run_macro_scans_for_all(db: Repo, *, client: Any = None) -> list[dict[
         try:
             if uid != _OWNER_USER_ID:
                 user = await db.get_user(uid)
-                plan = getattr(user, "plan", "free") if user is not None else "free"
+                # Trial users are pro here (recipients query already excludes
+                # lapsed-trial users pending a decision).
+                plan = effective_plan(user)
                 if await db.monthly_cost_usd(uid) >= monthly_cost_cap(plan, settings):
                     results.append({"user_id": str(uid), "status": "skipped_cost_cap"})
                     continue

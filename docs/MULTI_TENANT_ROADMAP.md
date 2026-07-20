@@ -155,7 +155,7 @@ Calendar-gated; nothing here blocks coding but everything here blocks *launch*.
 - [ ] File **A2P 10DLC** brand + campaign registration (days–weeks to approve)
 - [ ] Draft privacy policy + "not financial advice" disclaimer
 - [ ] Draft TCPA opt-in consent language + STOP/HELP copy
-- [ ] Create Stripe account, start business verification
+- [x] Create Stripe account, start business verification (live-mode ready)
 
 ### Phase 1 — Multi-tenant data model (~2–4 days)
 - [ ] `users` table (id, email, timezone, digest_send_time, digest_enabled)
@@ -211,10 +211,12 @@ per-channel adapters and retry backoff. Migrations `007_notifications.sql` +
   compliantly.
 
 ### Phase 6 — Billing & cost control (~3–5 days)
-- [ ] Stripe subscriptions + webhooks (active/canceled → `digest_enabled`)
-- [ ] Per-user monthly cost cap enforced against `agent_runs.cost_usd`
-- [ ] Per-user chat rate limiting
-- [ ] Graceful "cap reached" behavior (pause, notify) instead of surprise bills
+- [x] Stripe subscriptions + webhooks (built July 2026: Checkout + Customer
+      Portal + `/webhooks/stripe` flipping `users.plan`; `app/billing.py`,
+      migration `015_billing.sql`, docs in PRICING_AND_ONBOARDING.md §4)
+- [x] Per-user monthly cost cap enforced against `agent_runs.cost_usd`
+- [ ] Per-user chat rate limiting (beyond the Free daily cap)
+- [x] Graceful "cap reached" behavior (402 with upgrade message; digests skip)
 - **Deployable end state:** paying customers; your Anthropic bill is bounded.
 
 ### Phase 7 — Polish for public launch (open-ended)

@@ -13,7 +13,7 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import delete, event, func, select, text
+from sqlalchemy import delete, event, func, or_, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import (
@@ -37,6 +37,7 @@ from app.db.models import (
     OutboundMessage,
     Position,
     SnaptradeCredentials,
+    StripeEvent,
     TickerFundamentals,
     ToolCall,
     Transaction,
@@ -154,19 +155,35 @@ class Repo:
             await s.commit()
 
     async def get_or_create_user(
-        self, *, auth_id: uuid.UUID, email: str | None = None
+        self, *, auth_id: uuid.UUID, email: str | None = None, trial_days: int = 0
     ) -> uuid.UUID:
         """Resolve the app user for a Supabase auth uid, provisioning on first
-        sight. Returns the app ``users.id`` (distinct from the auth uid)."""
+        sight (with a no-card Pro trial when ``trial_days`` > 0). Returns the
+        app ``users.id`` (distinct from the auth uid)."""
         async with self._session() as s:
             existing = await s.execute(select(User.id).where(User.auth_id == auth_id))
             row = existing.scalar_one_or_none()
             if row is not None:
                 return row
-            user = User(auth_id=auth_id, email=email)
+            trial_ends_at = (
+                datetime.now(timezone.utc) + timedelta(days=trial_days)
+                if trial_days > 0
+                else None
+            )
+            user = User(auth_id=auth_id, email=email, trial_ends_at=trial_ends_at)
             s.add(user)
             await s.commit()
             return user.id
+
+    async def resolve_trial(self, user_id: uuid.UUID) -> None:
+        """The user chose to continue on Free (or the trial state is otherwise
+        settled): clear the trial marker so digests resume on the Free cadence."""
+        async with self._session() as s:
+            user = await s.get(User, user_id)
+            if user is None:
+                return
+            user.trial_ends_at = None
+            await s.commit()
 
     async def list_active_user_ids(self) -> list[uuid.UUID]:
         """Users who should receive scheduled digests.
@@ -202,11 +219,16 @@ class Repo:
             return sorted(out) if out else [_OWNER_USER_ID]
 
     async def list_macro_recipients(self) -> list[uuid.UUID]:
-        """Pro users (macro alerts are a Pro feature) with digests enabled."""
+        """Users on the Pro experience (paid, or an active no-card trial) with
+        digests enabled — macro alerts are a Pro feature."""
         async with self._session() as s:
             result = await s.execute(
                 select(User.id).where(
-                    User.plan == "pro", User.digest_enabled.is_(True)
+                    or_(
+                        User.plan == "pro",
+                        User.trial_ends_at > datetime.now(timezone.utc),
+                    ),
+                    User.digest_enabled.is_(True),
                 )
             )
             return sorted(result.scalars().all())
@@ -228,19 +250,95 @@ class Repo:
             )
             return float(result.scalar_one() or 0)
 
-    async def count_chats_today(self, user_id: uuid.UUID) -> int:
-        """This user's chat runs since UTC midnight (Free daily-limit check)."""
-        now = datetime.now(timezone.utc)
-        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    async def chat_usage_since(
+        self, user_id: uuid.UUID, since: datetime
+    ) -> tuple[int, datetime | None]:
+        """(count, oldest created_at) of this user's chat runs since ``since``.
+
+        Quota contract: rows with trigger='chat' count unless status='error'
+        (infrastructure failures don't burn questions; delivered answers —
+        completed/budget_exceeded/max_iterations — and in-flight runs do).
+        The oldest timestamp is when the next question unlocks (+ window)."""
         async with self._session() as s:
             result = await s.execute(
-                select(func.count()).where(
+                select(func.count(), func.min(AgentRun.created_at)).where(
                     AgentRun.user_id == user_id,
                     AgentRun.trigger == "chat",
-                    AgentRun.created_at >= start,
+                    AgentRun.status != "error",
+                    AgentRun.created_at >= since,
                 )
             )
-            return int(result.scalar_one() or 0)
+            count, oldest = result.one()
+            return int(count or 0), oldest
+
+    # ---- billing (Stripe) --------------------------------------------------
+
+    async def get_user_by_stripe_customer_id(self, customer_id: str) -> User | None:
+        async with self._session() as s:
+            result = await s.execute(
+                select(User).where(User.stripe_customer_id == customer_id)
+            )
+            return result.scalar_one_or_none()
+
+    async def set_stripe_customer_id(
+        self, user_id: uuid.UUID, customer_id: str
+    ) -> str:
+        """Link a Stripe customer to a user, first-writer-wins.
+
+        Only fills a NULL slot and returns whichever id is stored afterwards,
+        so a retried checkout can't clobber an existing link."""
+        async with self._session() as s:
+            user = await s.get(User, user_id)
+            if user is None:
+                return customer_id
+            if user.stripe_customer_id is None:
+                user.stripe_customer_id = customer_id
+                await s.commit()
+            return user.stripe_customer_id
+
+    async def apply_subscription_state(
+        self,
+        user_id: uuid.UUID,
+        *,
+        plan: str,
+        subscription_id: str | None,
+        current_period_end: datetime | None,
+        cancel_at_period_end: bool,
+    ) -> None:
+        """Single writer the Stripe webhook syncs subscription state through.
+
+        Flipping to 'free' clears the subscription fields but keeps
+        ``stripe_customer_id`` so a re-subscribe reuses the same customer."""
+        async with self._session() as s:
+            user = await s.get(User, user_id)
+            if user is None:
+                return
+            if plan == "pro" and user.plan != "pro":
+                user.plan_since = datetime.now(timezone.utc)
+            user.plan = plan
+            if plan == "pro":
+                # Paying settles any trial state (active or decision-pending).
+                user.trial_ends_at = None
+                user.stripe_subscription_id = subscription_id
+                user.stripe_current_period_end = current_period_end
+                user.stripe_cancel_at_period_end = cancel_at_period_end
+            else:
+                user.stripe_subscription_id = None
+                user.stripe_current_period_end = None
+                user.stripe_cancel_at_period_end = False
+            await s.commit()
+
+    async def record_stripe_event(self, event_id: str, event_type: str) -> bool:
+        """Record a webhook event id; False means it was already processed
+        (duplicate delivery) and the caller should skip it."""
+        async with self._session() as s:
+            result = await s.execute(
+                pg_insert(StripeEvent)
+                .values(id=event_id, type=event_type)
+                .on_conflict_do_nothing(index_elements=["id"])
+            )
+            await s.commit()
+            return bool(result.rowcount)
 
     async def delete_user_data(self, user_id: uuid.UUID) -> None:
         """Delete everything this user owns, then the user row itself.
@@ -760,15 +858,17 @@ class Repo:
         limit: int = 50,
     ) -> list[NewsItem]:
         uid = user_id or _OWNER_USER_ID
+        # The feed lives on publish time; created_at (insertion time) only
+        # backfills rows without one, so a batch inserted Monday still reads
+        # as Friday/Saturday/Sunday news.
+        effective = func.coalesce(NewsItem.published_at, NewsItem.created_at)
         async with self._session() as s:
             q = select(NewsItem).where(NewsItem.user_id == uid)
             if ticker is not None:
                 q = q.where(NewsItem.ticker == ticker)
             if since is not None:
-                q = q.where(NewsItem.created_at >= since)
-            result = await s.execute(
-                q.order_by(NewsItem.created_at.desc()).limit(limit)
-            )
+                q = q.where(effective >= since)
+            result = await s.execute(q.order_by(effective.desc()).limit(limit))
             return list(result.scalars().all())
 
     async def list_stored_news(
@@ -870,7 +970,13 @@ class Repo:
                     }
                 )
 
-        out.sort(key=lambda x: x["created_at"], reverse=True)
+        # Feed order is publish time when known (holding articles), insertion
+        # time otherwise (digests, alerts). Parse rather than compare strings:
+        # mixed UTC offsets would break lexicographic ordering.
+        def _effective_ts(x: dict[str, Any]) -> datetime:
+            return datetime.fromisoformat(x["published_at"] or x["created_at"])
+
+        out.sort(key=_effective_ts, reverse=True)
         return out[:limit]
 
     async def mark_alert_delivered(self, alert_id: uuid.UUID) -> None:

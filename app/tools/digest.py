@@ -1,7 +1,8 @@
 """send_digest — the terminal tool of a digest run.
 
-Exposed only to digest runs (never chat). Enforces the 900-char limit by
-returning an error tool_result on violation (the model must shorten and retry).
+Exposed only to digest runs (never chat). Enforces the 1000-char limit and the
+labeled-section structure (PORTFOLIO / TOP RISK / WATCH TODAY) by returning an
+error tool_result on violation (the model must fix the body and retry).
 On success it writes the ``digests`` row for today and enqueues to
 ``outbound_messages``; the queue resolves the user's preferred channel (or
 records a skip when none is verified), so enqueueing is unconditional.
@@ -15,14 +16,16 @@ from zoneinfo import ZoneInfo
 
 from app.config import get_settings
 
-DIGEST_MAX_CHARS = 900
+DIGEST_MAX_CHARS = 1000
 
 SEND_DIGEST_SCHEMA = {
     "name": "send_digest",
     "description": (
         "Deliver the finished morning digest to the user. Call this exactly once "
-        "to finish. The body must be <= 900 characters of plain text (no "
-        "markdown). If it is too long you will be asked to shorten and try again."
+        "to finish. The body must be <= 1000 characters of plain text (no "
+        "markdown), starting with a 'PORTFOLIO:' line, containing a 'TOP RISK' "
+        "section, and ending with a 'WATCH TODAY:' line. If it is too long or "
+        "malformed you will be asked to fix it and try again."
     ),
     "input_schema": {
         "type": "object",
@@ -34,6 +37,22 @@ SEND_DIGEST_SCHEMA = {
 
 def _today(tz: str) -> Any:
     return datetime.now(ZoneInfo(tz)).date()
+
+
+def validate_digest_structure(body: str) -> str | None:
+    """Return an error message when the required section labels are missing.
+
+    Deliberately lenient — only the three labels that make the digest scannable
+    are required, so a slightly off-spec but readable digest still ships.
+    """
+    nonempty = [ln.strip() for ln in body.strip().splitlines() if ln.strip()]
+    if not nonempty or not nonempty[0].startswith("PORTFOLIO:"):
+        return 'digest must start with a "PORTFOLIO:" line'
+    if "TOP RISK" not in nonempty:
+        return 'digest must contain a "TOP RISK" section label on its own line'
+    if not nonempty[-1].startswith("WATCH TODAY:"):
+        return 'digest must end with a "WATCH TODAY:" line'
+    return None
 
 
 async def send_digest(payload: dict[str, Any], ctx: Any = None) -> dict[str, Any]:
@@ -48,6 +67,10 @@ async def send_digest(payload: dict[str, Any], ctx: Any = None) -> dict[str, Any
             f"digest is {len(body)} chars; must be <= {DIGEST_MAX_CHARS}. "
             "Shorten it and call send_digest again."
         )
+
+    structure_err = validate_digest_structure(body)
+    if structure_err is not None:
+        raise ValueError(f"{structure_err}. Fix the sections and call send_digest again.")
 
     if ctx is None or getattr(ctx, "repo", None) is None:
         raise RuntimeError("send_digest requires database access")

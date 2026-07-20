@@ -146,6 +146,11 @@ def job_health(
             "cron": settings.fundamentals_refresh_cron,
             "enabled": bool(settings.fundamentals_refresh_cron),
         },
+        "news_refresh": {
+            "kind": "cron",
+            "cron": settings.news_refresh_cron,
+            "enabled": bool(settings.news_refresh_cron),
+        },
     }
 
     out: dict[str, dict[str, Any]] = {}

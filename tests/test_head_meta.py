@@ -5,13 +5,13 @@ app pages carry favicon/theme-color only (they are noindex) plus the quiet
 footer; /static serves the committed brand PNGs.
 """
 
+import importlib
 import re
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app.config import get_settings
-from app.main import create_app
 
 
 @pytest.fixture
@@ -20,8 +20,18 @@ def client(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "")
     monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
     monkeypatch.setenv("SUPABASE_ANON_KEY", "sb_publishable_test123")
+    # The og:url/og:image origin is baked into the landing HTML constants at
+    # import time, so a developer .env with PUBLIC_BASE_URL=http://localhost
+    # would leak into these assertions. Pin the documented default and rebuild
+    # the constants (identical to a run with no .env at all).
+    monkeypatch.setenv("PUBLIC_BASE_URL", "https://cirvia.ca")
     get_settings.cache_clear()
-    with TestClient(create_app()) as c:
+    import app.landing
+    import app.main
+
+    importlib.reload(app.landing)
+    importlib.reload(app.main)
+    with TestClient(app.main.create_app()) as c:
         yield c
     get_settings.cache_clear()
 

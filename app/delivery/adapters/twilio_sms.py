@@ -5,7 +5,7 @@ this is one form-encoded POST. Twilio error codes distinguish permanent
 failures (21211 invalid number, 21610 recipient texted STOP, 21614 not a
 mobile) from transient ones; 429/5xx retry.
 
-Cost note: a 900-char digest is ~6 SMS segments (~$0.05 via a CA long code).
+Cost note: a 1000-char digest is ~7 SMS segments (~$0.06 via a CA long code).
 A future lever is sending a short summary + dashboard link instead.
 """
 

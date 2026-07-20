@@ -1,8 +1,9 @@
 # Plan: Pricing + In-App Onboarding
 
-Decisions (2026-07-05): **freemium** (Free + Pro), Pro at **CAD $9/mo (≈ $90/yr)**,
-onboarding UI **server-rendered inside this FastAPI app**, **pricing page now /
-Stripe later**.
+Decisions (2026-07-05, updated 2026-07-20): **freemium** (Free + Pro), Pro at
+**USD $15/mo ($120/yr — 4 months free)**, onboarding UI **server-rendered
+inside this FastAPI app**. Stripe billing shipped — see §4. Every new signup
+gets a **7-day no-card Pro trial** (§1a).
 
 ---
 
@@ -36,7 +37,7 @@ the number lives in config and is easy to change.
 
 Two tiers. The split is tunable — this is a sensible starting point.
 
-| | Free | Pro — $9/mo ($90/yr) |
+| | Free | Pro — $15/mo USD ($120/yr) |
 |---|---|---|
 | Connected accounts | 1 | Unlimited |
 | Morning digest | Weekly (Mon) | Daily (weekdays) |
@@ -44,9 +45,29 @@ Two tiers. The split is tunable — this is a sensible starting point.
 | On-demand chat | 5 questions/day | Unlimited |
 | Holdings sync | ✓ | ✓ |
 
-The owner account is effectively Pro/unlimited. Billing is deferred, so "upgrade"
-initially routes to a waitlist/CTA; the plan flag and gating are built now so
-turning on Stripe later only flips the flag.
+The owner account is effectively Pro/unlimited (by decree, not subscription —
+the webhook never downgrades it). Stripe billing is live; upgrades run through
+hosted Checkout from `/app/settings`.
+
+### 1a. No-card Pro trial (shipped 2026-07-20)
+
+Every new signup gets `TRIAL_DAYS` (default 7) of the full Pro experience with
+no card on file (`users.trial_ends_at`, migration `017_trial.sql`; helpers in
+`app/plans.py`). While active, `effective_plan()` resolves to `pro` everywhere:
+daily digests, macro alerts, Pro chat quota, uncapped digest holdings.
+
+When the trial lapses **digests pause entirely** (neither cadence; the digest
+pipeline returns `skipped_trial_decision`, macro/anomaly recipients exclude the
+user) until the user logs in and decides:
+- **Upgrade** → Stripe Checkout; the webhook sets `plan='pro'` and clears
+  `trial_ends_at`.
+- **Continue on Free** → `POST /billing/choose-free` clears `trial_ends_at`;
+  the weekly Free digest resumes.
+
+The decision surfaces as a non-dismissible dashboard banner and the settings
+plan card (`/me` exposes `effective_plan` + a `trial` block). Nothing is ever
+charged automatically — there is no card to charge. Existing users
+(`trial_ends_at IS NULL`) are unaffected.
 
 ### Schema + gating
 - **Migration `006_plans.sql`**: `users.plan text not null default 'free'`
@@ -69,8 +90,8 @@ turning on Stripe later only flips the flag.
 Server-rendered, same layout as the rest of the site: two-column Free vs Pro
 comparison, annual toggle copy, FAQ on billing, CTAs:
 - Free → "Start free" → `/app` (onboarding).
-- Pro → "Go Pro" → until Stripe lands, a waitlist/`mailto` CTA (or a "start free,
-  upgrade in-app" flow).
+- Pro → "Go Pro" → `/app/settings?billing=upgrade` (signed-out visitors pass
+  through sign-in first, then land on the highlighted plan card).
 Add `/pricing` to the nav and footer; add it to `_AUTH_EXEMPT_PATHS`.
 
 ---
@@ -116,12 +137,33 @@ status).
 
 ---
 
-## 4. Billing (later — Phase 6)
+## 4. Billing (shipped — 2026-07-20)
 
-Deferred by choice. When ready: Stripe Checkout + customer portal, a webhook that
-flips `users.plan` on `checkout.session.completed` / subscription updates, and a
-per-user cost cap against `agent_runs.cost_usd`. The plan flag + gating built in
-step 1 mean this is mostly wiring, not rework.
+Stripe Checkout (hosted) + Customer Portal + a signature-verified webhook. All
+Stripe logic lives in `app/billing.py`; the webhook flips `users.plan`.
+
+- **Endpoints**: `POST /billing/checkout` (authed → Checkout URL),
+  `POST /billing/portal` (authed → Portal URL), `POST /webhooks/stripe`
+  (bearer-exempt; `Stripe-Signature` is the auth).
+- **Events registered** (exactly these four): `checkout.session.completed`,
+  `customer.subscription.created` / `.updated` / `.deleted`. Every event
+  re-fetches the subscription from the API and syncs to *current* state —
+  ordering and redelivery are harmless. Idempotency via the `stripe_events`
+  ledger (migration `015_billing.sql`).
+- **Status → plan**: `active` / `trialing` / `past_due` → `pro` (past_due =
+  dunning grace while Smart Retries run; dashboard auto-cancels after the final
+  retry); everything else → `free`. Downgrade clears subscription fields but
+  keeps `stripe_customer_id` for easy re-subscribe. Guards: the owner is never
+  downgraded; a stale (superseded) subscription's terminal event is ignored.
+- **Config**: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`,
+  `STRIPE_PRICE_PRO_MONTHLY`, `STRIPE_PRICE_PRO_ANNUAL` (optional),
+  `STRIPE_AUTOMATIC_TAX` (off until GST/HST registration — revisit near the
+  CRA $30k small-supplier threshold). Billing is enabled only when secret key +
+  monthly price + `PUBLIC_BASE_URL` are all set; otherwise the UI keeps its
+  "coming soon" copy.
+- **Account deletion** (`DELETE /me`) cancels any active subscription first and
+  aborts (502) if the cancel fails — no zombie subscriptions. Refunds stay
+  manual (dashboard), per the pricing FAQ.
 
 ---
 
@@ -132,7 +174,7 @@ step 1 mean this is mostly wiring, not rework.
    cadence + alerts gating, `GET/PATCH /me`, `GET /portfolio`.
 3. **Onboarding + dashboard pages** — Supabase JS auth, connect flow,
    preferences, dashboard. (`SUPABASE_ANON_KEY` config.)
-4. **Stripe** — checkout + webhooks flip the plan (separate phase).
+4. **Stripe** — checkout + webhooks flip the plan. ✅ shipped (see §4).
 
 ## Verification
 - `/pricing` reachable without a token; nav/footer link it; content correct.

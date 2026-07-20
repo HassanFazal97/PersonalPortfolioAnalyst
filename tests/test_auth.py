@@ -180,6 +180,7 @@ def _settings(**over):
         "supabase_url": "",
         "supabase_jwt_secret": "",
         "supabase_jwt_aud": "authenticated",
+        "trial_days": 7,
     }
     base.update(over)
     return SimpleNamespace(**base)

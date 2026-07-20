@@ -25,7 +25,7 @@ from app.auth.context import set_current_user_id
 from app.config import get_settings
 from app.db.repo import Repo
 from app.observability.logging import Observer
-from app.tools.registry import DISPATCH, ToolContext
+from app.tools.registry import DISPATCH, TOOL_TIMEOUTS, ToolContext
 
 _CHARS_PER_TOKEN = 4  # rough; used to convert the token cap to a char cap
 
@@ -65,7 +65,16 @@ def _block_to_dict(block: Any) -> dict[str, Any]:
             "name": _attr(block, "name"),
             "input": _attr(block, "input", {}) or {},
         }
-    # Unknown block types are preserved best-effort for replay.
+    # Server-side tool blocks (server_tool_use, web_search_tool_result, …)
+    # must replay VERBATIM on the next iteration — a lossy dict breaks the
+    # API's block validation. SDK objects expose model_dump(); scripted test
+    # doubles are already dicts.
+    if isinstance(block, dict):
+        return dict(block)
+    dump = getattr(block, "model_dump", None)
+    if callable(dump):
+        return dump(mode="json")
+    # Truly unknown object: best-effort stringification (last resort).
     return {"type": btype, "raw": str(block)}
 
 
@@ -179,8 +188,12 @@ async def safe_dispatch(
 # --------------------------------------------------------------------------
 
 
-def build_initial_messages(user_message: str) -> list[dict[str, Any]]:
-    return [{"role": "user", "content": user_message}]
+def build_initial_messages(
+    user_message: str, history: list[dict[str, Any]] | None = None
+) -> list[dict[str, Any]]:
+    """The new user message, optionally preceded by prior conversation turns
+    (plain ``{"role", "content"}`` text pairs — no tool traces)."""
+    return [*(history or []), {"role": "user", "content": user_message}]
 
 
 async def call_and_log(
@@ -248,6 +261,7 @@ async def run_agent(
     client: Any = None,
     ctx: ToolContext | None = None,
     user_id: Any | None = None,
+    history: list[dict[str, Any]] | None = None,
 ) -> AgentResult:
     settings = get_settings()
     client = _get_client(client)
@@ -275,7 +289,7 @@ async def run_agent(
     ctx.run_id = run_id
     observer = Observer(db, run_id)
 
-    messages = build_initial_messages(user_message)
+    messages = build_initial_messages(user_message, history)
     tool_summaries: list[dict[str, Any]] = []
     answer = ""
     status = "running"
@@ -306,6 +320,12 @@ async def run_agent(
 
             messages.append({"role": "assistant", "content": content_dicts})
             stop_reason = _attr(response, "stop_reason")
+
+            if stop_reason == "pause_turn":
+                # A server-side tool (web_search) paused mid-turn; re-send the
+                # conversation so the server continues where it left off. The
+                # iteration/budget caps still bound runaway continuations.
+                continue
 
             if stop_reason != "tool_use":
                 answer = _extract_text(content_dicts)
@@ -383,10 +403,20 @@ async def run_agent(
 
 
 async def _call_model(client, model, system_prompt, messages, tools):
+    # Cache the static prefix (tool schemas + system prompt): the loop resends
+    # the whole request every iteration, so cache reads (0.1x input price)
+    # cover everything up to the breakpoint on later iterations.
+    system = [
+        {
+            "type": "text",
+            "text": system_prompt,
+            "cache_control": {"type": "ephemeral"},
+        }
+    ]
     return await client.messages.create(
         model=model,
         max_tokens=1024,
-        system=system_prompt,
+        system=system,
         messages=messages,
         tools=tools,
     )
@@ -426,7 +456,7 @@ async def _run_tools(
             payload,
             ctx=ctx,
             schemas_by_name=schemas_by_name,
-            timeout=settings.tool_timeout_seconds,
+            timeout=TOOL_TIMEOUTS.get(name, settings.tool_timeout_seconds),
             max_output_tokens=settings.max_tool_output_tokens,
         )
         latency_ms = int((time.monotonic() - t0) * 1000)

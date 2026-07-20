@@ -29,6 +29,13 @@ Host is **Railway** (single container). The image runs migrations, then serves.
 | `MODEL` / `CLASSIFIER_MODEL` / `MACRO_MODEL` | no | model overrides |
 | `TZ` / `DIGEST_CRON` | no | schedule (default `America/Toronto`, `45 7 * * 1-5`) |
 | `SNAPTRADE_*` | no | Wealthsimple sync |
+| `PUBLIC_BASE_URL` | billing, Twilio | public origin, e.g. `https://cirvia.ca` — builds Stripe redirect URLs |
+| `STRIPE_SECRET_KEY` | billing | `sk_live_…` (or `sk_test_…` locally) |
+| `STRIPE_WEBHOOK_SECRET` | billing | `whsec_…` for `POST /webhooks/stripe` |
+| `STRIPE_PRICE_PRO_MONTHLY` | billing | `price_…` — Pro $15/mo USD |
+| `STRIPE_PRICE_PRO_ANNUAL` | no | `price_…` — Pro $120/yr USD; empty hides yearly |
+| `STRIPE_AUTOMATIC_TAX` | no | `false` until GST/HST-registered (Stripe Tax) |
+| `TRIAL_DAYS` | no | no-card Pro trial length for new signups (default 7; 0 disables) |
 
 Auth mode is implicit: if neither `SUPABASE_URL` nor `SUPABASE_JWT_SECRET` is
 set, only `API_TOKEN` works (single-user). Set `SUPABASE_URL` to accept per-user
@@ -129,6 +136,55 @@ policies filter on it. Under the owner role this is a no-op; under
 
 ---
 
+## Activate billing (Stripe)
+
+Billing stays off (UI shows "coming soon") until `STRIPE_SECRET_KEY`,
+`STRIPE_PRICE_PRO_MONTHLY`, and `PUBLIC_BASE_URL` are all set.
+
+**Dashboard prep (one-time):**
+1. Branding + statement descriptor ("CIRVIA") + support email under
+   Settings → Business.
+2. Customer Portal (Settings → Billing → Customer portal): enable
+   cancel-at-period-end, payment-method updates, invoice history, and
+   monthly↔annual plan switching between the two Pro prices.
+3. Billing → Subscriptions and emails: enable Smart Retries and set
+   "cancel subscription" after the final failed retry — this bounds the
+   `past_due` grace window and emits the `customer.subscription.deleted`
+   event that downgrades the user.
+
+**Test mode first (local):**
+1. Create product "Cirvia Pro" with recurring prices **$15/mo USD** and
+   **$120/yr USD** in test mode; copy the `price_…` ids into `.env` with a
+   `sk_test_…` key.
+2. `stripe listen --forward-to localhost:8000/webhooks/stripe` and put the
+   printed `whsec_…` in `STRIPE_WEBHOOK_SECRET`.
+3. Boot (migration `015_billing` auto-applies). Sign up a test user →
+   `/app/settings` → Upgrade → card `4242 4242 4242 4242` → success redirect
+   polls `/me` until the plan chip flips to Pro.
+4. Portal: Manage billing → cancel → settings shows "Pro until …";
+   `stripe subscriptions cancel <sub_id>` → plan flips back to free.
+5. `stripe events resend <evt_id>` → the duplicate short-circuits
+   (`{"received": true, "duplicate": true}`). Run `pytest`.
+
+**Go live:**
+1. Create the live product/prices; copy the live `price_…` ids.
+2. Developers → Webhooks → Add endpoint `https://cirvia.ca/webhooks/stripe`
+   with exactly these events: `checkout.session.completed`,
+   `customer.subscription.created`, `customer.subscription.updated`,
+   `customer.subscription.deleted`. Copy its `whsec_…`.
+3. Set the Railway vars (`STRIPE_SECRET_KEY` = `sk_live_…`,
+   `STRIPE_WEBHOOK_SECRET`, both price ids; confirm
+   `PUBLIC_BASE_URL=https://cirvia.ca`). One deploy ships code and flips the
+   UI copy — the pages key off `billing.enabled` from `/me`.
+4. Smoke test with a real card on a throwaway account: pay → plan flips →
+   cancel via portal → refund from the dashboard. Webhooks dashboard should
+   show all 200s.
+5. Watch Stripe's webhook-failure emails post-launch. Revisit Stripe Tax
+   (`STRIPE_AUTOMATIC_TAX=true` + GST/HST registration) as revenue approaches
+   the CRA $30k small-supplier threshold.
+
+---
+
 ## Rotate secrets
 
 Treat as compromised anything pasted into a terminal transcript or chat:
@@ -136,6 +192,9 @@ Treat as compromised anything pasted into a terminal transcript or chat:
   / `MIGRATION_DATABASE_URL`.
 - **`API_TOKEN`** — regenerate, update the Railway var and any caller (Shortcut,
   cron, Mac worker).
+- **`STRIPE_SECRET_KEY`** — Stripe Dashboard → Developers → API keys → roll key;
+  update the Railway var. Rolling the webhook endpoint regenerates its
+  `whsec_…` — update `STRIPE_WEBHOOK_SECRET` in the same deploy.
 
 The Supabase **publishable** key and `SUPABASE_URL` are public — safe to share.
 Never expose the Supabase **secret** key or the JWT signing key.

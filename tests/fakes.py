@@ -29,7 +29,10 @@ class FakeRepo:
         self._users_by_auth: dict[uuid.UUID, uuid.UUID] = {}
         self._users_by_id: dict[uuid.UUID, Any] = {}
         self._cost_override: dict[uuid.UUID, float] = {}
-        self._chats_override: dict[uuid.UUID, int] = {}
+        # (count, oldest created_at) forced per user, bypassing run counting.
+        self._chat_usage_override: dict[
+            uuid.UUID, tuple[int, datetime | None]
+        ] = {}
         self._notification_channels: dict[tuple[Any, str], SimpleNamespace] = {}
         self._verification_codes: dict[uuid.UUID, SimpleNamespace] = {}
         self._news_items: list[SimpleNamespace] = []
@@ -38,12 +41,18 @@ class FakeRepo:
         self.ticker_fundamentals: dict[str, SimpleNamespace] = {}
 
     def seed_user(self, user_id, *, plan="free", digest_enabled=True, email=None,
-                  digest_tickers=None):
+                  digest_tickers=None, stripe_customer_id=None,
+                  stripe_subscription_id=None, trial_ends_at=None):
         self._users_by_id[user_id] = SimpleNamespace(
             id=user_id, auth_id=None, email=email, plan=plan,
             digest_enabled=digest_enabled, timezone="America/Toronto",
             digest_send_time="07:45", preferred_channel=None,
             digest_tickers=list(digest_tickers or []),
+            stripe_customer_id=stripe_customer_id,
+            stripe_subscription_id=stripe_subscription_id,
+            plan_since=None, stripe_current_period_end=None,
+            stripe_cancel_at_period_end=False,
+            trial_ends_at=trial_ends_at,
         )
 
     async def create_run(self, *, trigger, user_message, model, prompt_version,
@@ -77,16 +86,30 @@ class FakeRepo:
         )
         return rows[:limit]
 
-    async def get_or_create_user(self, *, auth_id, email=None):
+    async def get_or_create_user(self, *, auth_id, email=None, trial_days=0):
         if auth_id not in self._users_by_auth:
             uid = uuid.uuid4()
             self._users_by_auth[auth_id] = uid
+            trial_ends_at = (
+                datetime.now(timezone.utc) + timedelta(days=trial_days)
+                if trial_days > 0
+                else None
+            )
             self._users_by_id[uid] = SimpleNamespace(
                 id=uid, auth_id=auth_id, email=email, plan="free", digest_enabled=True,
                 timezone="America/Toronto", digest_send_time="07:45",
                 preferred_channel=None, digest_tickers=[],
+                stripe_customer_id=None, stripe_subscription_id=None,
+                plan_since=None, stripe_current_period_end=None,
+                stripe_cancel_at_period_end=False,
+                trial_ends_at=trial_ends_at,
             )
         return self._users_by_auth[auth_id]
+
+    async def resolve_trial(self, user_id):
+        user = self._users_by_id.get(user_id)
+        if user is not None:
+            user.trial_ends_at = None
 
     async def get_user(self, user_id):
         return self._users_by_id.get(user_id)
@@ -132,9 +155,14 @@ class FakeRepo:
         return sorted(ids) if ids else []
 
     async def list_macro_recipients(self):
+        now = datetime.now(timezone.utc)
         return sorted(
             u.id for u in self._users_by_id.values()
-            if getattr(u, "plan", "free") == "pro" and getattr(u, "digest_enabled", True)
+            if (
+                getattr(u, "plan", "free") == "pro"
+                or (getattr(u, "trial_ends_at", None) or now) > now
+            )
+            and getattr(u, "digest_enabled", True)
         )
 
     async def list_anomaly_recipients(self):
@@ -149,13 +177,63 @@ class FakeRepo:
             if r.get("user_id") == user_id and r.get("cost_usd") is not None
         )
 
-    async def count_chats_today(self, user_id):
-        if user_id in self._chats_override:
-            return self._chats_override[user_id]
-        return sum(
-            1 for r in self.runs.values()
-            if r.get("user_id") == user_id and r.get("trigger") == "chat"
+    # ---- billing (mirrors app/db/repo.py) --------------------------------
+
+    async def get_user_by_stripe_customer_id(self, customer_id):
+        for user in self._users_by_id.values():
+            if getattr(user, "stripe_customer_id", None) == customer_id:
+                return user
+        return None
+
+    async def set_stripe_customer_id(self, user_id, customer_id):
+        user = self._users_by_id.get(user_id)
+        if user is None:
+            return customer_id
+        if getattr(user, "stripe_customer_id", None) is None:
+            user.stripe_customer_id = customer_id
+        return user.stripe_customer_id
+
+    async def apply_subscription_state(self, user_id, *, plan, subscription_id,
+                                       current_period_end, cancel_at_period_end):
+        user = self._users_by_id.get(user_id)
+        if user is None:
+            return
+        if plan == "pro" and user.plan != "pro":
+            user.plan_since = datetime.now(timezone.utc)
+        user.plan = plan
+        if plan == "pro":
+            user.trial_ends_at = None
+            user.stripe_subscription_id = subscription_id
+            user.stripe_current_period_end = current_period_end
+            user.stripe_cancel_at_period_end = cancel_at_period_end
+        else:
+            user.stripe_subscription_id = None
+            user.stripe_current_period_end = None
+            user.stripe_cancel_at_period_end = False
+
+    async def record_stripe_event(self, event_id, event_type):
+        if not hasattr(self, "_stripe_events"):
+            self._stripe_events: dict[str, str] = {}
+        if event_id in self._stripe_events:
+            return False
+        self._stripe_events[event_id] = event_type
+        return True
+
+    async def chat_usage_since(self, user_id, since):
+        """(count, oldest created_at) of non-error chat runs since ``since`` —
+        mirrors Repo.chat_usage_since's quota contract."""
+        if user_id in self._chat_usage_override:
+            return self._chat_usage_override[user_id]
+        stamps = sorted(
+            r["created_at"]
+            for r in self.runs.values()
+            if r.get("user_id") == user_id
+            and r.get("trigger") == "chat"
+            and r.get("status") != "error"
+            and r.get("created_at") is not None
+            and r["created_at"] >= since
         )
+        return len(stamps), (stamps[0] if stamps else None)
 
     async def finalize_run(self, run_id, **kwargs):
         self.runs[run_id].update(kwargs)
@@ -298,6 +376,9 @@ class FakeRepo:
             if (uid, fp) in self._news_fingerprints:
                 continue
             self._news_fingerprints.add((uid, fp))
+            pub = item.get("published_at")
+            if isinstance(pub, str):
+                pub = datetime.fromisoformat(pub.replace("Z", "+00:00"))
             self._news_items.append(SimpleNamespace(
                 id=uuid.uuid4(),
                 user_id=uid,
@@ -305,7 +386,7 @@ class FakeRepo:
                 headline=item["headline"],
                 source=item.get("source"),
                 url=item.get("url"),
-                published_at=item.get("published_at"),
+                published_at=pub,
                 summary=item.get("summary"),
                 run_id=run_id,
                 fingerprint=fp,
@@ -322,8 +403,8 @@ class FakeRepo:
         if ticker is not None:
             rows = [n for n in rows if n.ticker == ticker]
         if since is not None:
-            rows = [n for n in rows if n.created_at >= since]
-        rows.sort(key=lambda n: n.created_at, reverse=True)
+            rows = [n for n in rows if (n.published_at or n.created_at) >= since]
+        rows.sort(key=lambda n: n.published_at or n.created_at, reverse=True)
         return rows[:limit]
 
     async def list_stored_news(
@@ -405,7 +486,10 @@ class FakeRepo:
                     "created_at": n.created_at.isoformat(),
                 })
 
-        out.sort(key=lambda x: x["created_at"], reverse=True)
+        out.sort(
+            key=lambda x: datetime.fromisoformat(x["published_at"] or x["created_at"]),
+            reverse=True,
+        )
         return out[:limit]
 
     async def get_digest(self, digest_date, *, user_id=None):

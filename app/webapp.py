@@ -244,6 +244,9 @@ tr:last-child td { border-bottom: none; }
 .filters-row select { width: auto; min-width: 7rem; padding: 0.45rem 0.6rem;
   font-size: 0.85rem; }
 .news-feed { max-height: 420px; overflow-y: auto; margin-top: 0.75rem; }
+.news-day { color: var(--ink-3); font-size: 0.72rem; font-weight: 650;
+  text-transform: uppercase; letter-spacing: 0.06em; margin: 0.9rem 0 0.1rem; }
+.news-day:first-child { margin-top: 0; }
 .news-item { padding: 0.85rem 0; border-bottom: 1px solid var(--line); }
 .news-item:last-child { border-bottom: none; }
 .news-item .head { font-weight: 650; font-size: 0.95rem; color: var(--ink); line-height: 1.4; }
@@ -1331,6 +1334,13 @@ _DASHBOARD_BODY = """
 </div>
 <div class="dash-layout">
 <div class="dash-main">
+  <div class="warn-banner" id="trial-banner" style="display:none;">
+    <span><strong>Your Pro trial has ended and your digests are paused.</strong>
+    Choose to keep Pro or continue on Free to start receiving them again.</span>
+    <span class="actions">
+      <a class="btn" href="/app/settings?billing=upgrade">Choose a plan</a>
+    </span>
+  </div>
   <div class="warn-banner setup" id="delivery-banner" style="display:none;">
     <span><strong>Get your digest delivered.</strong> Add text, email, or Discord
     and your morning brief reaches you before the market opens.</span>
@@ -1411,6 +1421,7 @@ _DASHBOARD_BODY = """
       <input id="chat-input" placeholder="Any news on my holdings today?" maxlength="500">
       <button class="btn" id="chat-btn">Send</button>
     </div>
+    <p class="muted-note" id="chat-quota" style="display:none;"></p>
     <p class="muted-note">Informational only. Cirvia never gives buy or sell advice.</p>
   </div>
 
@@ -1473,28 +1484,59 @@ function newsQuery(extra) {
   return params.toString();
 }
 
+// Digest bodies are labeled plain-text sections; bold the labels so they read
+// as headings. Applied to already-escaped text, so no injection surface.
+function formatNewsBody(body) {
+  return esc(body).replace(
+    /^(PORTFOLIO:|TOP RISK|NOTABLE|WATCH TODAY:)/gm, '<strong>$1</strong>');
+}
+
+// Day buckets use the item's publish time when known (holding articles) and
+// insertion time otherwise (digests, alerts), in the browser's timezone —
+// which can differ from the server TZ that fetched the item by up to a day.
+function newsDayKey(item) {
+  const ts = item.published_at || item.created_at;
+  return ts ? new Date(ts).toDateString() : '';
+}
+function newsDayLabel(item) {
+  const ts = item.published_at || item.created_at;
+  if (!ts) return 'Earlier';
+  const d = new Date(ts), now = new Date();
+  const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
+  if (d.toDateString() === now.toDateString()) return 'Today';
+  if (d.toDateString() === yesterday.toDateString()) return 'Yesterday';
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
 function renderNewsItems(el, items, emptyMsg) {
   if (!items || items.length === 0) {
     el.innerHTML = '<p class="muted-note">' + esc(emptyMsg) + '</p>';
     return;
   }
-  el.innerHTML = items.map((item) => {
+  const parts = [];
+  let lastDay = null;
+  for (const item of items) {
+    const day = newsDayKey(item);
+    if (day !== lastDay) {
+      parts.push('<div class="news-day">' + esc(newsDayLabel(item)) + '</div>');
+      lastDay = day;
+    }
     const meta = [];
     if (item.kind) meta.push(item.kind);
     if (item.severity) meta.push(item.severity);
     if (item.category) meta.push(item.category);
     if (item.source) meta.push(item.source);
-    if (item.created_at) meta.push(new Date(item.created_at).toLocaleDateString());
     // News URLs come from external providers; only ever link http(s).
     const low = (item.url ?? '').toLowerCase();
     const urlOk = low.startsWith('http://') || low.startsWith('https://');
     const link = urlOk
       ? ' <a href="' + esc(item.url) + '" target="_blank" rel="noopener">Read</a>' : '';
-    return '<div class="news-item">' +
+    parts.push('<div class="news-item">' +
       '<div class="head">' + esc(item.headline) + link + '</div>' +
-      (item.body ? '<div class="body">' + esc(item.body) + '</div>' : '') +
-      '<div class="meta">' + esc(meta.join(' · ')) + '</div></div>';
-  }).join('');
+      (item.body ? '<div class="body">' + formatNewsBody(item.body) + '</div>' : '') +
+      '<div class="meta">' + esc(meta.join(' · ')) + '</div></div>');
+  }
+  el.innerHTML = parts.join('');
   staggerIn(el.querySelectorAll('.news-item'));
 }
 
@@ -1518,14 +1560,44 @@ function reloadNewsFeeds() {
 async function loadMe() {
   try {
     meProfile = await (await api('/me')).json();
+    const trial = meProfile.trial || {};
+    const planLabel = trial.active ? 'Pro trial'
+      : ((meProfile.effective_plan || meProfile.plan) === 'pro' ? 'Pro' : 'Free');
     document.getElementById('who').textContent =
-      (meProfile.email || '') + ' · ' + (meProfile.plan === 'pro' ? 'Pro' : 'Free');
+      (meProfile.email || '') + ' · ' + planLabel;
+    // Lapsed trial = digests paused until the user picks a plan; this banner
+    // is deliberately not dismissible.
+    document.getElementById('trial-banner').style.display =
+      trial.decision_pending ? 'flex' : 'none';
     if (meProfile.digest_tickers_editable) {
       document.getElementById('watchlist-card').style.display = 'block';
       document.getElementById('watchlist-limit-tag').textContent =
         'up to ' + (meProfile.digest_tickers_limit || 3);
     }
+    renderChatQuota(meProfile.chat_quota);
   } catch (e) {}
+}
+
+// Question-quota counter under the chat input. Hidden for the owner
+// (quota is null) and until the first /me or /chat response arrives.
+function renderChatQuota(q) {
+  const el = document.getElementById('chat-quota');
+  if (!el) return;
+  if (!q) { el.style.display = 'none'; return; }
+  const windowLabel = q.window === 'day' ? 'today' : 'this week';
+  if (q.remaining > 0) {
+    el.textContent = q.remaining + ' of ' + q.limit + ' questions left ' + windowLabel + '.';
+  } else {
+    let msg = 'No questions left ' + windowLabel + '.';
+    if (q.resets_at) {
+      const d = new Date(q.resets_at);
+      msg += q.window === 'day'
+        ? ' Next unlocks at ' + d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) + '.'
+        : ' Next unlocks ' + d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }) + '.';
+    }
+    el.textContent = msg;
+  }
+  el.style.display = 'block';
 }
 
 async function loadHoldings() {
@@ -1733,6 +1805,7 @@ async function sendChat() {
       pending.textContent = data.detail || 'Something went wrong.';
     } else {
       pending.textContent = data.answer || '(no answer)';
+      if (data.chat_quota) renderChatQuota(data.chat_quota);
     }
   } catch (e) {
     pending.textContent = 'Network error. Try again.';
@@ -2278,6 +2351,29 @@ document.querySelectorAll('#chart-controls button').forEach((btn) => {
 
 // --- news ----------------------------------------------------------------------
 
+// Digest bodies are labeled plain-text sections; bold the labels so they read
+// as headings. Applied to already-escaped text, so no injection surface.
+function formatNewsBody(body) {
+  return esc(body).replace(
+    /^(PORTFOLIO:|TOP RISK|NOTABLE|WATCH TODAY:)/gm, '<strong>$1</strong>');
+}
+
+// Day buckets use publish time when known, insertion time otherwise, in the
+// browser's timezone (duplicated from the dashboard feed, like formatNewsBody).
+function newsDayKey(item) {
+  const ts = item.published_at || item.created_at;
+  return ts ? new Date(ts).toDateString() : '';
+}
+function newsDayLabel(item) {
+  const ts = item.published_at || item.created_at;
+  if (!ts) return 'Earlier';
+  const d = new Date(ts), now = new Date();
+  const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
+  if (d.toDateString() === now.toDateString()) return 'Today';
+  if (d.toDateString() === yesterday.toDateString()) return 'Yesterday';
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
 async function loadNews() {
   const el = document.getElementById('stock-news');
   try {
@@ -2290,19 +2386,25 @@ async function loadNews() {
         ' yet. Digests, alerts, and articles that mention it will appear here.</p>';
       return;
     }
-    el.innerHTML = data.items.map((item) => {
-      const meta = [item.kind, item.source,
-        item.created_at ? new Date(item.created_at).toLocaleDateString() : null]
-        .filter(Boolean);
+    const parts = [];
+    let lastDay = null;
+    for (const item of data.items) {
+      const day = newsDayKey(item);
+      if (day !== lastDay) {
+        parts.push('<div class="news-day">' + esc(newsDayLabel(item)) + '</div>');
+        lastDay = day;
+      }
+      const meta = [item.kind, item.source].filter(Boolean);
       const low = (item.url ?? '').toLowerCase();
       const urlOk = low.startsWith('http://') || low.startsWith('https://');
       const link = urlOk
         ? ' <a href="' + esc(item.url) + '" target="_blank" rel="noopener">Read</a>' : '';
-      return '<div class="news-item">' +
+      parts.push('<div class="news-item">' +
         '<div class="head">' + esc(item.headline) + link + '</div>' +
-        (item.body ? '<div class="body">' + esc(item.body) + '</div>' : '') +
-        '<div class="meta">' + esc(meta.join(' · ')) + '</div></div>';
-    }).join('');
+        (item.body ? '<div class="body">' + formatNewsBody(item.body) + '</div>' : '') +
+        '<div class="meta">' + esc(meta.join(' · ')) + '</div></div>');
+    }
+    el.innerHTML = parts.join('');
   } catch (e) {
     el.innerHTML = '<p class="muted-note">Could not load news.</p>';
   }
@@ -2380,11 +2482,14 @@ _SETTINGS_BODY = """
   </div></div>
 </div>
 
-<div class="dash-card">
+<div class="dash-card" id="plan-card">
   <h3>Plan <span class="tag" id="plan-chip"></span></h3>
   <ul class="plan-limits" id="plan-limits"></ul>
+  <div id="billing-actions" style="margin-top:0.75rem;"></div>
   <p class="muted-note" id="plan-note" style="display:none;">Pro billing is coming
   soon. Until then every account stays on the Free plan.</p>
+  <div class="error-box" id="billing-error"></div>
+  <div class="notice-box" id="billing-notice"></div>
 </div>
 
 <div class="dash-card danger-card">
@@ -2420,25 +2525,156 @@ function setBox(id, msg) {
 async function loadAccount() {
   try {
     const me = await (await api('/me')).json();
-    const plan = me.plan === 'pro' ? 'Pro' : 'Free';
+    const trial = me.trial || {};
+    const eff = me.effective_plan || me.plan;
+    const plan = trial.active ? 'Pro trial' : (eff === 'pro' ? 'Pro' : 'Free');
     document.getElementById('who').textContent = (me.email || '') + ' \\u00b7 ' + plan;
     document.getElementById('account-email').textContent = me.email || 'unknown';
     document.getElementById('plan-chip').textContent = plan;
     const limits = document.getElementById('plan-limits');
-    const items = me.plan === 'pro'
+    const items = eff === 'pro'
       ? ['Daily weekday digest across all your holdings',
          'Macro alerts when the world moves',
-         'Unlimited chat questions',
+         '10 chat questions per day',
          'Unlimited connected accounts']
       : ['Weekly digest (Mondays) on up to ' + (me.digest_tickers_limit || 3) +
            ' holdings',
-         '5 chat questions per day',
+         '3 chat questions per week',
          '1 connected account'];
     limits.innerHTML = items.map((t) => '<li>' + esc(t) + '</li>').join('');
-    if (me.plan !== 'pro') {
-      document.getElementById('plan-note').style.display = 'block';
-    }
+    renderBilling(me);
   } catch (e) { /* nav still works; cards degrade individually */ }
+}
+
+// ---- billing (Stripe checkout + customer portal) ---------------------------
+
+function renderBilling(me) {
+  const actions = document.getElementById('billing-actions');
+  const note = document.getElementById('plan-note');
+  const billing = me.billing || {};
+  const trial = me.trial || {};
+  actions.innerHTML = '';
+  note.style.display = 'none';
+  if (!billing.enabled) {
+    // Deployment has no Stripe keys (e.g. local dev) — keep the old copy.
+    if (me.plan !== 'pro') note.style.display = 'block';
+    return;
+  }
+  if (me.plan !== 'pro') {
+    const upgradeBtns =
+      '<button class="btn" id="upgrade-btn">Upgrade to Pro \\u2014 $15/mo USD</button>' +
+      (billing.annual_available
+        ? '<button class="link-btn" id="upgrade-annual-btn" ' +
+          'style="margin-left:0.75rem;">or $120/yr \\u2014 4 months free</button>'
+        : '');
+    if (trial.decision_pending) {
+      actions.innerHTML =
+        '<p class="muted-note" style="margin-bottom:0.75rem;"><strong ' +
+        'style="color:var(--ink);">Your Pro trial has ended and your digests ' +
+        'are paused.</strong> Keep the full Pro experience, or continue on ' +
+        'Free with a weekly digest.</p>' + upgradeBtns +
+        '<div style="margin-top:0.6rem;"><button class="link-btn" ' +
+        'id="choose-free-btn">Continue with Free</button></div>';
+    } else if (trial.active) {
+      actions.innerHTML = upgradeBtns +
+        '<p class="muted-note" style="margin-top:0.75rem;">Pro trial ends ' +
+        esc(new Date(trial.ends_at).toLocaleDateString()) +
+        ' \\u2014 after that, digests pause until you choose Pro or Free.</p>';
+    } else {
+      actions.innerHTML = upgradeBtns;
+    }
+    document.getElementById('upgrade-btn')
+      .addEventListener('click', () => startCheckout('monthly'));
+    const annual = document.getElementById('upgrade-annual-btn');
+    if (annual) annual.addEventListener('click', () => startCheckout('annual'));
+    const chooseFree = document.getElementById('choose-free-btn');
+    if (chooseFree) chooseFree.addEventListener('click', chooseFreePlan);
+  } else if (me.is_owner) {
+    // The owner is Pro by decree, not by subscription — nothing to manage.
+  } else if (billing.has_billing_account) {
+    let html = '<button class="btn ghost" id="portal-btn">Manage billing</button>';
+    if (billing.cancel_at_period_end && billing.current_period_end) {
+      html = '<p class="muted-note" style="margin-bottom:0.75rem;">Pro until ' +
+        esc(new Date(billing.current_period_end).toLocaleDateString()) +
+        ' \\u2014 renewing is one click away in Manage billing.</p>' + html;
+    }
+    actions.innerHTML = html;
+    document.getElementById('portal-btn').addEventListener('click', openPortal);
+  }
+}
+
+async function startCheckout(interval) {
+  setBox('billing-error', null);
+  try {
+    const resp = await api('/billing/checkout', {
+      method: 'POST',
+      body: JSON.stringify({ interval }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.detail || 'Could not start checkout');
+    window.location.href = data.url;
+  } catch (e) {
+    setBox('billing-error', e.message);
+  }
+}
+
+async function openPortal() {
+  setBox('billing-error', null);
+  try {
+    const resp = await api('/billing/portal', { method: 'POST' });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.detail || 'Could not open the billing portal');
+    window.location.href = data.url;
+  } catch (e) {
+    setBox('billing-error', e.message);
+  }
+}
+
+async function chooseFreePlan() {
+  setBox('billing-error', null);
+  try {
+    const resp = await api('/billing/choose-free', { method: 'POST' });
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({}));
+      throw new Error(data.detail || 'Could not update your plan');
+    }
+    setBox('billing-notice', 'You\\u2019re on the Free plan \\u2014 your weekly ' +
+      'digest resumes Monday. Upgrade any time.');
+    await loadAccount();
+  } catch (e) {
+    setBox('billing-error', e.message);
+  }
+}
+
+async function handleBillingReturn() {
+  const params = new URLSearchParams(window.location.search);
+  const state = params.get('billing');
+  if (!state) return;
+  // Keep reloads from re-triggering the notice/polling.
+  window.history.replaceState({}, '', '/app/settings');
+  const card = document.getElementById('plan-card');
+  if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  if (state === 'canceled') {
+    setBox('billing-notice', 'Checkout canceled \\u2014 you were not charged.');
+    return;
+  }
+  if (state !== 'success') return;
+  // The plan flips asynchronously via the Stripe webhook; poll briefly.
+  setBox('billing-notice', 'Payment received \\u2014 finalizing your upgrade\\u2026');
+  for (let i = 0; i < 15; i++) {
+    await new Promise((r) => setTimeout(r, 2000));
+    try {
+      const me = await (await api('/me')).json();
+      if (me.plan === 'pro') {
+        setBox('billing-notice', 'Welcome to Pro! Daily digests, macro alerts, ' +
+          'and unlimited chat are now on.');
+        await loadAccount();
+        return;
+      }
+    } catch (e) { /* keep polling */ }
+  }
+  setBox('billing-notice', 'Payment received \\u2014 your plan will update within ' +
+    'a minute. Refresh this page if it doesn\\u2019t.');
 }
 
 // ---- change password --------------------------------------------------------
@@ -2603,7 +2839,7 @@ async function loadDeliveryOverview() {
   }
 }
 
-loadAccount();
+loadAccount().then(handleBillingReturn);
 loadConnection();
 loadDeliveryOverview();
 """

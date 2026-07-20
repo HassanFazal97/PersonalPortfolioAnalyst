@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
 from app.config import Settings
-from app.tools import digest, market, news, portfolio
+from app.tools import anomalies, digest, fundamentals, market, news, portfolio, risk
 
 
 @dataclass
@@ -118,12 +118,93 @@ SEARCH_NEWS_SCHEMA = {
 }
 
 
-# Chat runs (and digest investigations) expose these four — never send_digest.
+GET_FUNDAMENTALS_SCHEMA = {
+    "name": "get_fundamentals",
+    "description": (
+        "Fundamentals for one or more tickers: valuation (P/E, PEG, P/B, "
+        "EV/EBITDA, P/FCF), growth, margins, financial health, dividends "
+        "(rate, payout, ex-div date), beta, 52-week range, analyst "
+        "rating/target, next earnings date, and ETF expense ratio/top "
+        "holdings. Use for any question about valuation, income, quality, or "
+        "'is X expensive' — never estimate these numbers from memory. Batch "
+        "every ticker into one call."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "tickers": {
+                "type": "array",
+                "items": {"type": "string"},
+                "maxItems": 8,
+                "description": "Yahoo-format tickers, e.g. ['NVDA','SHOP.TO'].",
+            }
+        },
+        "required": ["tickers"],
+    },
+}
+
+GET_PORTFOLIO_RISK_SCHEMA = {
+    "name": "get_portfolio_risk",
+    "description": (
+        "Risk profile of the user's holdings: per-holding portfolio weight, "
+        "beta, 90-day return, max drawdown, and annualized volatility, plus "
+        "portfolio-level weighted beta, concentration (largest and top-3 "
+        "weight), and the most volatile holding. Use for 'how risky is my "
+        "portfolio', 'what's my beta', 'am I too concentrated', 'which "
+        "holding is most volatile'. All numbers are precomputed — report "
+        "them, don't recompute."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "tickers": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "Optional subset of holdings to analyze; omit for the "
+                    "whole portfolio."
+                ),
+            }
+        },
+        "additionalProperties": False,
+    },
+}
+
+SCAN_ANOMALIES_SCHEMA = {
+    "name": "scan_anomalies",
+    "description": (
+        "Statistical anomaly scan of daily price behaviour: unusually large "
+        "one-day moves (rolling z-score), sustained drift from baseline "
+        "(CUSUM change-point), and decoupling from the benchmark "
+        "(correlation break). Defaults to the user's holdings. Use for "
+        "'anything unusual in my portfolio?' or 'is X behaving strangely?'. "
+        "Detectors flag statistical behaviour only — pair with search_news "
+        "when the user asks why."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "tickers": {
+                "type": "array",
+                "items": {"type": "string"},
+                "maxItems": 8,
+                "description": "Optional tickers; omit to scan all holdings.",
+            }
+        },
+        "additionalProperties": False,
+    },
+}
+
+
+# Chat runs (and digest investigations) expose these — never send_digest.
 CHAT_TOOLS: list[dict[str, Any]] = [
     GET_PORTFOLIO_SCHEMA,
     GET_QUOTE_SCHEMA,
     GET_PRICE_HISTORY_SCHEMA,
     SEARCH_NEWS_SCHEMA,
+    GET_FUNDAMENTALS_SCHEMA,
+    GET_PORTFOLIO_RISK_SCHEMA,
+    SCAN_ANOMALIES_SCHEMA,
 ]
 
 # The synthesize stage exposes ONLY send_digest so the run must terminate by
@@ -137,4 +218,24 @@ DISPATCH: dict[str, ToolFn] = {
     "get_price_history": market.get_price_history,
     "search_news": news.search_news,
     "send_digest": digest.send_digest,
+    "get_fundamentals": fundamentals.get_fundamentals_tool,
+    "get_portfolio_risk": risk.get_portfolio_risk,
+    "scan_anomalies": anomalies.scan_anomalies,
+}
+
+# Tools that fan out to live market-data fetches need more headroom than the
+# global settings.tool_timeout_seconds default (10 s).
+TOOL_TIMEOUTS: dict[str, float] = {
+    "get_fundamentals": 20.0,
+    "get_portfolio_risk": 25.0,
+    "scan_anomalies": 30.0,
+}
+
+# Anthropic server-side web search (same tool the macro specialists use).
+# Executed by the API, never dispatched locally — appended to CHAT_TOOLS for
+# Pro chats only; search cost doesn't fit the Free tier's economics.
+WEB_SEARCH_TOOL: dict[str, Any] = {
+    "type": "web_search_20260209",
+    "name": "web_search",
+    "max_uses": 3,
 }

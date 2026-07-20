@@ -13,7 +13,7 @@ import logging
 import re
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime, time
+from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 from urllib.parse import parse_qsl
 from zoneinfo import ZoneInfo
@@ -25,15 +25,23 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from app import billing
 from app.agent.anomaly.orchestrator import run_anomaly_scan, run_anomaly_scans_for_all
 from app.agent.budget import Budget
+from app.agent.chat_context import build_chat_context, compose_chat_system_prompt
 from app.agent.digest_pipeline import run_digest_pipeline, run_digests_for_all
 from app.agent.loop import run_agent
 from app.agent.macro.orchestrator import run_macro_scan, run_macro_scans_for_all
-from app.agent.prompts import CHAT_SYSTEM_PROMPT
+from app.agent.news_refresh import refresh_news_for_user, run_news_refresh_for_all
+from app.agent.prompts import CHAT_SYSTEM_PROMPT, CHAT_WEB_SEARCH_SUFFIX
 from app.auth.context import set_current_user_id
 from app.auth.jwt import AuthError, jwks_url_for, verify_supabase_jwt
-from app.config import DEFAULT_USER_ID, get_settings, monthly_cost_cap
+from app.config import (
+    DEFAULT_USER_ID,
+    chat_run_budget,
+    get_settings,
+    monthly_cost_cap,
+)
 from app.db.repo import Repo
 from app.delivery import discord_connect, twilio_inbound, unsubscribe, verification
 from app.delivery.adapters import build_adapters
@@ -55,10 +63,15 @@ from app.landing import (
     PRIVACY_HTML,
     TERMS_HTML,
 )
-from app.plans import max_digest_holdings
+from app.plans import (
+    effective_plan,
+    max_digest_holdings,
+    trial_active,
+    trial_decision_pending,
+)
 from app.scheduler import DeliveryScheduler, DigestScheduler, IntervalScheduler
 from app.tools import fundamentals, market, portfolio
-from app.tools.registry import CHAT_TOOLS, ToolContext
+from app.tools.registry import CHAT_TOOLS, WEB_SEARCH_TOOL, ToolContext
 from app.tools.tickers import normalize_ticker
 from app.webapp import (
     NOT_CONFIGURED_HTML,
@@ -85,6 +98,7 @@ async def lifespan(app: FastAPI):
     app.state.macro_scheduler = None
     app.state.anomaly_scheduler = None
     app.state.fundamentals_scheduler = None
+    app.state.news_scheduler = None
     app.state.delivery_scheduler = None
     # Which channels this deployment can send (drives verification + UI).
     app.state.delivery_adapters = build_adapters(settings)
@@ -149,6 +163,20 @@ async def lifespan(app: FastAPI):
             fundamentals_scheduler.start()
             app.state.fundamentals_scheduler = fundamentals_scheduler
 
+        if settings.news_refresh_cron:
+            async def _run_news_refresh() -> None:
+                await run_news_refresh_for_all(repo)
+
+            news_scheduler = DigestScheduler(
+                heartbeat_wrapped("news_refresh", repo, _run_news_refresh),
+                cron=settings.news_refresh_cron,
+                timezone=settings.tz,
+                job_id="news_refresh",
+                misfire_grace_seconds=settings.digest_misfire_grace_seconds,
+            )
+            news_scheduler.start()
+            app.state.news_scheduler = news_scheduler
+
         if settings.delivery_interval_seconds > 0:
             dispatcher = Dispatcher(
                 repo,
@@ -171,6 +199,8 @@ async def lifespan(app: FastAPI):
     finally:
         if app.state.delivery_scheduler is not None:
             app.state.delivery_scheduler.shutdown()
+        if app.state.news_scheduler is not None:
+            app.state.news_scheduler.shutdown()
         if app.state.fundamentals_scheduler is not None:
             app.state.fundamentals_scheduler.shutdown()
         if app.state.anomaly_scheduler is not None:
@@ -209,6 +239,10 @@ class PreferredChannelRequest(BaseModel):
     channel: str
 
 
+class CheckoutRequest(BaseModel):
+    interval: str = "monthly"  # 'monthly' | 'annual'
+
+
 _bearer = HTTPBearer(auto_error=False)
 
 # Exempt from bearer auth so platform liveness probes and uptime pingers — which
@@ -232,6 +266,8 @@ _AUTH_EXEMPT_PATHS = {
     # Twilio cannot attach our bearer token; the route validates
     # X-Twilio-Signature instead.
     "/webhooks/twilio/sms",
+    # Stripe cannot either; the route verifies Stripe-Signature instead.
+    "/webhooks/stripe",
     # Email unsubscribe links carry their own signed token.
     "/unsubscribe",
     # Discord's OAuth redirect is a bare browser GET; the signed ``state``
@@ -290,7 +326,11 @@ async def require_auth(
         except (AuthError, ValueError) as exc:
             raise HTTPException(status_code=401, detail="invalid token") from exc
         repo = _require_repo(request.app)
-        user_id = await repo.get_or_create_user(auth_id=auth_id, email=claims.get("email"))
+        user_id = await repo.get_or_create_user(
+            auth_id=auth_id,
+            email=claims.get("email"),
+            trial_days=settings.trial_days,
+        )
         _bind_user(request, user_id)
         return
 
@@ -336,6 +376,31 @@ def _fmt_time(value) -> str | None:
     return value.strftime("%H:%M")
 
 
+def _trial_payload(user) -> dict:
+    """Trial state for the UI: active countdown, or the paused decision gate."""
+    ends = getattr(user, "trial_ends_at", None) if user is not None else None
+    return {
+        "active": trial_active(user),
+        "ends_at": ends.isoformat() if ends else None,
+        "decision_pending": trial_decision_pending(user),
+    }
+
+
+def _billing_payload(settings, user) -> dict:
+    """Billing state for the settings UI. Rendered from the mirrored columns
+    so no page load ever waits on a Stripe round-trip."""
+    period_end = getattr(user, "stripe_current_period_end", None) if user else None
+    return {
+        "enabled": billing.billing_enabled(settings),
+        "annual_available": bool(settings.stripe_price_pro_annual),
+        "has_billing_account": bool(getattr(user, "stripe_customer_id", None)),
+        "cancel_at_period_end": bool(
+            getattr(user, "stripe_cancel_at_period_end", False)
+        ),
+        "current_period_end": period_end.isoformat() if period_end else None,
+    }
+
+
 async def _me_payload(repo: Repo, user_id: uuid.UUID) -> dict:
     settings = get_settings()
     user = await repo.get_user(user_id)
@@ -345,6 +410,7 @@ async def _me_payload(repo: Repo, user_id: uuid.UUID) -> dict:
             "user_id": str(user_id),
             "email": None,
             "plan": "pro" if is_owner else "free",
+            "effective_plan": "pro" if is_owner else "free",
             "timezone": "America/Toronto",
             "digest_send_time": "07:45",
             "digest_enabled": True,
@@ -353,8 +419,13 @@ async def _me_payload(repo: Repo, user_id: uuid.UUID) -> dict:
             "digest_tickers_limit": None if is_owner else settings.free_max_digest_holdings,
             "digest_tickers_editable": False,
             "is_owner": is_owner,
+            "trial": _trial_payload(None),
+            "billing": _billing_payload(settings, None),
+            "chat_quota": await _chat_quota_payload(repo, user_id, "free", settings),
         }
-    plan = user.plan
+    # Limits track the effective plan (an active trial is Pro); "plan" stays
+    # the stored paid flag so the UI can tell trial apart from subscription.
+    plan = effective_plan(user)
     cap = max_digest_holdings(plan, settings)
     positions = await repo.list_positions(user_id=user_id)
     unique_tickers = sorted({p.ticker for p in positions})
@@ -367,7 +438,8 @@ async def _me_payload(repo: Repo, user_id: uuid.UUID) -> dict:
     return {
         "user_id": str(user_id),
         "email": user.email,
-        "plan": plan,
+        "plan": user.plan,
+        "effective_plan": plan,
         "timezone": user.timezone,
         "digest_send_time": _fmt_time(user.digest_send_time),
         "digest_enabled": user.digest_enabled,
@@ -376,6 +448,9 @@ async def _me_payload(repo: Repo, user_id: uuid.UUID) -> dict:
         "digest_tickers_limit": cap,
         "digest_tickers_editable": editable,
         "is_owner": is_owner,
+        "trial": _trial_payload(user),
+        "billing": _billing_payload(settings, user),
+        "chat_quota": await _chat_quota_payload(repo, user_id, plan, settings),
     }
 
 
@@ -385,7 +460,7 @@ async def _validate_digest_tickers(
     """Validate and normalize a digest watchlist update."""
     settings = get_settings()
     user = await repo.get_user(user_id)
-    plan = getattr(user, "plan", "free") if user is not None else "free"
+    plan = effective_plan(user)
     if plan == "pro":
         return []
     cap = max_digest_holdings(plan, settings)
@@ -431,23 +506,124 @@ async def _delete_supabase_auth_user(settings, auth_id: uuid.UUID | None) -> boo
     return resp.status_code < 400 or resp.status_code == 404
 
 
+def _chat_window(plan: str) -> tuple[str, timedelta]:
+    """Rolling quota window for a plan: Pro counts per 24h, Free per 7 days."""
+    if plan == "pro":
+        return "day", timedelta(hours=24)
+    return "week", timedelta(days=7)
+
+
+def _chat_limit(plan: str, settings) -> int:
+    return (
+        settings.pro_daily_chat_limit
+        if plan == "pro"
+        else settings.free_weekly_chat_limit
+    )
+
+
+async def _chat_quota_payload(
+    repo: Repo, user_id: uuid.UUID, plan: str, settings
+) -> dict | None:
+    """The user's chat-question quota state (None for the exempt owner)."""
+    if user_id == _OWNER_USER_ID:
+        return None
+    window, span = _chat_window(plan)
+    used, oldest = await repo.chat_usage_since(
+        user_id, datetime.now(timezone.utc) - span
+    )
+    # The oldest counted question leaving the window is when a slot frees up.
+    resets_at = (oldest + span).isoformat() if oldest is not None else None
+    return {
+        "limit": _chat_limit(plan, settings),
+        "used": used,
+        "remaining": max(0, _chat_limit(plan, settings) - used),
+        "window": window,
+        "resets_at": resets_at,
+    }
+
+
+def _user_tz(user) -> ZoneInfo:
+    try:
+        return ZoneInfo(getattr(user, "timezone", None) or "America/Toronto")
+    except Exception:
+        return ZoneInfo("UTC")
+
+
+# Prior turns are replayed verbatim into the prompt; cap each message so one
+# long answer doesn't dominate the context window.
+_CHAT_HISTORY_MSG_CHARS = 1200
+
+
+async def _chat_history_messages(
+    repo: Repo, user_id: uuid.UUID, settings
+) -> list[dict]:
+    """Up to chat_history_turns prior Q&A pairs, oldest first, as plain
+    user/assistant text messages (no tool traces). Runs that errored or never
+    produced an answer are skipped so roles stay strictly paired."""
+    turns = settings.chat_history_turns
+    if turns <= 0:
+        return []
+    # Over-fetch: errored/answerless runs are skipped below, and they must not
+    # crowd usable turns out of the fixed-size window.
+    runs = await repo.list_chat_runs(user_id, limit=turns * 2)
+    pairs: list[list[dict]] = []
+    for r in runs:  # newest first
+        question = getattr(r, "user_message", None)
+        answer = getattr(r, "final_answer", None)
+        if getattr(r, "status", None) == "error" or not question or not answer:
+            continue
+        pairs.append([
+            {"role": "user", "content": question[:_CHAT_HISTORY_MSG_CHARS]},
+            {"role": "assistant", "content": answer[:_CHAT_HISTORY_MSG_CHARS]},
+        ])
+        if len(pairs) == turns:
+            break
+    # Chronological order for the prompt: oldest pair first.
+    return [msg for pair in reversed(pairs) for msg in pair]
+
+
 async def _enforce_usage_limits(repo: Repo, user_id: uuid.UUID, settings) -> None:
-    """Guard a chat against the per-user monthly cost cap and the Free daily
-    chat limit. Owner/service token is exempt. Raises 402 when over."""
+    """Guard a chat against the plan's rolling question quota (Free 3/week,
+    Pro 10/day) and the monthly fair-use compute cap. Owner/service token is
+    exempt. Raises 402 when over."""
     if user_id == _OWNER_USER_ID:
         return
     user = await repo.get_user(user_id)
-    plan = getattr(user, "plan", "free") if user is not None else "free"
+    # An active no-card trial counts as Pro everywhere, quotas included.
+    plan = effective_plan(user)
     if await repo.monthly_cost_usd(user_id) >= monthly_cost_cap(plan, settings):
+        upsell = "" if plan == "pro" else " Upgrade to Pro for more headroom."
         raise HTTPException(
             status_code=402,
-            detail="Monthly usage limit reached. Upgrade to Pro or try again next month.",
+            detail=(
+                "You've reached this month's fair-use compute cap. It resets "
+                f"at the start of next month.{upsell}"
+            ),
         )
-    if plan == "free" and await repo.count_chats_today(user_id) >= settings.free_daily_chat_limit:
+    window, span = _chat_window(plan)
+    now = datetime.now(timezone.utc)
+    used, oldest = await repo.chat_usage_since(user_id, now - span)
+    limit = _chat_limit(plan, settings)
+    if used < limit:
+        return
+    unlocks = (oldest or now) + span
+    local = unlocks.astimezone(_user_tz(user))
+    if plan == "pro":
         raise HTTPException(
             status_code=402,
-            detail="Daily chat limit reached on the Free plan. Upgrade to Pro for unlimited chat.",
+            detail=(
+                f"Daily limit reached ({limit} questions per day on Pro). "
+                f"Your next question unlocks at {local:%-I:%M %p} ({local:%Z})."
+            ),
         )
+    raise HTTPException(
+        status_code=402,
+        detail=(
+            f"You've used your {limit} free questions this week. Your next "
+            f"question unlocks {local:%a %b %-d}. Upgrade to Pro for "
+            f"{settings.pro_daily_chat_limit} per day."
+        ),
+    )
 
 
 # Funnel visibility (PRODUCT.md: visitor -> signup -> connected portfolio).
@@ -621,20 +797,42 @@ def create_app() -> FastAPI:
         active_chats.add(user_id)
         try:
             await _enforce_usage_limits(repo, user_id, settings)
+            user = await repo.get_user(user_id)
+            plan = effective_plan(user)
+            if user_id == _OWNER_USER_ID:
+                max_cost = settings.chat_max_cost_usd
+            else:
+                max_cost = chat_run_budget(plan, settings)
             budget = Budget(
                 max_iterations=settings.chat_max_iterations,
-                max_cost_usd=settings.chat_max_cost_usd,
+                max_cost_usd=max_cost,
                 model=settings.model,
             )
+            tz = getattr(user, "timezone", None) or settings.tz
+            ctx = ToolContext(
+                settings=settings, repo=repo, user_id=user_id, timezone=tz
+            )
+            context = await build_chat_context(ctx, tz=tz)
+            history = await _chat_history_messages(repo, user_id, settings)
+            # Server-side web search is a Pro perk: its per-search cost
+            # doesn't fit the Free tier's economics.
+            base_prompt = CHAT_SYSTEM_PROMPT
+            tools = CHAT_TOOLS
+            if plan == "pro" or user_id == _OWNER_USER_ID:
+                base_prompt = CHAT_SYSTEM_PROMPT + CHAT_WEB_SEARCH_SUFFIX
+                tools = [*CHAT_TOOLS, WEB_SEARCH_TOOL]
             result = await run_agent(
                 req.message,
                 trigger="chat",
-                system_prompt=CHAT_SYSTEM_PROMPT,
-                tools=CHAT_TOOLS,
+                system_prompt=compose_chat_system_prompt(base_prompt, context),
+                tools=tools,
                 budget=budget,
                 db=repo,
+                ctx=ctx,
                 user_id=user_id,
+                history=history,
             )
+            quota = await _chat_quota_payload(repo, user_id, plan, settings)
         finally:
             active_chats.discard(user_id)
         return {
@@ -647,6 +845,7 @@ def create_app() -> FastAPI:
             "cost_usd": result.cost_usd,
             "latency_ms": result.latency_ms,
             "tool_calls": result.tool_summaries,
+            "chat_quota": quota,
         }
 
     @app.get("/chat/history")
@@ -763,6 +962,16 @@ def create_app() -> FastAPI:
             results = await run_anomaly_scans_for_all(repo)
             return {"scans": results}
         return await run_anomaly_scan(repo, user_id=user_id)
+
+    @app.post("/news/refresh")
+    async def news_refresh(request: Request) -> dict:
+        """Fetch, importance-filter, and store holding news for the caller
+        (or every recipient via service token) — same path as the daily job."""
+        repo = _require_repo(app)
+        user_id = _user_id(request)
+        if user_id == _OWNER_USER_ID and request.headers.get("X-News-Refresh-All") == "1":
+            return {"refreshes": await run_news_refresh_for_all(repo)}
+        return await refresh_news_for_user(repo, user_id)
 
     @app.get("/alerts")
     async def list_alerts(request: Request, limit: int = 20) -> dict:
@@ -905,9 +1114,106 @@ def create_app() -> FastAPI:
         settings = get_settings()
         user = await repo.get_user(user_id)
         auth_id = getattr(user, "auth_id", None) if user is not None else None
+        # An active subscription must die with the account — otherwise Stripe
+        # keeps charging a customer we no longer know. Abort on failure rather
+        # than leave a paying zombie behind.
+        subscription_id = (
+            getattr(user, "stripe_subscription_id", None) if user is not None else None
+        )
+        if subscription_id and billing.billing_enabled(settings):
+            try:
+                await billing.cancel_subscription(settings, subscription_id)
+            except Exception as exc:
+                logging.getLogger(__name__).error(
+                    "could not cancel subscription %s during account deletion: %s",
+                    subscription_id,
+                    exc,
+                )
+                raise HTTPException(
+                    status_code=502,
+                    detail=(
+                        "could not cancel your subscription — try again in a "
+                        "minute or contact us"
+                    ),
+                ) from exc
         await repo.delete_user_data(user_id)
         auth_user_deleted = await _delete_supabase_auth_user(settings, auth_id)
         return {"deleted": True, "auth_user_deleted": auth_user_deleted}
+
+    # ---- Billing (Stripe) ------------------------------------------------
+
+    @app.post("/billing/checkout")
+    async def billing_checkout(req: CheckoutRequest, request: Request) -> dict:
+        """A hosted Checkout URL for upgrading to Pro; the browser redirects."""
+        settings = get_settings()
+        if not billing.billing_enabled(settings):
+            raise HTTPException(status_code=503, detail="billing is not configured")
+        repo = _require_repo(app)
+        user_id = _user_id(request)
+        if user_id == _OWNER_USER_ID:
+            raise HTTPException(
+                status_code=400, detail="the owner account is already Pro"
+            )
+        user = await repo.get_user(user_id)
+        if user is None:
+            raise HTTPException(status_code=404, detail="user not found")
+        if user.plan == "pro":
+            raise HTTPException(
+                status_code=409,
+                detail="Already on Pro — use Manage billing to change your plan.",
+            )
+        url = await billing.create_checkout_session(
+            repo, settings, user, interval=req.interval
+        )
+        return {"url": url}
+
+    @app.post("/billing/choose-free")
+    async def billing_choose_free(request: Request) -> dict:
+        """Resolve a lapsed (or running) trial by continuing on the Free plan.
+
+        Clears the trial marker so digests resume on the Free cadence.
+        Idempotent; a no-op for users with no trial state."""
+        repo = _require_repo(app)
+        user_id = _user_id(request)
+        await repo.resolve_trial(user_id)
+        return await _me_payload(repo, user_id)
+
+    @app.post("/billing/portal")
+    async def billing_portal(request: Request) -> dict:
+        """A hosted Customer Portal URL (invoices, payment method, cancel)."""
+        settings = get_settings()
+        if not billing.billing_enabled(settings):
+            raise HTTPException(status_code=503, detail="billing is not configured")
+        repo = _require_repo(app)
+        user = await repo.get_user(_user_id(request))
+        customer_id = getattr(user, "stripe_customer_id", None) if user else None
+        if not customer_id:
+            raise HTTPException(status_code=409, detail="no billing history yet")
+        return {"url": await billing.create_portal_session(settings, customer_id)}
+
+    @app.post("/webhooks/stripe")
+    async def stripe_webhook(request: Request) -> dict:
+        """Subscription lifecycle events. Bearer-exempt; Stripe-Signature over
+        the raw body is the auth. Every event re-fetches current subscription
+        state, so ordering and redelivery are both harmless."""
+        settings = get_settings()
+        if not settings.stripe_webhook_secret:
+            raise HTTPException(status_code=503, detail="billing is not configured")
+        raw = await request.body()
+        signature = request.headers.get("Stripe-Signature", "")
+        try:
+            event = billing.verify_webhook(
+                raw, signature, settings.stripe_webhook_secret
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=400, detail="invalid Stripe signature"
+            ) from exc
+        repo = _require_repo(app)
+        if not await repo.record_stripe_event(event["id"], event["type"]):
+            return {"received": True, "duplicate": True}
+        await billing.handle_event(repo, settings, event)
+        return {"received": True}
 
     @app.get("/news")
     async def list_news(
