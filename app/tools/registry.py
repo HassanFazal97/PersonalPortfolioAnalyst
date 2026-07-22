@@ -11,7 +11,16 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
 from app.config import Settings
-from app.tools import anomalies, digest, fundamentals, market, news, portfolio, risk
+from app.tools import (
+    anomalies,
+    digest,
+    fundamentals,
+    market,
+    news,
+    portfolio,
+    portfolio_risk,
+    risk,
+)
 
 
 @dataclass
@@ -196,6 +205,39 @@ SCAN_ANOMALIES_SCHEMA = {
 }
 
 
+ANALYZE_PORTFOLIO_RISK_SCHEMA = {
+    "name": "analyze_portfolio_risk",
+    "description": (
+        "Portfolio-LEVEL, matrix-based risk analytics — how the holdings behave "
+        "TOGETHER, which a single stock's numbers can't show. Returns true "
+        "portfolio volatility (from the holdings' return covariance, not a naive "
+        "weighted average), the diversification benefit and ratio, per-holding "
+        "RISK contribution vs capital weight (finds hidden concentration — a "
+        "holding that is a small % of value but a large % of risk), the "
+        "effective number of independent bets, and the most-correlated pairs. "
+        "Use for 'how diversified am I really', 'what's actually driving my "
+        "risk', 'are my holdings too correlated', 'is my portfolio riskier than "
+        "it looks'. Distinct from get_portfolio_risk, which is per-holding only. "
+        "All numbers are precomputed — report them, don't recompute. Describe "
+        "the risk; never recommend trades."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "tickers": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "Optional subset of holdings to analyze; omit for the whole "
+                    "portfolio."
+                ),
+            }
+        },
+        "additionalProperties": False,
+    },
+}
+
+
 # Chat runs (and digest investigations) expose these — never send_digest.
 CHAT_TOOLS: list[dict[str, Any]] = [
     GET_PORTFOLIO_SCHEMA,
@@ -205,6 +247,45 @@ CHAT_TOOLS: list[dict[str, Any]] = [
     GET_FUNDAMENTALS_SCHEMA,
     GET_PORTFOLIO_RISK_SCHEMA,
     SCAN_ANOMALIES_SCHEMA,
+]
+
+ESTIMATE_DOWNSIDE_RISK_SCHEMA = {
+    "name": "estimate_downside_risk",
+    "description": (
+        "How much the portfolio could LOSE. Returns Value at Risk and "
+        "Conditional VaR (Expected Shortfall) at 95%% and 99%% over 1-day and "
+        "1-month horizons in both %% and CAD, the worst realized day/week/month "
+        "and max drawdown over ~2 years of history, and beta-scaled market-"
+        "shock scenarios (e.g. 'what if the market drops 20%%'). Use for 'how "
+        "much could I lose', 'what's my downside', 'what happens in a crash', "
+        "'value at risk', 'worst case'. All numbers are precomputed — report "
+        "them. These are statistical estimates from history, NOT predictions, "
+        "and never a recommendation to trade."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "tickers": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "Optional subset of holdings to analyze; omit for the whole "
+                    "portfolio."
+                ),
+            }
+        },
+        "additionalProperties": False,
+    },
+}
+
+
+# Pro-only chat tools. The quant engine (covariance/risk decomposition + tail
+# risk) is the headline Pro differentiator and its history fetches are heavier,
+# so — like WEB_SEARCH_TOOL — these are appended to the roster only for Pro
+# chats (see app/main.py::_prepare_chat).
+PRO_CHAT_TOOLS: list[dict[str, Any]] = [
+    ANALYZE_PORTFOLIO_RISK_SCHEMA,
+    ESTIMATE_DOWNSIDE_RISK_SCHEMA,
 ]
 
 # The synthesize stage exposes ONLY send_digest so the run must terminate by
@@ -220,6 +301,8 @@ DISPATCH: dict[str, ToolFn] = {
     "send_digest": digest.send_digest,
     "get_fundamentals": fundamentals.get_fundamentals_tool,
     "get_portfolio_risk": risk.get_portfolio_risk,
+    "analyze_portfolio_risk": portfolio_risk.analyze_portfolio_risk,
+    "estimate_downside_risk": portfolio_risk.estimate_downside_risk,
     "scan_anomalies": anomalies.scan_anomalies,
 }
 
@@ -228,6 +311,11 @@ DISPATCH: dict[str, ToolFn] = {
 TOOL_TIMEOUTS: dict[str, float] = {
     "get_fundamentals": 20.0,
     "get_portfolio_risk": 25.0,
+    # Fans out ~2yr of adjusted-close history for up to 25 holdings + FX.
+    "analyze_portfolio_risk": 35.0,
+    # Same fan-out plus the benchmark; the adjusted-close cache makes a
+    # back-to-back call with analyze_portfolio_risk cheap.
+    "estimate_downside_risk": 35.0,
     "scan_anomalies": 30.0,
 }
 

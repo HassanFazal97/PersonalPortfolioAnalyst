@@ -19,11 +19,17 @@ from app.tools.tickers import normalize_ticker, normalize_tickers
 
 QUOTE_TTL_SECONDS = 60.0
 INTRADAY_TTL_SECONDS = 60.0
+# Adjusted-close history changes only once per day; a 15-minute cache lets the
+# quant tools (analyze_portfolio_risk, estimate_downside_risk) share one fetch
+# per ticker within a conversation instead of each re-pulling ~2yr of history.
+ADJUSTED_TTL_SECONDS = 900.0
 
 # ticker -> (monotonic_timestamp, normalized_quote_dict)
 _quote_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 # ticker -> (monotonic_timestamp, intraday bar rows)
 _intraday_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+# (ticker, days) -> (monotonic_timestamp, adjusted-close rows)
+_adjusted_cache: dict[tuple[str, int], tuple[float, list[dict[str, Any]]]] = {}
 
 
 def _clock() -> float:
@@ -31,9 +37,25 @@ def _clock() -> float:
 
 
 def cache_clear() -> None:
-    """Test/utility helper to reset the quote and intraday caches."""
+    """Test/utility helper to reset the quote, intraday, and adjusted caches."""
     _quote_cache.clear()
     _intraday_cache.clear()
+    _adjusted_cache.clear()
+
+
+async def get_adjusted_closes(ticker: str, days: int) -> list[dict[str, Any]]:
+    """Split/dividend-adjusted daily closes, 15-minute TTL cached, off-thread.
+
+    The quant engine's data source. Caches per (ticker, days) so a
+    conversation that runs several portfolio-risk tools pays one Yahoo fetch
+    per ticker, not one per tool."""
+    key = (ticker, days)
+    cached = _adjusted_cache.get(key)
+    if cached and _clock() - cached[0] < ADJUSTED_TTL_SECONDS:
+        return cached[1]
+    rows = await asyncio.to_thread(_fetch_adjusted_closes_raw, ticker, days)
+    _adjusted_cache[key] = (_clock(), rows)
+    return rows
 
 
 # --------------------------------------------------------------------------
@@ -81,6 +103,31 @@ def _fetch_history_raw(ticker: str, days: int) -> list[dict[str, Any]]:
                 "volume": int(row["Volume"]),
             }
         )
+    return rows
+
+
+def _fetch_adjusted_closes_raw(ticker: str, days: int) -> list[dict[str, Any]]:
+    """Return split- and dividend-adjusted daily closes (oldest first).
+
+    The returns/covariance engine (``app/quant/``) MUST use this seam, not
+    ``_fetch_history_raw``: that path passes ``auto_adjust=False`` and returns
+    raw close, which injects a spurious ~-75%% "return" on every split date and
+    a negative jump on every ex-dividend date — corrupting volatility, every
+    covariance entry, and VaR tails. ``auto_adjust=True`` folds splits and
+    dividends into the close so bar-to-bar log returns are economically clean.
+
+    Shape is intentionally minimal (``{date, adj_close}``) so tests can patch
+    it with synthetic series.
+    """
+    import yfinance as yf
+
+    df = yf.Ticker(ticker).history(period=f"{days}d", auto_adjust=True)
+    rows: list[dict[str, Any]] = []
+    for idx, row in df.iterrows():
+        close = float(row["Close"])
+        if math.isnan(close):
+            continue
+        rows.append({"date": idx.date().isoformat(), "adj_close": close})
     return rows
 
 
