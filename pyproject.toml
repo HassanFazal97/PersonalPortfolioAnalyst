@@ -15,7 +15,12 @@ dependencies = [
     "finnhub-python>=2.4",
     "apscheduler>=3.10",
     "httpx>=0.27",
-    "snaptrade-python-sdk>=11.0",
+    # Pinned below 12: SnapTrade SDK 12.0.0 changed its request auth and
+    # breaks every call with 401/403 code 0000 "Authentication credentials
+    # were not provided". Prod has no lockfile, so `pip install .` pulls the
+    # newest match on every rebuild — an unbounded `>=11.0` silently upgraded
+    # to 12.0.0 on a deploy and took brokerage connect down. 11.0.x verified.
+    "snaptrade-python-sdk>=11.0,<12",
     "pyjwt[crypto]>=2.9",
     "stripe>=12",
 ]
