@@ -116,15 +116,15 @@ nav.menu-open .nav-toggle span:last-child { transform: translateY(-3.5px) rotate
   .nav-links a:not(.btn):not(.keep) { display: none; }
   .nav-links a.keep[data-auth=signin] { display: none; } /* lives in the menu */
   .nav-toggle { display: block; }
-  /* the bar is transparent until scrolled; an open menu needs its own backdrop */
+  /* the bar is transparent until scrolled; an open menu needs an opaque
+     backdrop (blur alone can't be relied on) so the hero never bleeds through */
   nav.menu-open {
-    background: oklch(13% 0.014 300 / 0.95); backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px); border-bottom-color: var(--line); }
+    background: oklch(13% 0.014 300); border-bottom-color: var(--line); }
   nav.menu-open .nav-menu { display: flex; flex-direction: column;
     position: absolute; top: 100%; left: 0; right: 0;
     padding: 0.25rem 1.5rem 0.9rem;
-    background: oklch(13% 0.014 300 / 0.95); backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px); border-bottom: 1px solid var(--line); }
+    background: oklch(13% 0.014 300); border-bottom: 1px solid var(--line);
+    box-shadow: 0 18px 32px -18px oklch(0% 0 0 / 0.6); }
   .nav-menu a { padding: 0.85rem 0; font-weight: 600; color: var(--ink-2);
     border-bottom: 1px solid var(--line); }
   .nav-menu a:last-child { border-bottom: none; }
