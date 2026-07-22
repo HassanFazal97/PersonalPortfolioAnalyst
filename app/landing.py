@@ -61,7 +61,7 @@ _CSS = """
   --font: "Schibsted Grotesk", ui-sans-serif, system-ui, -apple-system, sans-serif;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
-html { scroll-behavior: smooth; }
+html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
 html, body { overflow-x: clip; }
 body {
   font-family: var(--font);
@@ -103,7 +103,33 @@ nav.scrolled {
 .nav-links { display: flex; align-items: center; gap: 1.4rem; font-size: 0.92rem; font-weight: 500; }
 .nav-links a { color: var(--ink-3); }
 .nav-links a:hover, .nav-links a.active { color: var(--ink); text-decoration: none; }
-@media (max-width: 660px) { .nav-links a:not(.btn):not(.keep) { display: none; } }
+/* phone menu toggle: two bars that rotate into an X; hidden above 660px */
+.nav-toggle { display: none; background: none; border: 0; cursor: pointer;
+  padding: 0.7rem; margin: -0.35rem -0.45rem -0.35rem 0; }
+.nav-toggle span { display: block; width: 20px; height: 2px; border-radius: 2px;
+  background: var(--ink); margin: 5px 0;
+  transition: transform 0.2s var(--ease); }
+nav.menu-open .nav-toggle span:first-child { transform: translateY(3.5px) rotate(45deg); }
+nav.menu-open .nav-toggle span:last-child { transform: translateY(-3.5px) rotate(-45deg); }
+.nav-menu { display: none; }
+@media (max-width: 660px) {
+  .nav-links a:not(.btn):not(.keep) { display: none; }
+  .nav-links a.keep[data-auth=signin] { display: none; } /* lives in the menu */
+  .nav-toggle { display: block; }
+  /* the bar is transparent until scrolled; an open menu needs its own backdrop */
+  nav.menu-open {
+    background: oklch(13% 0.014 300 / 0.95); backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px); border-bottom-color: var(--line); }
+  nav.menu-open .nav-menu { display: flex; flex-direction: column;
+    position: absolute; top: 100%; left: 0; right: 0;
+    padding: 0.25rem 1.5rem 0.9rem;
+    background: oklch(13% 0.014 300 / 0.95); backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px); border-bottom: 1px solid var(--line); }
+  .nav-menu a { padding: 0.85rem 0; font-weight: 600; color: var(--ink-2);
+    border-bottom: 1px solid var(--line); }
+  .nav-menu a:last-child { border-bottom: none; }
+  .nav-menu a:hover, .nav-menu a.active { color: var(--ink); text-decoration: none; }
+}
 /* buttons */
 .btn {
   display: inline-block; font-family: var(--font); font-weight: 600; font-size: 0.92rem;
@@ -345,6 +371,20 @@ footer { border-top: 1px solid var(--line); margin-top: 2rem; }
 .foot-col a:hover { color: var(--ink); text-decoration: none; }
 .foot-bottom { max-width: var(--maxw); margin: 0 auto; padding: 0 1.5rem 2.5rem; color: var(--ink-3); font-size: 0.85rem; }
 .foot-bottom .disc { border-top: 1px solid var(--line); padding-top: 1.25rem; max-width: 75ch; }
+/* phone tier: tighter gutters and rhythm, hero type scaled for ~375px,
+   full-width primary CTA */
+@media (max-width: 640px) {
+  .wrap { padding: 0 1.1rem 4rem; }
+  .nav-inner { padding: 0.7rem 1.1rem; }
+  h1 { font-size: clamp(2.1rem, 9vw, 2.5rem); }
+  section { padding-top: clamp(3rem, 12vw, 4.5rem); }
+  .cta-row { gap: 0.8rem; }
+  .cta-row .btn.lg { width: min(100%, 320px); text-align: center; }
+  .plan { padding: 1.4rem 1.2rem; }
+  .contact-card { padding: 1.5rem 1.2rem; }
+  .foot-inner { gap: 1.75rem 2.5rem; padding: 2.25rem 1.1rem 2rem; }
+  .foot-bottom { padding: 0 1.1rem 2.25rem; }
+}
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   *, *::before, *::after { animation: none !important; transition: none !important; }
@@ -467,6 +507,27 @@ document.addEventListener('DOMContentLoaded', function () {
   function onScroll() { if (nav) nav.classList.toggle('scrolled', window.scrollY > 24); }
   window.addEventListener('scroll', onScroll, { passive: true });
   onScroll();
+
+  /* phone menu: dependency-free so it survives a failed Motion CDN load */
+  var tgl = document.querySelector('.nav-toggle');
+  if (tgl && nav) {
+    var setMenu = function (open) {
+      nav.classList.toggle('menu-open', open);
+      tgl.setAttribute('aria-expanded', open ? 'true' : 'false');
+    };
+    tgl.addEventListener('click', function () {
+      setMenu(!nav.classList.contains('menu-open'));
+    });
+    document.getElementById('nav-menu').addEventListener('click', function (e) {
+      if (e.target.closest('a')) setMenu(false);
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') { setMenu(false); tgl.blur(); }
+    });
+    document.addEventListener('click', function (e) {
+      if (!nav.contains(e.target)) setMenu(false);
+    });
+  }
 
   if (!window.Motion || navigator.webdriver
       || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
@@ -640,7 +701,16 @@ def _nav(active: str) -> str:
         f'<div class="nav-links">{links}'
         '<a class="keep" href="/app" data-auth="signin">Sign in</a>'
         '<a class="btn" href="/app#signup" data-auth="cta">Get started</a>'
-        "</div></div></nav>"
+        "</div>"
+        '<button class="nav-toggle" type="button" aria-label="Menu"'
+        ' aria-expanded="false" aria-controls="nav-menu">'
+        "<span></span><span></span></button>"
+        "</div>"
+        # Phone dropdown: same marketing links again, plus Sign in (the inline
+        # one hides <=660px). _auth_nav_js removes every [data-auth=signin].
+        f'<div class="nav-menu" id="nav-menu">{links}'
+        '<a href="/app" data-auth="signin">Sign in</a></div>'
+        "</nav>"
     )
 
 
@@ -782,27 +852,27 @@ _HOME_BODY = """
     <div class="hero-orb" aria-hidden="true"></div>
     <canvas id="aurora" aria-hidden="true"></canvas>
     <div class="float-card fc-chat" data-float aria-hidden="true">
-      <p class="fc-q">&ldquo;Why is ENB down today?&rdquo;</p>
-      <p class="fc-a">Crude fell after OPEC+ output news. ENB is your third-largest holding.</p>
+      <p class="fc-q">&ldquo;Why is my NVDA down today?&rdquo;</p>
+      <p class="fc-a">A court ruling in a big AI copyright lawsuit hit tech stocks. NVIDIA is your largest holding, so it moved your portfolio the most.</p>
     </div>
     <div class="float-card fc-digest" data-float aria-hidden="true">
       <div class="mock-top"><span class="mock-dot"></span>Morning digest
         <span class="mock-date">7:45 AM</span></div>
       <div class="mock-val"><span class="v" data-tick>$48,214</span>
-        <span class="d gain">+1.2% today</span></div>
+        <span class="d loss">&minus;0.4% today</span></div>
       <div class="mock-row"><span class="t">VFV</span>
         <span class="n">S&amp;P 500 ETF</span>
         <span class="chg gain">+0.8%</span></div>
       <div class="mock-row"><span class="t">NVDA</span>
         <span class="n">NVIDIA</span>
-        <span class="chg gain">+2.1%</span></div>
+        <span class="chg loss">&minus;2.1%</span></div>
       <div class="mock-row"><span class="t">ENB</span>
         <span class="n">Enbridge</span>
-        <span class="chg loss">&minus;1.2%</span></div>
+        <span class="chg gain">+0.6%</span></div>
     </div>
     <div class="float-card fc-alert" data-float aria-hidden="true">
       <span class="mock-alert-k">Macro alert</span>
-      <p class="fc-a">OPEC+ signals higher output. Crude down 3%; touches ENB and SU.</p>
+      <p class="fc-a">Major AI copyright lawsuit ruling shakes tech stocks. NVDA and MSFT in your portfolio are affected.</p>
     </div>
   </div>
 </section>
@@ -834,17 +904,17 @@ _HOME_BODY = """
 </section>
 
 <section id="showcase">
-  <h2 data-reveal>Ask about your book.</h2>
+  <h2 data-reveal>Ask about your investments.</h2>
   <p class="sect-lead" data-reveal>Every answer starts from the positions you
   actually hold.</p>
   <div class="show-panel chat-demo" data-chat aria-hidden="true">
     <div class="mock-top"><span class="mock-dot"></span>Chat</div>
-    <div class="bubble user">Why is ENB down today?</div>
-    <div class="bubble bot">Crude fell 3% after OPEC+ signalled higher August
-    output. ENB is your third-largest holding; pipelines are less exposed than
-    producers, but sentiment is dragging the sector.</div>
+    <div class="bubble user">Why is my NVDA down today?</div>
+    <div class="bubble bot">A court ruled against a major AI company in a copyright
+    lawsuit, and tech stocks sold off. NVIDIA is your largest holding, so it pulled
+    your portfolio down the most today.</div>
     <div class="bubble user">Anything to watch this week?</div>
-    <div class="bubble bot">Two things: NVDA reports earnings Wednesday after
+    <div class="bubble bot">Two things: Apple reports earnings Thursday after
     close, and the Bank of Canada rate decision lands Thursday morning.</div>
   </div>
 </section>
@@ -853,8 +923,9 @@ _HOME_BODY = """
   <h2 data-reveal>Connected in three minutes.</h2>
   <div class="steps" data-reveal-group>
     <div class="step" data-reveal-item><div class="num"></div><div><h3>Connect your brokerage</h3>
-    <p>Link through SnapTrade's secure portal. Cirvia never sees or stores your
-    brokerage login.</p></div></div>
+    <p>Pick your brokerage (Wealthsimple, Questrade, and more) and log in on a secure
+    connection page &mdash; the same way you&rsquo;d link your bank to a budgeting app.
+    We never see your password.</p></div></div>
     <div class="step" data-reveal-item><div class="num"></div><div><h3>We read your holdings</h3>
     <p>Read-only access syncs positions and balances. Cirvia can never place a trade
     or move money.</p></div></div>
@@ -872,10 +943,10 @@ _HOME_BODY = """
       and never handles your money.</p>
     </div>
     <ul class="checklist" data-reveal>
-      <li>Read-only brokerage access, always</li>
-      <li>Your credentials stay with your bank, never with us</li>
-      <li>Connection secrets encrypted at rest</li>
-      <li>Every account isolated at the database level</li>
+      <li>We can only view your investments &mdash; never touch them</li>
+      <li>Your brokerage password stays with your bank &mdash; we never see it</li>
+      <li>Everything is encrypted and stored securely</li>
+      <li>Your data is yours &mdash; no one else can ever see it</li>
     </ul>
   </div>
 </section>
@@ -890,12 +961,12 @@ _HOME_BODY = """
     <p>No. Cirvia is informational only. It explains and contextualizes; it does not
     tell you to buy or sell.</p></details>
     <details data-reveal-item><summary>Which brokerages work?</summary>
-    <p>Any brokerage SnapTrade supports — including Wealthsimple, Questrade, and
-    most major North American brokers. You pick yours in the secure connection
-    portal.</p></details>
+    <p>Wealthsimple, Questrade, and most major North American brokerages. Connections
+    are handled by SnapTrade, a trusted service that links millions of brokerage
+    accounts.</p></details>
     <details data-reveal-item><summary>How is my data protected?</summary>
-    <p>Brokerage credentials stay with your bank, connection secrets are encrypted,
-    and every account is isolated by row-level security. See our
+    <p>Your password stays with your brokerage, your data is encrypted, and your
+    information is completely separate from every other user&rsquo;s. See our
     <a href="/privacy">Privacy Policy</a>.</p></details>
   </div>
 </section>

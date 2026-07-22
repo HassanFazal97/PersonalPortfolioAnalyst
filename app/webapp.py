@@ -230,10 +230,21 @@ tr:last-child td { border-bottom: none; }
   border-radius: 4px; background: var(--surface-2); vertical-align: middle;
   animation: skl-pulse 1.4s ease-in-out infinite; }
 .earn-soon { color: var(--accent-text); font-weight: 650; }
-/* metric columns win over Qty when the main column narrows */
-@media (max-width: 1100px) {
-  #holdings th:nth-child(2), #holdings td:nth-child(2) { display: none; }
-}
+/* holdings: horizontal swipe with the Ticker column pinned left */
+#holdings { position: relative; }
+.table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.table-scroll table { min-width: 720px; }
+#holdings th:first-child, #holdings td:first-child {
+  position: sticky; left: 0; z-index: 2; background: var(--surface-1); }
+.holdings-row:hover td:first-child { background: var(--surface-2); }
+/* scroll affordances only when the table actually overflows */
+#holdings.is-scrollable th:first-child, #holdings.is-scrollable td:first-child {
+  box-shadow: 6px 0 10px -6px oklch(0% 0 0 / 0.55); }
+#holdings.is-scrollable::after {
+  content: ""; position: absolute; top: 0; right: 0; bottom: 0; width: 32px;
+  pointer-events: none; background: linear-gradient(to left, var(--surface-1), transparent);
+  transition: opacity 0.2s var(--ease); }
+#holdings.is-scrollable.at-end::after { opacity: 0; }
 .acct-count { font-size: 0.72rem; color: var(--ink-3); margin-left: 0.5rem; }
 .watchlist-badge { font-size: 0.68rem; font-weight: 650; color: var(--accent-text);
   border: 1px solid var(--accent); border-radius: 999px; padding: 0.1rem 0.45rem;
@@ -317,6 +328,31 @@ tr:last-child td { border-bottom: none; }
 .plan-limits li { margin: 0.3rem 0; }
 .danger-card { border-color: oklch(72% 0.14 25 / 0.45); }
 .danger-card h3 { color: var(--loss); }
+/* phone tier: tighter shell, wrapping headers, 16px inputs (stops iOS
+   focus-zoom), and >=44px tap targets */
+@media (max-width: 640px) {
+  .app-wrap { padding: 1.4rem 1rem 3rem; }
+  .nav-links { gap: 0.9rem; font-size: 0.88rem; }
+  .nav-links a.keep, .nav-links .link-btn { padding: 0.6rem 0.1rem; }
+  .topbar { flex-wrap: wrap; gap: 0.25rem 1rem; }
+  .dash-card { padding: 0.95rem 1rem 1.1rem; }
+  .dash-card h3 { flex-wrap: wrap; row-gap: 0.35rem; }
+  .refresh-row { flex-wrap: wrap; }
+  .filters-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; }
+  .filters-row select { width: 100%; min-width: 0; }
+  .chat-msg.user { margin-left: 1rem; }
+  .chat-msg.bot { margin-right: 1rem; }
+  input[type=email], input[type=password], input[type=time], input[type=tel],
+  input[type=url], input[type=text], select, .chat-row input { font-size: 1rem; }
+  .btn { display: inline-flex; align-items: center; justify-content: center;
+    min-height: 44px; }
+  .link-btn { padding: 0.5rem 0.25rem; margin: -0.5rem -0.25rem; }
+  .link-btn:hover { text-decoration: none; }
+  .chart-controls button { padding: 0.45rem 0.9rem; }
+  .auth-form-col { padding: 2.5rem 1.25rem; }
+  .ob-rail { overflow-x: auto; }
+  .step-panel { padding: 1.25rem 1rem; }
+}
 """
 
 _SHELL_JS = """
@@ -1659,15 +1695,24 @@ async function loadHoldings() {
         `<td class="m-fpe">${skl}</td><td class="m-yield">${skl}</td>` +
         `<td class="m-52w">${skl}</td><td class="m-earn">${skl}</td></tr>`;
     }
-    el.innerHTML = '<table><thead><tr><th>Ticker</th><th>Qty</th><th>Value</th>' +
+    el.innerHTML = '<div class="table-scroll"><table><thead><tr><th>Ticker</th><th>Qty</th><th>Value</th>' +
       '<th>Day</th><th>Total</th><th>Weight</th><th>Fwd P/E</th><th>Yield</th>' +
-      '<th>Off high</th><th>Earnings</th></tr></thead><tbody>' + rows + '</tbody></table>';
+      '<th>Off high</th><th>Earnings</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
     el.querySelectorAll('.holdings-row').forEach((row) => {
       // The whole row navigates; the ticker anchor keeps middle-click/new-tab.
       row.addEventListener('click', () => {
         window.location.href = '/app/stock/' + encodeURIComponent(row.dataset.ticker);
       });
     });
+    // Fade + pinned-column shadow only while there is more table to swipe to.
+    const sc = el.querySelector('.table-scroll');
+    const updScroll = () => {
+      el.classList.toggle('is-scrollable', sc.scrollWidth > sc.clientWidth + 1);
+      el.classList.toggle('at-end', sc.scrollLeft + sc.clientWidth >= sc.scrollWidth - 4);
+    };
+    sc.addEventListener('scroll', updScroll, { passive: true });
+    window.addEventListener('resize', updScroll, { passive: true });
+    updScroll();
     staggerIn(el.querySelectorAll('tbody tr'));
     buildDashWatchlist();
     loadMetrics();

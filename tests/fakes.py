@@ -211,6 +211,9 @@ class FakeRepo:
             user.stripe_current_period_end = None
             user.stripe_cancel_at_period_end = False
 
+    async def stripe_event_seen(self, event_id):
+        return event_id in getattr(self, "_stripe_events", {})
+
     async def record_stripe_event(self, event_id, event_type):
         if not hasattr(self, "_stripe_events"):
             self._stripe_events: dict[str, str] = {}

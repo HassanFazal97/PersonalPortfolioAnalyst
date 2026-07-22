@@ -1210,9 +1210,14 @@ def create_app() -> FastAPI:
                 status_code=400, detail="invalid Stripe signature"
             ) from exc
         repo = _require_repo(app)
-        if not await repo.record_stripe_event(event["id"], event["type"]):
+        if await repo.stripe_event_seen(event["id"]):
             return {"received": True, "duplicate": True}
+        # Record only after success: a failed event must stay unrecorded so
+        # Stripe's retry is processed rather than skipped as a duplicate.
+        # (A racing duplicate delivery double-processes harmlessly — handling
+        # re-fetches current Stripe state.)
         await billing.handle_event(repo, settings, event)
+        await repo.record_stripe_event(event["id"], event["type"])
         return {"received": True}
 
     @app.get("/news")

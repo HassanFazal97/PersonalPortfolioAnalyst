@@ -446,6 +446,50 @@ def test_webhook_duplicate_event_short_circuits(monkeypatch):
     assert len(calls) == 1  # processed exactly once
 
 
+def test_webhook_missing_subscription_is_acknowledged(monkeypatch):
+    """An event whose subscription Stripe no longer knows must 200 (no-op),
+    not 500 into a retry storm."""
+    client = _client(monkeypatch, FakeRepo())
+
+    async def fake_fetch(settings, sub_id):
+        return None  # what fetch_subscription returns on resource_missing
+
+    monkeypatch.setattr(billing, "fetch_subscription", fake_fetch)
+    payload = _event(
+        event_type="customer.subscription.updated", obj={"id": "sub_gone"}
+    )
+    resp = client.post(
+        "/webhooks/stripe", content=payload, headers=_signed_headers(payload)
+    )
+    assert resp.status_code == 200
+
+
+def test_webhook_failed_event_is_not_marked_processed(monkeypatch):
+    """A 500 during handling must leave the event unrecorded so Stripe's
+    retry is processed instead of short-circuiting as a duplicate."""
+    uid = uuid.uuid4()
+    repo = FakeRepo()
+    repo.seed_user(uid, stripe_customer_id="cus_1")
+    client = _client(monkeypatch, repo)
+    attempts = []
+
+    async def flaky_fetch(settings, sub_id):
+        attempts.append(sub_id)
+        if len(attempts) == 1:
+            raise RuntimeError("transient stripe outage")
+        return _sub("active")
+
+    monkeypatch.setattr(billing, "fetch_subscription", flaky_fetch)
+    payload = _event(obj={"id": "sub_1"})
+    headers = _signed_headers(payload)
+    with pytest.raises(RuntimeError):  # TestClient re-raises the app's 500
+        client.post("/webhooks/stripe", content=payload, headers=headers)
+    retry = client.post("/webhooks/stripe", content=payload, headers=headers)
+    assert retry.status_code == 200
+    assert "duplicate" not in retry.json()
+    assert repo._users_by_id[uid].plan == "pro"  # the retry actually processed
+
+
 def test_webhook_unknown_event_type_is_acknowledged(monkeypatch):
     client = _client(monkeypatch, FakeRepo())
     payload = _event(event_type="invoice.created", obj={"id": "in_1"})

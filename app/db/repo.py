@@ -328,9 +328,17 @@ class Repo:
                 user.stripe_cancel_at_period_end = False
             await s.commit()
 
+    async def stripe_event_seen(self, event_id: str) -> bool:
+        """Whether this webhook event id was already processed successfully."""
+        async with self._session() as s:
+            return await s.get(StripeEvent, event_id) is not None
+
     async def record_stripe_event(self, event_id: str, event_type: str) -> bool:
-        """Record a webhook event id; False means it was already processed
-        (duplicate delivery) and the caller should skip it."""
+        """Mark a webhook event as processed. Called only AFTER successful
+        handling so a failed event stays unrecorded and Stripe's retry gets
+        processed instead of short-circuiting as a duplicate. False = another
+        delivery won the race (harmless: event handling re-fetches current
+        Stripe state, so double-processing is idempotent)."""
         async with self._session() as s:
             result = await s.execute(
                 pg_insert(StripeEvent)

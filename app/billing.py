@@ -132,11 +132,19 @@ def _as_dict(obj) -> dict:
     return obj.to_dict() if hasattr(obj, "to_dict") else dict(obj)
 
 
-async def fetch_subscription(settings: Settings, subscription_id: str) -> dict:
-    """Current subscription state from the Stripe API (canceled subs are
-    still retrievable). Module-level so tests can monkeypatch it."""
+async def fetch_subscription(settings: Settings, subscription_id: str) -> dict | None:
+    """Current subscription state from the Stripe API, or None when Stripe no
+    longer knows the id (canceled subs are retrievable; only deleted/foreign
+    resources 404 — treat those like an unknown customer, not an error).
+    Module-level so tests can monkeypatch it."""
     client = get_client(settings)
-    return _as_dict(await client.v1.subscriptions.retrieve_async(subscription_id))
+    try:
+        return _as_dict(await client.v1.subscriptions.retrieve_async(subscription_id))
+    except stripe.InvalidRequestError as exc:
+        if getattr(exc, "code", None) == "resource_missing":
+            logger.warning("subscription %s not found on Stripe — skipping", subscription_id)
+            return None
+        raise
 
 
 def _period_end(sub: dict) -> datetime | None:
@@ -217,12 +225,16 @@ async def handle_event(repo, settings: Settings, event) -> None:
             await repo.set_stripe_customer_id(uid, customer_id)
         sub_id = obj.get("subscription")
         if sub_id:
-            await sync_subscription(repo, await fetch_subscription(settings, sub_id))
+            sub = await fetch_subscription(settings, sub_id)
+            if sub is not None:
+                await sync_subscription(repo, sub)
     elif etype in (
         "customer.subscription.created",
         "customer.subscription.updated",
         "customer.subscription.deleted",
     ):
-        await sync_subscription(repo, await fetch_subscription(settings, obj["id"]))
+        sub = await fetch_subscription(settings, obj["id"])
+        if sub is not None:
+            await sync_subscription(repo, sub)
     else:
         logger.info("unhandled stripe event type %s — ignoring", etype)
