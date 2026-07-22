@@ -14,10 +14,21 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /srv
 
-# Install dependencies first for better layer caching.
+# Install dependencies from the hash-pinned lockfile first, for reproducible
+# builds and better layer caching. requirements.txt is generated from
+# pyproject.toml (see docs/DEPLOY.md "Dependencies & the lockfile"); regenerate
+# it whenever pyproject deps change. --require-hashes (auto-enabled since every
+# entry is hashed) makes the build fail closed rather than silently pulling a
+# newer release — this is what a stray SnapTrade SDK 12.0.0 upgrade would have
+# hit instead of reaching prod.
+COPY requirements.txt ./
+RUN pip install --require-hashes -r requirements.txt
+
+# Then the app package itself, with no dependency resolution (all deps are
+# already pinned-installed above).
 COPY pyproject.toml README.md ./
 COPY app ./app
-RUN pip install .
+RUN pip install --no-deps .
 
 # Scripts are run by path (migrate.py, sync_wealthsimple.py), not imported.
 COPY scripts ./scripts

@@ -43,6 +43,30 @@ Supabase JWTs alongside the service token.
 
 ---
 
+## Dependencies & the lockfile
+
+The Docker image installs from `requirements.txt`, a **hash-pinned lockfile**
+generated from `pyproject.toml`. `pyproject.toml` still declares the direct
+deps (with intentional bounds, e.g. `snaptrade-python-sdk>=11.0,<12`), but the
+build resolves nothing at deploy time — it installs the exact pinned set with
+`pip install --require-hashes`. This is deliberate: an unbounded `>=` with no
+lock once let a fresh `snaptrade-python-sdk` 12.0.0 release install itself on a
+routine rebuild and break brokerage connect in prod. The build now fails closed
+instead of drifting.
+
+**Regenerate the lock whenever you change deps in `pyproject.toml`:**
+```bash
+# uv is the resolver (https://docs.astral.sh/uv); output is a plain pip file,
+# so local dev and the Docker build stay pip-based.
+uv pip compile pyproject.toml --python-version 3.12 --generate-hashes -o requirements.txt
+```
+Target `--python-version 3.12` to match the image (`python:3.12-slim`). Commit
+`requirements.txt` alongside the `pyproject.toml` change; the next push
+rebuilds against the new pins. Adding a dependency without regenerating the
+lock fails the build (the new import is missing), which is the intended guard.
+
+---
+
 ## Migrations
 
 The container runs `python scripts/migrate.py && uvicorn …` on boot, so
