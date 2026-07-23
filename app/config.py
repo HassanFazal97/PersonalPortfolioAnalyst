@@ -31,10 +31,25 @@ class ModelPrice:
 MODEL_PRICES: dict[str, ModelPrice] = {
     "claude-sonnet-4-6": ModelPrice(input_per_mtok=3.0, output_per_mtok=15.0),
     "claude-haiku-4-5": ModelPrice(input_per_mtok=1.0, output_per_mtok=5.0),
+    # Not used by the product; priced so the eval judge (evals/) can be pointed
+    # at Opus without breaking cost accounting.
+    "claude-opus-4-8": ModelPrice(input_per_mtok=5.0, output_per_mtok=25.0),
 }
 
 # Fallback price for unknown models so cost accounting never crashes a run.
 DEFAULT_MODEL_PRICE = ModelPrice(input_per_mtok=3.0, output_per_mtok=15.0)
+
+# Embedding prices, USD per million tokens (input-only — embeddings have no
+# output tokens). Same rule as MODEL_PRICES: update here, never at call sites.
+EMBEDDING_PRICES: dict[str, float] = {
+    "voyage-3.5-lite": 0.02,
+    "voyage-3.5": 0.06,
+}
+DEFAULT_EMBEDDING_PRICE = 0.06
+
+
+def embedding_price_for(model: str) -> float:
+    return EMBEDDING_PRICES.get(model, DEFAULT_EMBEDDING_PRICE)
 
 
 def price_for(model: str) -> ModelPrice:
@@ -166,6 +181,44 @@ class Settings(BaseSettings):
     digest_max_iterations: int = Field(default=25, alias="DIGEST_MAX_ITERATIONS")
     digest_max_cost_usd: float = Field(default=1.50, alias="DIGEST_MAX_COST_USD")
 
+    # ---- Portfolio Deep Dive (multi-agent research; Pro-only) --------------
+    # Overall USD cap per run across all stages (plan + specialists + critic +
+    # synthesis). Economics: 2 dives/week ≈ $8/month worst case, which fits
+    # under PRO_MONTHLY_COST_CAP_USD alongside chat/digest use because real
+    # runs land far below the cap (specialists stop early on quiet portfolios).
+    deep_dive_max_cost_usd: float = Field(default=1.00, alias="DEEP_DIVE_MAX_COST_USD")
+    # Anchor-budget iteration ceiling summed across stages (each specialist
+    # also carries its own small per-stage budget; see deep_dive/specialists.py).
+    deep_dive_max_iterations: int = Field(default=40, alias="DEEP_DIVE_MAX_ITERATIONS")
+    # Rolling 7-day quota per Pro user. Owner/service token is exempt.
+    deep_dive_weekly_limit: int = Field(default=2, alias="DEEP_DIVE_WEEKLY_LIMIT")
+    # Cron for the scheduled weekly fan-out ("" disables; runs stay manual).
+    deep_dive_cron: str = Field(default="", alias="DEEP_DIVE_CRON")
+
+    # ---- Semantic memory (pgvector + Voyage embeddings) --------------------
+    # The feature switch: unset = no ingestion, no recall_memory chat tool
+    # (fail-open, like Finnhub/Twilio). Voyage is Anthropic's recommended
+    # embedding provider; we call its REST API with httpx — no extra SDK.
+    voyage_api_key: str = Field(default="", alias="VOYAGE_API_KEY")
+    embedding_model: str = Field(default="voyage-3.5-lite", alias="EMBEDDING_MODEL")
+    # Must match the vector(N) column in migration 019. Changing models means:
+    # truncate memory_chunks, migrate the column dimension, re-run the backfill
+    # (the table is a derived cache of digests/news_items/agent_runs).
+    embedding_dimensions: int = Field(default=1024, alias="EMBEDDING_DIMENSIONS")
+    memory_recall_max_results: int = Field(
+        default=6, alias="MEMORY_RECALL_MAX_RESULTS"
+    )
+    # Safety ceiling for scripts/backfill_memory.py (embeddings are ~$0.02/Mtok,
+    # so $1 covers years of content; the cap exists to make runaways impossible).
+    memory_backfill_max_cost_usd: float = Field(
+        default=1.00, alias="MEMORY_BACKFILL_MAX_COST_USD"
+    )
+
+    # ---- Eval harness (evals/) ----------------------------------------------
+    # LLM-as-judge model. Rubric-anchored absolute scoring, so a same-family
+    # judge is fine; point at claude-opus-4-8 for a stronger judge.
+    eval_judge_model: str = Field(default="claude-sonnet-4-6", alias="EVAL_JUDGE_MODEL")
+
     max_tool_output_tokens: int = Field(default=6000, alias="MAX_TOOL_OUTPUT_TOKENS")
     tool_timeout_seconds: float = Field(default=10.0, alias="TOOL_TIMEOUT_SECONDS")
 
@@ -184,8 +237,22 @@ class Settings(BaseSettings):
     free_monthly_cost_cap_usd: float = Field(default=1.50, alias="FREE_MONTHLY_COST_CAP_USD")
     pro_monthly_cost_cap_usd: float = Field(default=9.00, alias="PRO_MONTHLY_COST_CAP_USD")
     free_max_digest_holdings: int = Field(default=3, alias="FREE_MAX_DIGEST_HOLDINGS")
+    # ---- Pro per-holding digest breakdown ----------------------------------
+    # A Pro digest details each "mover/newsworthy" holding and summarizes the
+    # rest. A holding is detailed when its abs day move >= this, its abs week
+    # move >= 2x this, or it has a persisted same-day news item (persistence
+    # already applied the NEWS_MIN_SALIENCE floor). Everything else folds into a
+    # one-line quiet summary.
+    digest_mover_threshold_pct: float = Field(
+        default=2.0, alias="DIGEST_MOVER_THRESHOLD_PCT"
+    )
+    # Char cap for the Pro-only HOLDINGS section (separate from the SMS core's
+    # DIGEST_MAX_CHARS); an over-long section is bounced back to the model.
+    digest_holdings_max_chars: int = Field(
+        default=4000, alias="DIGEST_HOLDINGS_MAX_CHARS"
+    )
 
-    digest_cron: str = Field(default="45 7 * * 1-5", alias="DIGEST_CRON")
+    digest_cron: str = Field(default="0 9 * * 1-5", alias="DIGEST_CRON")
     tz: str = Field(default="America/Toronto", alias="TZ")
 
     # ---- Daily holding-news refresh (news_items feed) ----------------------
@@ -194,7 +261,7 @@ class Settings(BaseSettings):
     # shortly before DIGEST_CRON so the digest reuses the still-warm news
     # cache (NEWS_TTL_SECONDS). "" disables the in-process job — still
     # triggerable via POST /news/refresh.
-    news_refresh_cron: str = Field(default="35 7 * * *", alias="NEWS_REFRESH_CRON")
+    news_refresh_cron: str = Field(default="50 8 * * *", alias="NEWS_REFRESH_CRON")
     # Max articles persisted per ticker per run, importance-ranked.
     news_max_per_ticker: int = Field(default=2, alias="NEWS_MAX_PER_TICKER")
     # An article is kept when its classified signal is non-neutral OR its

@@ -26,6 +26,7 @@ from sqlalchemy import (
     func,
     text,
 )
+from pgvector.sqlalchemy import Vector
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -63,7 +64,7 @@ class User(Base):
     plan: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'free'"))
     timezone: Mapped[str] = mapped_column(Text, nullable=False, default="America/Toronto")
     digest_send_time: Mapped[time] = mapped_column(
-        Time, nullable=False, server_default=text("'07:45'")
+        Time, nullable=False, server_default=text("'09:00'")
     )
     digest_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("true")
@@ -265,6 +266,69 @@ class Digest(Base):
     created_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+
+class MemoryChunk(Base):
+    """Semantic-memory row: one embedded chunk of something the product told
+    this user (digest, news item, chat answer). A pure derived cache of those
+    source tables — safe to truncate and re-backfill on embedding-model
+    changes. ``content_date`` is the content's semantic date (digest date,
+    published_at, chat time), which recall filters on."""
+
+    __tablename__ = "memory_chunks"
+    __table_args__ = (
+        UniqueConstraint("user_id", "source_type", "source_id", "chunk_index"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    user_id: Mapped[uuid.UUID] = _user_id_column()
+    # digest | news | chat | alert (CHECK-constrained in migration 019)
+    source_type: Mapped[str] = mapped_column(Text, nullable=False)
+    source_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    chunk_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    tickers: Mapped[list] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'")
+    )
+    content_date: Mapped[date] = mapped_column(Date, nullable=False)
+    embedding: Mapped[list] = mapped_column(Vector(1024), nullable=False)
+    embedding_model: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class DeepDiveReport(Base):
+    """One multi-agent deep-dive research run (see app/agent/deep_dive/).
+
+    ``report`` is the structured JSON the dashboard renders; ``summary`` the
+    short deliverable text; ``progress`` a stage snapshot for reconnecting
+    progress UIs. ``run_id`` is the anchor agent_runs row that owns cost/
+    observability for the whole pipeline."""
+
+    __tablename__ = "deep_dive_reports"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    user_id: Mapped[uuid.UUID] = _user_id_column()
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("agent_runs.id"), nullable=False
+    )
+    # running | completed | partial | error
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="running")
+    report: Mapped[dict | None] = mapped_column(JSONB)
+    summary: Mapped[str | None] = mapped_column(Text)
+    progress: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'")
+    )
+    cost_usd: Mapped[Decimal | None] = mapped_column(Numeric)
+    created_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class OutboundMessage(Base):

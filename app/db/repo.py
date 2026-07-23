@@ -29,7 +29,9 @@ from app.config import DEFAULT_USER_ID
 from app.db.models import (
     AgentRun,
     Alert,
+    DeepDiveReport,
     Digest,
+    MemoryChunk,
     JobHeartbeat,
     ModelCall,
     NewsItem,
@@ -361,6 +363,12 @@ class Repo:
             await s.execute(delete(Digest).where(Digest.user_id == user_id))
             await s.execute(delete(Alert).where(Alert.user_id == user_id))
             await s.execute(delete(NewsItem).where(NewsItem.user_id == user_id))
+            await s.execute(
+                delete(DeepDiveReport).where(DeepDiveReport.user_id == user_id)
+            )
+            await s.execute(
+                delete(MemoryChunk).where(MemoryChunk.user_id == user_id)
+            )
             await s.execute(delete(AgentRun).where(AgentRun.user_id == user_id))
             await s.execute(
                 delete(OutboundMessage).where(OutboundMessage.user_id == user_id)
@@ -675,7 +683,8 @@ class Repo:
         body: str,
         digest_date: date,
         user_id: uuid.UUID | None = None,
-    ) -> None:
+    ) -> uuid.UUID:
+        """Returns the digest row id (memory ingestion references it)."""
         uid = user_id or _OWNER_USER_ID
         async with self._session() as s:
             existing = await s.execute(
@@ -685,11 +694,15 @@ class Repo:
             )
             row = existing.scalar_one_or_none()
             if row is None:
-                s.add(Digest(user_id=uid, run_id=run_id, body=body, digest_date=digest_date))
+                row = Digest(
+                    user_id=uid, run_id=run_id, body=body, digest_date=digest_date
+                )
+                s.add(row)
             else:
                 row.body = body
                 row.run_id = run_id
             await s.commit()
+            return row.id
 
     async def get_digest(
         self, digest_date: date, *, user_id: uuid.UUID | None = None
@@ -702,6 +715,140 @@ class Repo:
                 )
             )
             return result.scalar_one_or_none()
+
+    # ---- semantic memory (pgvector) ----------------------------------------
+
+    async def upsert_memory_chunks(self, rows: list[dict[str, Any]]) -> int:
+        """Insert embedded chunks; the (user_id, source_type, source_id,
+        chunk_index) unique key makes re-ingestion/backfill idempotent.
+        Returns the number of rows actually inserted."""
+        if not rows:
+            return 0
+        async with self._session() as s:
+            stmt = (
+                pg_insert(MemoryChunk)
+                .values(rows)
+                .on_conflict_do_nothing(
+                    index_elements=["user_id", "source_type", "source_id", "chunk_index"]
+                )
+            )
+            result = await s.execute(stmt)
+            await s.commit()
+            return result.rowcount or 0
+
+    async def search_memory(
+        self,
+        *,
+        user_id: uuid.UUID,
+        embedding: list[float],
+        k: int = 6,
+        tickers: list[str] | None = None,
+        date_from: date | None = None,
+        date_to: date | None = None,
+        source_types: list[str] | None = None,
+    ) -> list[tuple[MemoryChunk, float]]:
+        """Cosine-nearest chunks for this user, optionally filtered by ticker
+        (jsonb containment), date window, and source type. Returns
+        (chunk, cosine_distance) pairs, nearest first. The explicit user_id
+        filter is defense-in-depth alongside the RLS policy."""
+        async with self._session() as s:
+            dist = MemoryChunk.embedding.cosine_distance(embedding).label("dist")
+            stmt = (
+                select(MemoryChunk, dist)
+                .where(MemoryChunk.user_id == user_id)
+                .order_by(dist)
+                .limit(max(1, k))
+            )
+            if tickers:
+                stmt = stmt.where(
+                    or_(*[MemoryChunk.tickers.contains([t]) for t in tickers])
+                )
+            if date_from is not None:
+                stmt = stmt.where(MemoryChunk.content_date >= date_from)
+            if date_to is not None:
+                stmt = stmt.where(MemoryChunk.content_date <= date_to)
+            if source_types:
+                stmt = stmt.where(MemoryChunk.source_type.in_(source_types))
+            result = await s.execute(stmt)
+            return [(row[0], float(row[1])) for row in result.all()]
+
+    # ---- deep-dive reports -------------------------------------------------
+
+    async def create_deep_dive_report(
+        self, *, run_id: uuid.UUID, user_id: uuid.UUID | None = None
+    ) -> uuid.UUID:
+        async with self._session() as s:
+            row = DeepDiveReport(
+                user_id=user_id or _OWNER_USER_ID, run_id=run_id, status="running"
+            )
+            s.add(row)
+            await s.commit()
+            return row.id
+
+    async def update_deep_dive_report(
+        self,
+        report_id: uuid.UUID,
+        *,
+        status: str | None = None,
+        report: dict | None = None,
+        summary: str | None = None,
+        progress: dict | None = None,
+        cost_usd: float | None = None,
+    ) -> None:
+        async with self._session() as s:
+            row = await s.get(DeepDiveReport, report_id)
+            if row is None:
+                return
+            if status is not None:
+                row.status = status
+                if status in ("completed", "partial", "error"):
+                    row.completed_at = datetime.now(timezone.utc)
+            if report is not None:
+                row.report = report
+            if summary is not None:
+                row.summary = summary
+            if progress is not None:
+                row.progress = progress
+            if cost_usd is not None:
+                row.cost_usd = Decimal(str(cost_usd))
+            await s.commit()
+
+    async def get_deep_dive_report(
+        self, report_id: uuid.UUID
+    ) -> DeepDiveReport | None:
+        async with self._session() as s:
+            return await s.get(DeepDiveReport, report_id)
+
+    async def list_deep_dive_reports(
+        self, user_id: uuid.UUID, *, limit: int = 10
+    ) -> list[DeepDiveReport]:
+        """This user's reports, newest first (dashboard history)."""
+        async with self._session() as s:
+            result = await s.execute(
+                select(DeepDiveReport)
+                .where(DeepDiveReport.user_id == user_id)
+                .order_by(DeepDiveReport.created_at.desc())
+                .limit(limit)
+            )
+            return list(result.scalars().all())
+
+    async def deep_dive_usage_since(
+        self, user_id: uuid.UUID, since: datetime
+    ) -> tuple[int, datetime | None]:
+        """(count, oldest created_at) of deep dives in the window — quota is
+        counted on report rows, not agent_runs, so the pipeline's specialist
+        sub-runs don't inflate it."""
+        async with self._session() as s:
+            result = await s.execute(
+                select(
+                    func.count(DeepDiveReport.id), func.min(DeepDiveReport.created_at)
+                ).where(
+                    DeepDiveReport.user_id == user_id,
+                    DeepDiveReport.created_at >= since,
+                )
+            )
+            count, oldest = result.one()
+            return int(count or 0), oldest
 
     # ---- macro alerts ----------------------------------------------------
 
@@ -819,12 +966,14 @@ class Repo:
         items: list[dict[str, Any]],
         *,
         run_id: uuid.UUID | None = None,
-    ) -> int:
-        """Insert holding news articles; skip duplicates via fingerprint."""
+    ) -> list[NewsItem]:
+        """Insert holding news articles; skip duplicates via fingerprint.
+        Returns the rows actually inserted (memory ingestion embeds them;
+        callers wanting a count use ``len()``)."""
         if not items:
-            return 0
+            return []
         uid = user_id or _OWNER_USER_ID
-        inserted = 0
+        inserted: list[NewsItem] = []
         async with self._session() as s:
             for item in items:
                 fp = item.get("fingerprint") or self.news_fingerprint(
@@ -840,20 +989,19 @@ class Repo:
                 pub = item.get("published_at")
                 if isinstance(pub, str):
                     pub = datetime.fromisoformat(pub.replace("Z", "+00:00"))
-                s.add(
-                    NewsItem(
-                        user_id=uid,
-                        ticker=item["ticker"],
-                        headline=item["headline"],
-                        source=item.get("source"),
-                        url=item.get("url"),
-                        published_at=pub,
-                        summary=item.get("summary"),
-                        run_id=run_id,
-                        fingerprint=fp,
-                    )
+                row = NewsItem(
+                    user_id=uid,
+                    ticker=item["ticker"],
+                    headline=item["headline"],
+                    source=item.get("source"),
+                    url=item.get("url"),
+                    published_at=pub,
+                    summary=item.get("summary"),
+                    run_id=run_id,
+                    fingerprint=fp,
                 )
-                inserted += 1
+                s.add(row)
+                inserted.append(row)
             await s.commit()
         return inserted
 
@@ -1004,11 +1152,17 @@ class Repo:
         user_id: uuid.UUID | None = None,
         kind: str = "message",
         subject: str | None = None,
+        sms_body: str | None = None,
     ) -> uuid.UUID:
         """Queue a message for delivery, resolving the user's preferred channel
         now (destination snapshot). No verified, opted-in channel -> the row is
         written as 'skipped' with the reason in last_error, so generation always
-        succeeds and delivery state stays auditable."""
+        succeeds and delivery state stays auditable.
+
+        ``sms_body`` is a channel-aware override: when the resolved channel is
+        SMS, the shorter ``sms_body`` is delivered instead of ``body`` (which is
+        the richer version kept for email/Discord/web). Skipped rows retain the
+        full ``body`` for the audit trail."""
         uid = user_id or _OWNER_USER_ID
         payload: dict[str, Any] = {"kind": kind}
         if subject:
@@ -1037,6 +1191,8 @@ class Repo:
                 else:
                     msg.channel = preferred
                     msg.destination = row.destination
+                    if preferred == "sms" and sms_body:
+                        msg.body = sms_body
             s.add(msg)
             await s.commit()
             return msg.id

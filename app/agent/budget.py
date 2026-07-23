@@ -33,6 +33,12 @@ class Budget:
         self.output_tokens += output_tokens
         self.cost_usd += self._price.cost(input_tokens, output_tokens)
 
+    def record_flat_cost(self, usd: float) -> None:
+        """Fold a non-token cost into the run (e.g. an embedding call made by
+        the recall_memory tool — input-only pricing, so the token-pair
+        ``record_usage`` doesn't fit)."""
+        self.cost_usd += usd
+
     def start_iteration(self) -> None:
         self.iterations += 1
 

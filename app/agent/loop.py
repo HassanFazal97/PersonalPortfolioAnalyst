@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.agent.budget import Budget
+from app.agent.events import EventCallback, emit, tool_label
 from app.agent.prompts import BUDGET_SUMMARY_PROMPT, PROMPT_VERSION
 from app.auth.context import set_current_user_id
 from app.config import get_settings
@@ -141,14 +142,19 @@ async def safe_dispatch(
     schemas_by_name: dict[str, dict[str, Any]],
     timeout: float,
     max_output_tokens: int,
+    dispatch: dict[str, Any] | None = None,
 ) -> tuple[str, str | None]:
     """Execute one tool safely. Returns (result_string, error_message | None).
 
     Order: schema validation -> timeout -> one retry (timeout/connection only)
     -> truncate -> JSON-serialize. Errors become a returned message, never a
     raised exception (they flow into the conversation as is_error tool_results).
+
+    ``dispatch`` overrides the global table for this call — the eval harness
+    injects per-case fixture tools this way (a parameter, not a module-global
+    swap, so concurrent cases can't race).
     """
-    fn = DISPATCH.get(name)
+    fn = (dispatch or DISPATCH).get(name)
     if fn is None:
         msg = f"unknown tool '{name}'"
         return msg, msg
@@ -206,15 +212,20 @@ async def call_and_log(
     observer: Observer,
     iteration: int,
     budget: Budget,
+    max_tokens: int = 1024,
 ) -> tuple[list[dict[str, Any]], str | None]:
     """One model call: record usage into ``budget`` and persist it.
 
     Shared by the digest planner/synthesizer stages so their calls are logged
     identically to the main loop. Returns (content_dicts, stop_reason).
+
+    ``max_tokens`` defaults to 1024 (fine for the small JSON/text stages); the
+    synthesizer raises it so a rich per-holding digest isn't truncated mid
+    tool_use.
     """
     kwargs: dict[str, Any] = {
         "model": model,
-        "max_tokens": 1024,
+        "max_tokens": max_tokens,
         "system": system_prompt,
         "messages": messages,
     }
@@ -262,6 +273,8 @@ async def run_agent(
     ctx: ToolContext | None = None,
     user_id: Any | None = None,
     history: list[dict[str, Any]] | None = None,
+    on_event: EventCallback | None = None,
+    dispatch: dict[str, Any] | None = None,
 ) -> AgentResult:
     settings = get_settings()
     client = _get_client(client)
@@ -288,6 +301,7 @@ async def run_agent(
     )
     ctx.run_id = run_id
     observer = Observer(db, run_id)
+    await emit(on_event, {"type": "run_start", "run_id": str(run_id)})
 
     messages = build_initial_messages(user_message, history)
     tool_summaries: list[dict[str, Any]] = []
@@ -298,10 +312,19 @@ async def run_agent(
         while True:
             budget.start_iteration()
             iteration = budget.iterations
+            await emit(on_event, {"type": "iteration", "n": iteration})
 
-            response = await _call_model(
-                client, settings.model, system_prompt, messages, tools
-            )
+            # Stream token-by-token only when someone is listening AND the
+            # client supports it; scripted test doubles (and the digest
+            # pipeline, which passes no callback) stay on messages.create.
+            if on_event is not None and hasattr(client.messages, "stream"):
+                response = await _call_model_streaming(
+                    client, settings.model, system_prompt, messages, tools, on_event
+                )
+            else:
+                response = await _call_model(
+                    client, settings.model, system_prompt, messages, tools
+                )
             content_dicts = _content_to_dicts(_attr(response, "content"))
             usage = {
                 "input_tokens": _usage(response, "input_tokens"),
@@ -325,6 +348,10 @@ async def run_agent(
                 # A server-side tool (web_search) paused mid-turn; re-send the
                 # conversation so the server continues where it left off. The
                 # iteration/budget caps still bound runaway continuations.
+                await emit(
+                    on_event,
+                    {"type": "server_tool", "name": "web_search", "status": "searching"},
+                )
                 continue
 
             if stop_reason != "tool_use":
@@ -341,11 +368,14 @@ async def run_agent(
                 observer=observer,
                 iteration=iteration,
                 summaries=tool_summaries,
+                on_event=on_event,
+                dispatch=dispatch,
             )
 
             if budget.exceeded():
                 status = "budget_exceeded" if budget.cost_exceeded() else "max_iterations"
                 # Final turn: return tool_results plus a tools-off summary ask.
+                await emit(on_event, {"type": "status", "status": "budget_summary"})
                 messages.append(
                     {
                         "role": "user",
@@ -355,6 +385,7 @@ async def run_agent(
                 answer = await _summary_turn(
                     client, settings, system_prompt, messages, observer,
                     budget, status_iteration=budget.iterations + 1,
+                    on_event=on_event,
                 )
                 break
 
@@ -422,6 +453,47 @@ async def _call_model(client, model, system_prompt, messages, tools):
     )
 
 
+async def _call_model_streaming(client, model, system_prompt, messages, tools, on_event):
+    """Streaming twin of ``_call_model``: forwards text deltas and server-tool
+    starts to ``on_event``, then returns the accumulated final ``Message`` —
+    same shape as the non-streaming response, so everything downstream
+    (content dicts, budget, observer, pause_turn replay) is unchanged."""
+    system = [
+        {
+            "type": "text",
+            "text": system_prompt,
+            "cache_control": {"type": "ephemeral"},
+        }
+    ]
+    kwargs: dict[str, Any] = {
+        "model": model,
+        "max_tokens": 1024,
+        "system": system,
+        "messages": messages,
+    }
+    if tools:
+        kwargs["tools"] = tools
+    async with client.messages.stream(**kwargs) as stream:
+        async for event in stream:
+            etype = _attr(event, "type")
+            if etype == "content_block_delta":
+                delta = _attr(event, "delta")
+                if _attr(delta, "type") == "text_delta":
+                    await emit(on_event, {"type": "text_delta", "text": _attr(delta, "text", "")})
+            elif etype == "content_block_start":
+                block = _attr(event, "content_block")
+                if _attr(block, "type") == "server_tool_use":
+                    await emit(
+                        on_event,
+                        {
+                            "type": "server_tool",
+                            "name": _attr(block, "name", "web_search"),
+                            "status": "searching",
+                        },
+                    )
+        return await stream.get_final_message()
+
+
 def _usage(response: Any, key: str) -> int:
     usage = _attr(response, "usage")
     return int(_attr(usage, key, 0) or 0)
@@ -436,6 +508,16 @@ def _request_snapshot(model, system_prompt, messages, tools) -> dict[str, Any]:
     }
 
 
+def _input_summary(payload: dict[str, Any]) -> str:
+    """A short human-readable hint of what a tool was asked (for the UI)."""
+    for key in ("tickers", "ticker", "query"):
+        val = payload.get(key)
+        if val:
+            text = ", ".join(val) if isinstance(val, list) else str(val)
+            return _truncate(text, 80)
+    return ""
+
+
 async def _run_tools(
     tool_uses,
     *,
@@ -445,11 +527,22 @@ async def _run_tools(
     observer,
     iteration,
     summaries,
+    on_event=None,
+    dispatch=None,
 ) -> list[dict[str, Any]]:
     tool_results: list[dict[str, Any]] = []
     for block in tool_uses:
         name = block["name"]
         payload = block.get("input", {}) or {}
+        await emit(
+            on_event,
+            {
+                "type": "tool_start",
+                "name": name,
+                "label": tool_label(name),
+                "input_summary": _input_summary(payload),
+            },
+        )
         t0 = time.monotonic()
         result_str, error = await safe_dispatch(
             name,
@@ -458,9 +551,14 @@ async def _run_tools(
             schemas_by_name=schemas_by_name,
             timeout=TOOL_TIMEOUTS.get(name, settings.tool_timeout_seconds),
             max_output_tokens=settings.max_tool_output_tokens,
+            dispatch=dispatch,
         )
         latency_ms = int((time.monotonic() - t0) * 1000)
         is_error = error is not None
+        await emit(
+            on_event,
+            {"type": "tool_end", "name": name, "ok": not is_error, "latency_ms": latency_ms},
+        )
         await observer.tool_call(
             iteration=iteration,
             tool_name=name,
@@ -482,14 +580,20 @@ async def _run_tools(
 
 
 async def _summary_turn(
-    client, settings, system_prompt, messages, observer, budget, *, status_iteration
+    client, settings, system_prompt, messages, observer, budget, *, status_iteration,
+    on_event=None,
 ) -> str:
-    response = await client.messages.create(
-        model=settings.model,
-        max_tokens=1024,
-        system=system_prompt,
-        messages=messages,
-    )
+    if on_event is not None and hasattr(client.messages, "stream"):
+        response = await _call_model_streaming(
+            client, settings.model, system_prompt, messages, None, on_event
+        )
+    else:
+        response = await client.messages.create(
+            model=settings.model,
+            max_tokens=1024,
+            system=system_prompt,
+            messages=messages,
+        )
     content_dicts = _content_to_dicts(_attr(response, "content"))
     usage = {
         "input_tokens": _usage(response, "input_tokens"),

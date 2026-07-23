@@ -177,6 +177,106 @@ class FakeRepo:
             if r.get("user_id") == user_id and r.get("cost_usd") is not None
         )
 
+    # ---- semantic memory (mirrors app/db/repo.py) ------------------------
+    # Vector search is faked as insertion-order (no cosine math): unit tests
+    # assert plumbing/filters, not ranking quality.
+
+    async def upsert_memory_chunks(self, rows):
+        if not hasattr(self, "memory_chunks"):
+            self.memory_chunks = []
+        inserted = 0
+        seen = {
+            (c["user_id"], c["source_type"], c["source_id"], c["chunk_index"])
+            for c in self.memory_chunks
+        }
+        for row in rows:
+            key = (row["user_id"], row["source_type"], row["source_id"], row["chunk_index"])
+            if key in seen:
+                continue
+            seen.add(key)
+            self.memory_chunks.append(dict(row))
+            inserted += 1
+        return inserted
+
+    async def search_memory(self, *, user_id, embedding, k=6, tickers=None,
+                            date_from=None, date_to=None, source_types=None):
+        rows = []
+        for c in getattr(self, "memory_chunks", []):
+            if c["user_id"] != user_id:
+                continue
+            if tickers and not set(tickers) & set(c.get("tickers") or []):
+                continue
+            if date_from and c["content_date"] < date_from:
+                continue
+            if date_to and c["content_date"] > date_to:
+                continue
+            if source_types and c["source_type"] not in source_types:
+                continue
+            chunk = SimpleNamespace(**c)
+            rows.append((chunk, 0.25))
+        return rows[:k]
+
+    # ---- deep-dive reports (mirrors app/db/repo.py) ----------------------
+
+    async def create_deep_dive_report(self, *, run_id, user_id=None):
+        report_id = uuid.uuid4()
+        if not hasattr(self, "deep_dive_reports"):
+            self.deep_dive_reports = {}
+        self.deep_dive_reports[report_id] = SimpleNamespace(
+            id=report_id,
+            user_id=user_id,
+            run_id=run_id,
+            status="running",
+            report=None,
+            summary=None,
+            progress={},
+            cost_usd=None,
+            created_at=datetime.now(timezone.utc),
+            completed_at=None,
+        )
+        return report_id
+
+    async def update_deep_dive_report(
+        self, report_id, *, status=None, report=None, summary=None,
+        progress=None, cost_usd=None,
+    ):
+        row = getattr(self, "deep_dive_reports", {}).get(report_id)
+        if row is None:
+            return
+        if status is not None:
+            row.status = status
+            if status in ("completed", "partial", "error"):
+                row.completed_at = datetime.now(timezone.utc)
+        if report is not None:
+            row.report = report
+        if summary is not None:
+            row.summary = summary
+        if progress is not None:
+            row.progress = progress
+        if cost_usd is not None:
+            row.cost_usd = cost_usd
+
+    async def get_deep_dive_report(self, report_id):
+        return getattr(self, "deep_dive_reports", {}).get(report_id)
+
+    async def list_deep_dive_reports(self, user_id, *, limit=10):
+        rows = [
+            r
+            for r in getattr(self, "deep_dive_reports", {}).values()
+            if r.user_id == user_id
+        ]
+        rows.sort(key=lambda r: r.created_at, reverse=True)
+        return rows[:limit]
+
+    async def deep_dive_usage_since(self, user_id, since):
+        rows = [
+            r
+            for r in getattr(self, "deep_dive_reports", {}).values()
+            if r.user_id == user_id and r.created_at >= since
+        ]
+        oldest = min((r.created_at for r in rows), default=None)
+        return len(rows), oldest
+
     # ---- billing (mirrors app/db/repo.py) --------------------------------
 
     async def get_user_by_stripe_customer_id(self, customer_id):
@@ -349,6 +449,7 @@ class FakeRepo:
         self._digests_by_user[(uid, digest_date)] = row
         if uid == uuid.UUID(DEFAULT_USER_ID):
             self.digests[digest_date] = row
+        return row.id
 
     async def list_recent_digests(self, *, user_id=None, since=None, limit=50):
         from app.config import DEFAULT_USER_ID
@@ -371,7 +472,7 @@ class FakeRepo:
         from app.config import DEFAULT_USER_ID
 
         uid = user_id or uuid.UUID(DEFAULT_USER_ID)
-        inserted = 0
+        inserted = []
         for item in items:
             fp = item.get("fingerprint") or self.news_fingerprint(
                 item.get("url"), item["headline"]
@@ -382,7 +483,7 @@ class FakeRepo:
             pub = item.get("published_at")
             if isinstance(pub, str):
                 pub = datetime.fromisoformat(pub.replace("Z", "+00:00"))
-            self._news_items.append(SimpleNamespace(
+            row = SimpleNamespace(
                 id=uuid.uuid4(),
                 user_id=uid,
                 ticker=item["ticker"],
@@ -394,8 +495,9 @@ class FakeRepo:
                 run_id=run_id,
                 fingerprint=fp,
                 created_at=datetime.now(timezone.utc),
-            ))
-            inserted += 1
+            )
+            self._news_items.append(row)
+            inserted.append(row)
         return inserted
 
     async def list_news_items(self, *, user_id=None, ticker=None, since=None, limit=50):
@@ -597,15 +699,21 @@ class FakeRepo:
             if a.id == alert_id:
                 a.delivered = True
 
-    async def enqueue_outbound(self, body, *, user_id=None, kind="message", subject=None):
+    async def enqueue_outbound(self, body, *, user_id=None, kind="message",
+                               subject=None, sms_body=None):
+        # Mirror the real channel-aware routing: SMS gets the shorter sms_body,
+        # other channels get the (possibly richer) body.
+        user = self._users_by_id.get(user_id) if user_id is not None else None
+        preferred = getattr(user, "preferred_channel", None) if user else None
+        stored_body = sms_body if (preferred == "sms" and sms_body) else body
         msg_id = uuid.uuid4()
-        self.outbound.append(body)
+        self.outbound.append(stored_body)
         self._outbox[msg_id] = SimpleNamespace(
             id=msg_id,
-            body=body,
+            body=stored_body,
             status="queued",
             attempts=0,
-            channel=None,
+            channel=preferred,
             destination=None,
             payload={"kind": kind, **({"subject": subject} if subject else {})},
         )
@@ -829,3 +937,49 @@ def text_turn(text, *, in_tok=100, out_tok=20):
         "content": [{"type": "text", "text": text}],
         "usage": {"input_tokens": in_tok, "output_tokens": out_tok},
     }
+
+
+class _ScriptedStream:
+    """Async-context/iterator double for ``client.messages.stream(...)``:
+    synthesizes streaming events from a canned response, then hands the same
+    response back from ``get_final_message`` — mirroring the SDK's contract
+    that the final Message equals the accumulated stream."""
+
+    def __init__(self, response: dict[str, Any]) -> None:
+        self._response = response
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    def __aiter__(self):
+        async def gen():
+            for block in self._response.get("content", []):
+                btype = block.get("type")
+                if btype == "text":
+                    yield {"type": "content_block_start", "content_block": {"type": "text"}}
+                    text = block.get("text", "")
+                    mid = max(1, len(text) // 2)
+                    for chunk in (text[:mid], text[mid:]):
+                        if chunk:
+                            yield {
+                                "type": "content_block_delta",
+                                "delta": {"type": "text_delta", "text": chunk},
+                            }
+                else:
+                    yield {"type": "content_block_start", "content_block": dict(block)}
+        return gen()
+
+    async def get_final_message(self):
+        return self._response
+
+
+class ScriptedStreamingAnthropic(ScriptedAnthropic):
+    """ScriptedAnthropic that also exposes the streaming API, so the loop's
+    ``hasattr(client.messages, "stream")`` guard selects the streaming path."""
+
+    def stream(self, **kwargs):
+        self.calls.append(kwargs)
+        return _ScriptedStream(self._responses.pop(0))
