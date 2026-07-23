@@ -168,6 +168,16 @@ class Settings(BaseSettings):
         default="^GSPC", alias="FUNDAMENTALS_BETA_BENCHMARK"
     )
 
+    # ---- daily_prices store (adjusted-close cache for the quant engine) ----
+    # Nightly sync of held tickers (+ benchmark + FX) after the close, in TZ.
+    # "" disables the in-process job — the lazy fill-on-miss read path still
+    # populates the store. See app/tools/price_store.py.
+    daily_prices_cron: str = Field(default="40 18 * * 1-5", alias="DAILY_PRICES_CRON")
+    # History window the quant engine requests (~2 trading years).
+    daily_prices_history_days: int = Field(
+        default=730, alias="DAILY_PRICES_HISTORY_DAYS"
+    )
+
     chat_max_iterations: int = Field(default=10, alias="CHAT_MAX_ITERATIONS")
     # Prior Q&A pairs replayed into each chat run for follow-up questions
     # (0 disables memory). Each pair costs ~input tokens on every iteration.

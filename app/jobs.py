@@ -146,6 +146,11 @@ def job_health(
             "cron": settings.fundamentals_refresh_cron,
             "enabled": bool(settings.fundamentals_refresh_cron),
         },
+        "daily_prices_sync": {
+            "kind": "cron",
+            "cron": settings.daily_prices_cron,
+            "enabled": bool(settings.daily_prices_cron),
+        },
         "news_refresh": {
             "kind": "cron",
             "cron": settings.news_refresh_cron,

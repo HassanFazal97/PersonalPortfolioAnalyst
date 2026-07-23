@@ -39,6 +39,7 @@ class FakeRepo:
         self._news_fingerprints: set[tuple] = set()
         self.job_heartbeats: dict[str, SimpleNamespace] = {}
         self.ticker_fundamentals: dict[str, SimpleNamespace] = {}
+        self.daily_prices: dict[str, list[SimpleNamespace]] = {}
 
     def seed_user(self, user_id, *, plan="free", digest_enabled=True, email=None,
                   digest_tickers=None, stripe_customer_id=None,
@@ -764,6 +765,37 @@ class FakeRepo:
             fetched_at=datetime.now(timezone.utc),
             fetch_error=fetch_error,
         )
+
+    # ---- daily prices (global adjusted-close cache) ---------------------
+
+    async def get_daily_prices(self, ticker, *, since=None):
+        rows = self.daily_prices.get(ticker, [])
+        if since is not None:
+            rows = [r for r in rows if r.price_date >= since]
+        return sorted(rows, key=lambda r: r.price_date)
+
+    async def upsert_daily_prices(self, ticker, rows):
+        from datetime import date as _date
+
+        store = {r.price_date: r for r in self.daily_prices.get(ticker, [])}
+        n = 0
+        for r in rows:
+            d = r.get("date") if r.get("date") is not None else r.get("price_date")
+            if isinstance(d, str):
+                d = _date.fromisoformat(d)
+            adj = r.get("adj_close")
+            if d is None or adj is None:
+                continue
+            store[d] = SimpleNamespace(
+                ticker=ticker,
+                price_date=d,
+                adj_close=adj,
+                close=r.get("close"),
+                currency=r.get("currency"),
+            )
+            n += 1
+        self.daily_prices[ticker] = list(store.values())
+        return n
 
     # ---- notification channels (mirrors app/db/repo.py) -----------------
 

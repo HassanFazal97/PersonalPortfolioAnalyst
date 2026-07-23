@@ -24,7 +24,7 @@ from app.quant import returns as qreturns
 from app.quant import simulate as qsimulate
 from app.quant.covariance import ledoit_wolf
 from app.quant.riskdecomp import decompose
-from app.tools import fundamentals, market, portfolio
+from app.tools import fundamentals, portfolio, price_store
 from app.tools.tickers import normalize_tickers
 
 # ~2 calendar years so the covariance has ~500 daily observations — enough for
@@ -123,7 +123,9 @@ async def _load_portfolio_returns(
     async def _one(t: str) -> tuple[str, list[dict]]:
         async with sem:
             try:
-                return t, await market.get_adjusted_closes(t, HISTORY_DAYS)
+                # Reads the persistent daily_prices store (fill-on-miss), so
+                # repeated risk calls are reproducible and don't re-hit Yahoo.
+                return t, await price_store.get_adjusted_closes(ctx.repo, t, HISTORY_DAYS)
             except Exception:  # noqa: BLE001 - one bad ticker never kills the scan
                 return t, []
 

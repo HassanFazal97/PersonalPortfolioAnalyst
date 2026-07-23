@@ -10,6 +10,7 @@ import uuid
 from datetime import date, datetime, time
 from decimal import Decimal
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
@@ -26,7 +27,6 @@ from sqlalchemy import (
     func,
     text,
 )
-from pgvector.sqlalchemy import Vector
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -459,6 +459,25 @@ class TickerFundamentals(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     fetch_error: Mapped[str | None] = mapped_column(Text)
+
+
+class DailyPrice(Base):
+    """Global per-ticker daily adjusted-close cache (system table, not tenant
+    data). The quant engine's return-history source; one row per (ticker, date),
+    shared across users. ``adj_close`` is split/dividend-adjusted — the only
+    series safe for returns. Written by ``app/tools/price_store.py`` (lazy
+    fill-on-miss + the daily_prices_sync job)."""
+
+    __tablename__ = "daily_prices"
+
+    ticker: Mapped[str] = mapped_column(Text, primary_key=True)
+    price_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    adj_close: Mapped[Decimal] = mapped_column(Numeric, nullable=False)
+    close: Mapped[Decimal | None] = mapped_column(Numeric)
+    currency: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
 
 
 class SchemaMigration(Base):

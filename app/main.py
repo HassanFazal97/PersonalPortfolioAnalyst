@@ -70,6 +70,8 @@ from app.landing import (
     PRIVACY_HTML,
     TERMS_HTML,
 )
+from app.memory import ingest as memory_ingest
+from app.memory.embeddings import memory_enabled
 from app.plans import (
     effective_plan,
     max_digest_holdings,
@@ -78,9 +80,7 @@ from app.plans import (
 )
 from app.scheduler import DeliveryScheduler, DigestScheduler, IntervalScheduler
 from app.streaming import SENTINEL, ProgressBroker, sse_response
-from app.tools import fundamentals, market, portfolio, portfolio_risk
-from app.memory import ingest as memory_ingest
-from app.memory.embeddings import memory_enabled
+from app.tools import fundamentals, market, portfolio, portfolio_risk, price_store
 from app.tools.registry import (
     CHAT_TOOLS,
     PRO_CHAT_TOOLS,
@@ -115,6 +115,7 @@ async def lifespan(app: FastAPI):
     app.state.macro_scheduler = None
     app.state.anomaly_scheduler = None
     app.state.fundamentals_scheduler = None
+    app.state.daily_prices_scheduler = None
     app.state.news_scheduler = None
     app.state.deep_dive_scheduler = None
     app.state.delivery_scheduler = None
@@ -181,6 +182,20 @@ async def lifespan(app: FastAPI):
             fundamentals_scheduler.start()
             app.state.fundamentals_scheduler = fundamentals_scheduler
 
+        if settings.daily_prices_cron:
+            async def _run_daily_prices_sync() -> None:
+                await price_store.run_daily_prices_sync(repo, settings)
+
+            daily_prices_scheduler = DigestScheduler(
+                heartbeat_wrapped("daily_prices_sync", repo, _run_daily_prices_sync),
+                cron=settings.daily_prices_cron,
+                timezone=settings.tz,
+                job_id="daily_prices_sync",
+                misfire_grace_seconds=settings.digest_misfire_grace_seconds,
+            )
+            daily_prices_scheduler.start()
+            app.state.daily_prices_scheduler = daily_prices_scheduler
+
         if settings.news_refresh_cron:
             async def _run_news_refresh() -> None:
                 await run_news_refresh_for_all(repo)
@@ -237,6 +252,8 @@ async def lifespan(app: FastAPI):
             app.state.news_scheduler.shutdown()
         if app.state.fundamentals_scheduler is not None:
             app.state.fundamentals_scheduler.shutdown()
+        if app.state.daily_prices_scheduler is not None:
+            app.state.daily_prices_scheduler.shutdown()
         if app.state.anomaly_scheduler is not None:
             app.state.anomaly_scheduler.shutdown()
         if app.state.macro_scheduler is not None:

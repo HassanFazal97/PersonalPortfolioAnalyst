@@ -29,10 +29,11 @@ from app.config import DEFAULT_USER_ID
 from app.db.models import (
     AgentRun,
     Alert,
+    DailyPrice,
     DeepDiveReport,
     Digest,
-    MemoryChunk,
     JobHeartbeat,
+    MemoryChunk,
     ModelCall,
     NewsItem,
     NotificationChannel,
@@ -1558,3 +1559,61 @@ class Repo:
             )
             await s.execute(stmt)
             await s.commit()
+
+    # ---- daily prices (global per-ticker adjusted-close cache) ------------
+
+    async def get_daily_prices(
+        self, ticker: str, *, since: date | None = None
+    ) -> list[DailyPrice]:
+        """Stored adjusted closes for one ticker, oldest first, on/after
+        ``since`` (all history when ``since`` is None)."""
+        async with self._session() as s:
+            q = select(DailyPrice).where(DailyPrice.ticker == ticker)
+            if since is not None:
+                q = q.where(DailyPrice.price_date >= since)
+            q = q.order_by(DailyPrice.price_date)
+            result = await s.execute(q)
+            return list(result.scalars().all())
+
+    async def upsert_daily_prices(
+        self, ticker: str, rows: list[dict[str, Any]]
+    ) -> int:
+        """Bulk-upsert ``{date, adj_close[, close, currency]}`` rows for one
+        ticker. ``date`` is an ISO string or a ``date``. Returns the count."""
+        if not rows:
+            return 0
+        now = datetime.now(timezone.utc)
+        values = []
+        for r in rows:
+            d = r.get("date") if r.get("date") is not None else r.get("price_date")
+            if isinstance(d, str):
+                d = date.fromisoformat(d)
+            adj = r.get("adj_close")
+            if d is None or adj is None:
+                continue
+            values.append(
+                {
+                    "ticker": ticker,
+                    "price_date": d,
+                    "adj_close": adj,
+                    "close": r.get("close"),
+                    "currency": r.get("currency"),
+                    "updated_at": now,
+                }
+            )
+        if not values:
+            return 0
+        async with self._session() as s:
+            stmt = pg_insert(DailyPrice).values(values)
+            stmt = stmt.on_conflict_do_update(
+                index_elements=[DailyPrice.ticker, DailyPrice.price_date],
+                set_={
+                    "adj_close": stmt.excluded.adj_close,
+                    "close": stmt.excluded.close,
+                    "currency": stmt.excluded.currency,
+                    "updated_at": now,
+                },
+            )
+            await s.execute(stmt)
+            await s.commit()
+        return len(values)
