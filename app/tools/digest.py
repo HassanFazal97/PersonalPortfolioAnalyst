@@ -15,6 +15,8 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from app.config import get_settings
+from app.memory import ingest as memory_ingest
+from app.memory.embeddings import memory_enabled
 
 DIGEST_MAX_CHARS = 1000
 
@@ -25,11 +27,17 @@ SEND_DIGEST_SCHEMA = {
         "to finish. The body must be <= 1000 characters of plain text (no "
         "markdown), starting with a 'PORTFOLIO:' line, containing a 'TOP RISK' "
         "section, and ending with a 'WATCH TODAY:' line. If it is too long or "
-        "malformed you will be asked to fix it and try again."
+        "malformed you will be asked to fix it and try again. For a Pro digest, "
+        "also pass 'holdings': the per-holding breakdown (plain text, no "
+        "'HOLDINGS' label); it is shown on longer channels (email/Discord/web) "
+        "while 'body' alone is sent by text message."
     ),
     "input_schema": {
         "type": "object",
-        "properties": {"body": {"type": "string"}},
+        "properties": {
+            "body": {"type": "string"},
+            "holdings": {"type": "string"},
+        },
         "required": ["body"],
     },
 }
@@ -76,24 +84,58 @@ async def send_digest(payload: dict[str, Any], ctx: Any = None) -> dict[str, Any
         raise RuntimeError("send_digest requires database access")
 
     settings = get_settings()
+
+    # Optional Pro-only per-holding breakdown. The short `body` is the SMS core;
+    # the rich body (core + HOLDINGS) is stored and sent to longer channels.
+    holdings = payload.get("holdings")
+    rich_body = body
+    if isinstance(holdings, str) and holdings.strip():
+        holdings = holdings.strip()
+        if len(holdings) > settings.digest_holdings_max_chars:
+            raise ValueError(
+                f"holdings section is {len(holdings)} chars; must be <= "
+                f"{settings.digest_holdings_max_chars}. Shorten it (drop quiet "
+                "detail or tighten sentences) and call send_digest again."
+            )
+        rich_body = f"{body}\n\nHOLDINGS\n{holdings}"
+
     tz = getattr(ctx, "timezone", None) or settings.tz
     digest_date = _today(tz)
     run_id = getattr(ctx, "run_id", None)
     user_id = getattr(ctx, "user_id", None)
 
-    await ctx.repo.upsert_digest(
-        run_id=run_id, body=body, digest_date=digest_date, user_id=user_id
+    # Store the rich body so the dashboard and /digest/latest show the full
+    # breakdown; the SMS channel still gets the short core via `sms_body`.
+    digest_id = await ctx.repo.upsert_digest(
+        run_id=run_id, body=rich_body, digest_date=digest_date, user_id=user_id
     )
 
+    # Fire-and-forget semantic-memory ingestion (fail-open; no-op without a
+    # VOYAGE_API_KEY). The digest must never fail because embedding did.
+    if digest_id is not None and memory_enabled(settings):
+        async def _embed() -> None:
+            positions = await ctx.repo.list_positions(user_id=user_id)
+            await memory_ingest.embed_digest(
+                ctx.repo,
+                user_id=user_id,
+                digest_id=digest_id,
+                body=rich_body,
+                digest_date=digest_date,
+                holdings_tickers=sorted({p.ticker for p in positions}),
+            )
+
+        memory_ingest.schedule(_embed())
+
     await ctx.repo.enqueue_outbound(
-        body,
+        rich_body,
         user_id=user_id,
         kind="digest",
         subject=f"Your morning digest — {digest_date.strftime('%b %d')}",
+        sms_body=body,
     )
 
     return {
         "status": "sent",
         "digest_date": digest_date.isoformat(),
-        "chars": len(body),
+        "chars": len(rich_body),
     }

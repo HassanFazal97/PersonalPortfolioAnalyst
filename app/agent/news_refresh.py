@@ -22,6 +22,8 @@ from app.agent.budget import Budget
 from app.auth.context import set_current_user_id
 from app.config import DEFAULT_USER_ID, Settings, get_settings
 from app.db.repo import Repo
+from app.memory import ingest as memory_ingest
+from app.memory.embeddings import memory_enabled
 from app.plans import max_digest_holdings, user_plan_and_tz
 from app.tools import news
 from app.tools.classify import classify_news
@@ -110,7 +112,14 @@ async def persist_important_news(
         items.extend({**a, "ticker": ticker} for a in kept)
     if not items:
         return 0
-    return await db.insert_news_items_if_new(user_id, items, run_id=run_id)
+    inserted = await db.insert_news_items_if_new(user_id, items, run_id=run_id)
+    if inserted and memory_enabled(settings):
+        # Fire-and-forget semantic-memory ingestion of the new articles
+        # (fail-open; covers both the daily refresh and digest-day persists).
+        memory_ingest.schedule(
+            memory_ingest.embed_news_items(db, user_id=user_id, rows=list(inserted))
+        )
+    return len(inserted)
 
 
 def _news_tickers_for_user(
