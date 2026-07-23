@@ -20,6 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import httpx  # noqa: E402
 from sqlalchemy import select  # noqa: E402
 
 from app.config import get_settings  # noqa: E402
@@ -30,6 +31,24 @@ from app.memory.embeddings import EmbeddingClient  # noqa: E402
 
 # ~4 chars/token; used only for the --dry-run cost estimate.
 _CHARS_PER_TOKEN = 4
+
+# Free-tier Voyage keys allow ~3 requests/min; the runtime client fails fast
+# (chat can't wait), but a one-off backfill can afford to sit out 429 windows.
+_RATE_LIMIT_WAIT_SECONDS = 25.0
+_RATE_LIMIT_MAX_WAITS = 60
+
+
+async def _patient(coro_factory):
+    """Run an ingest step, waiting out Voyage 429s instead of crashing."""
+    for _ in range(_RATE_LIMIT_MAX_WAITS):
+        try:
+            return await coro_factory()
+        except httpx.HTTPStatusError as e:
+            if e.response is None or e.response.status_code != 429:
+                raise
+            print(f"  rate limited — waiting {_RATE_LIMIT_WAIT_SECONDS:.0f}s", flush=True)
+            await asyncio.sleep(_RATE_LIMIT_WAIT_SECONDS)
+    raise SystemExit("still rate limited after repeated waits; re-run to continue")
 
 
 async def _existing_source_ids(repo: Repo, user_id, source_type) -> set:
@@ -99,23 +118,23 @@ async def backfill_user(
         if client.cost_usd >= max_cost:
             print(f"  cost cap ${max_cost} reached — aborting; re-run to continue")
             break
-        counts["digest"] += await ingest.embed_digest(
+        counts["digest"] += await _patient(lambda d=d: ingest.embed_digest(
             repo, user_id=user_id, digest_id=d.id, body=d.body,
             digest_date=d.digest_date, holdings_tickers=holdings, client=client,
-        )
+        ))
     if news_rows and client.cost_usd < max_cost:
-        counts["news"] += await ingest.embed_news_items(
+        counts["news"] += await _patient(lambda: ingest.embed_news_items(
             repo, user_id=user_id, rows=news_rows, client=client
-        )
+        ))
     for c in chats:
         if client.cost_usd >= max_cost:
             print(f"  cost cap ${max_cost} reached — aborting; re-run to continue")
             break
-        counts["chat"] += await ingest.embed_chat_run(
+        counts["chat"] += await _patient(lambda c=c: ingest.embed_chat_run(
             repo, user_id=user_id, run_id=c.id, question=c.user_message,
             answer=c.final_answer, created_at=c.created_at,
             holdings_tickers=holdings, client=client,
-        )
+        ))
     return counts
 
 
