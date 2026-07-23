@@ -1,0 +1,25 @@
+# Eval harness: manual dispatch + weekly cron — deliberately NOT per-PR
+# (a full run costs ~$1.5–2; run locally before prompt-version bumps instead).
+name: evals
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: "0 12 * * 1"  # Mondays 12:00 UTC
+
+jobs:
+  evals:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+      - run: python -m evals.run --suite all --max-cost 5.00
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eval-report
+          path: evals/results/

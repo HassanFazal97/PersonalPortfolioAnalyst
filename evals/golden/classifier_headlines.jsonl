@@ -1,0 +1,33 @@
+# Labeled headlines for the news-signal classifier (exact-match on expected_signal).
+# Seeded from realistic patterns; extend by exporting real classified news_items
+# rows and hand-correcting labels.
+{"headline": "Regulator opens antitrust probe into Maplewood Systems", "summary": "The competition bureau is investigating pricing practices.", "expected_signal": "warning"}
+{"headline": "Trellis Energy cuts full-year guidance on weak demand", "summary": "Management lowered revenue outlook by 12%.", "expected_signal": "warning"}
+{"headline": "Northgate Bank misses Q2 earnings estimates", "summary": "EPS came in 8% below consensus on higher loan losses.", "expected_signal": "warning"}
+{"headline": "Class-action lawsuit filed against Corvid Pharma over trial disclosures", "summary": "Shareholders allege omitted safety data.", "expected_signal": "warning"}
+{"headline": "Helix Motors recalls 400,000 vehicles over brake defect", "summary": "Recall covers three model years.", "expected_signal": "warning"}
+{"headline": "Auditor flags going-concern doubt at Bluepine Retail", "summary": "Annual report cites liquidity pressure.", "expected_signal": "warning"}
+{"headline": "Quarry Metals announces dilutive share offering", "summary": "New issue expands share count by 15%.", "expected_signal": "warning"}
+{"headline": "Sable Software shares slide 11% after CFO resigns abruptly", "summary": "No successor named.", "expected_signal": "warning"}
+{"headline": "Credit agency downgrades Harborline Logistics to junk", "summary": "Cites leverage and weakening cash flow.", "expected_signal": "warning"}
+{"headline": "Data breach exposes customer records at Lanternet Communications", "summary": "Company says 2M accounts affected.", "expected_signal": "warning"}
+{"headline": "Ridgeway Semiconductor beats estimates and raises guidance", "summary": "Revenue up 38% year over year.", "expected_signal": "opportunity"}
+{"headline": "Analyst upgrades Fairbank Insurance to buy with 25% upside target", "summary": "Cites improving underwriting margins.", "expected_signal": "opportunity"}
+{"headline": "Copperfield Mining wins landmark court ruling on flagship project", "summary": "Clears final legal hurdle to construction.", "expected_signal": "opportunity"}
+{"headline": "Vantage Air announces $2B share buyback", "summary": "Board authorizes repurchase of 8% of float.", "expected_signal": "opportunity"}
+{"headline": "Brightcove Biotech's lead drug meets primary endpoint in phase 3", "summary": "Approval filing planned this year.", "expected_signal": "opportunity"}
+{"headline": "Osprey Cloud signs multi-year contract with federal government", "summary": "Deal worth up to $900M.", "expected_signal": "opportunity"}
+{"headline": "Kestrel Foods raises dividend 15% and issues strong outlook", "summary": "Tenth consecutive annual increase.", "expected_signal": "opportunity"}
+{"headline": "Halcyon Games soars after record holiday bookings", "summary": "Bookings up 44%; guidance raised.", "expected_signal": "opportunity"}
+{"headline": "Meridian Rail wins approval for strategic merger", "summary": "Regulators cleared the deal with minor conditions.", "expected_signal": "opportunity"}
+{"headline": "Solara Power secures financing for grid-scale storage expansion", "summary": "Fully funds the 2027 pipeline.", "expected_signal": "opportunity"}
+{"headline": "Ashford Holdings to present at industry conference next week", "summary": "CEO fireside chat scheduled Tuesday.", "expected_signal": "neutral"}
+{"headline": "Pinecrest Utilities declares regular quarterly dividend", "summary": "Unchanged at $0.42 per share.", "expected_signal": "neutral"}
+{"headline": "Whitmore Industrial appoints new head of investor relations", "summary": "Internal promotion effective May 1.", "expected_signal": "neutral"}
+{"headline": "Cobalt Ridge sets date for annual shareholder meeting", "summary": "Meeting to be held virtually in June.", "expected_signal": "neutral"}
+{"headline": "Juniper Retail completes previously announced store remodels", "summary": "Program finished on schedule.", "expected_signal": "neutral"}
+{"headline": "Statler Freight publishes annual sustainability report", "summary": "Details emissions targets.", "expected_signal": "neutral"}
+{"headline": "Arcadia Devices releases routine firmware update", "summary": "Maintenance release, no new features.", "expected_signal": "neutral"}
+{"headline": "Longview Capital files unchanged 13F holdings report", "summary": "Portfolio steady quarter over quarter.", "expected_signal": "neutral"}
+{"headline": "Beacon Chemical to attend trade show in Frankfurt", "summary": "Booth 12, hall B.", "expected_signal": "neutral"}
+{"headline": "Marlowe Media renews standard office lease in Toronto", "summary": "Ten-year term at market rates.", "expected_signal": "neutral"}
