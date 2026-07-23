@@ -181,6 +181,34 @@ tr:last-child td { border-bottom: none; }
   font-size: 0.93rem; line-height: 1.55; white-space: pre-wrap; color: var(--ink-2); }
 .chat-msg.user { background: var(--surface-2); margin-left: 2rem; }
 .chat-msg.bot { background: oklch(30% 0.1 295 / 0.35); margin-right: 2rem; }
+.chat-step { display: flex; align-items: center; gap: 0.45rem; color: var(--ink-3);
+  font-size: 0.82rem; margin: 0.15rem 0; }
+.chat-step .st { width: 1em; text-align: center; }
+.chat-step.done .st { color: var(--gain); }
+.chat-step.fail .st { color: var(--loss); }
+.chat-note { color: var(--ink-3); font-size: 0.85rem; font-style: italic; margin: 0.2rem 0; }
+/* deep dive */
+.dd-stages { list-style: none; padding: 0; margin: 0.75rem 0 0.25rem; }
+.dd-stages li { display: flex; align-items: center; gap: 0.5rem; margin: 0.35rem 0;
+  font-size: 0.9rem; color: var(--ink-2); flex-wrap: wrap; }
+.dd-stages .st { width: 1.1em; text-align: center; color: var(--ink-3); }
+.dd-stages li.done .st { color: var(--gain); }
+.dd-stages li.fail .st { color: var(--loss); }
+.dd-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-left: 0.4rem; }
+.dd-chip { font-size: 0.78rem; padding: 0.15rem 0.55rem; border-radius: 999px;
+  border: 1px solid var(--line); color: var(--ink-3); }
+.dd-chip.running { border-color: var(--accent-hover); color: var(--ink-2); }
+.dd-chip.done { border-color: var(--gain); }
+.dd-chip.fail { border-color: var(--loss); }
+.dd-activity { color: var(--ink-3); font-size: 0.8rem; margin-top: 0.4rem;
+  min-height: 1.1em; font-style: italic; }
+.dd-finding { margin: 0.5rem 0; padding: 0.4rem 0.75rem; border-left: 2px solid var(--line);
+  font-size: 0.92rem; line-height: 1.5; }
+.dd-finding .ev { color: var(--ink-3); font-size: 0.83rem; }
+.dd-badge { font-size: 0.72rem; padding: 0.1rem 0.45rem; border-radius: 999px;
+  border: 1px solid var(--line); color: var(--ink-3); margin-left: 0.4rem; white-space: nowrap; }
+.dd-badge.verified { color: var(--gain); border-color: var(--gain); }
+.dd-badge.challenged { color: var(--warn); border-color: var(--warn); }
 .chat-row { display: flex; gap: 0.5rem; }
 .chat-row input { flex: 1; padding: 0.65rem 0.8rem; border-radius: var(--r-s);
   border: 1px solid var(--line); background: var(--surface-2); color: var(--ink);
@@ -430,6 +458,7 @@ def _page(
         shell = f"""<nav><div class="nav-inner">
 <a class="logo" href="/">Cir<span>via</span></a>
 <div class="nav-links"><a class="keep" href="/app/dashboard">Dashboard</a>
+<a class="keep" href="/app/risk">Risk Lab</a>
 <a class="keep" href="/app/settings">Settings</a>
 <button class="link-btn" onclick="signOut()">Sign out</button></div>
 </div></nav>
@@ -1096,7 +1125,7 @@ _ONBOARDING_BODY = """
     <label for="tz">Timezone</label>
     <select id="tz"></select>
     <label for="send-time">Send time</label>
-    <input type="time" id="send-time" value="07:45">
+    <input type="time" id="send-time" value="09:00">
     <button class="btn full" id="prefs-btn">Continue</button>
     <div class="error-box" id="prefs-error"></div>
   </div>
@@ -1393,6 +1422,28 @@ _DASHBOARD_BODY = """
       <button class="link-btn" id="connection-banner-dismiss">Dismiss</button>
     </span>
   </div>
+  <div class="dash-card" id="digest-card" style="display:none;">
+    <h3>Today's digest <span class="updated-at" id="digest-updated"></span></h3>
+    <div class="digest-body" id="digest-body"></div>
+  </div>
+
+  <div class="dash-card" id="deep-dive-card">
+    <h3>Deep Dive <span class="tag">Pro</span>
+      <span class="refresh-row">
+        <select id="dd-history" style="display:none;"></select>
+        <button class="btn" id="dd-run-btn">Run deep dive</button>
+      </span>
+    </h3>
+    <p class="muted-note" id="dd-blurb" style="margin-top:0.5rem;">A team of AI
+    research agents — fundamentals, technical, risk, and news — investigates
+    your portfolio in parallel, a verifier adversarially re-checks their
+    claims against live data, and a final agent writes the report.</p>
+    <div id="dd-progress" style="display:none;"></div>
+    <div class="dd-activity" id="dd-activity" style="display:none;"></div>
+    <div id="dd-report" style="display:none;"></div>
+    <div class="error-box" id="dd-error"></div>
+  </div>
+
   <div class="dash-card">
     <h3>News</h3>
     <div class="filters-row" id="news-filters">
@@ -1524,7 +1575,7 @@ function newsQuery(extra) {
 // as headings. Applied to already-escaped text, so no injection surface.
 function formatNewsBody(body) {
   return esc(body).replace(
-    /^(PORTFOLIO:|TOP RISK|NOTABLE|WATCH TODAY:)/gm, '<strong>$1</strong>');
+    /^(PORTFOLIO:|TOP RISK|NOTABLE|WATCH TODAY:|HOLDINGS|QUIET:)/gm, '<strong>$1</strong>');
 }
 
 // Day buckets use the item's publish time when known (holding articles) and
@@ -1576,6 +1627,24 @@ function renderNewsItems(el, items, emptyMsg) {
   staggerIn(el.querySelectorAll('.news-item'));
 }
 
+async function loadDigest() {
+  const card = document.getElementById('digest-card');
+  try {
+    const res = await api('/digest/latest');
+    if (!res.ok) { card.style.display = 'none'; return; }  // 404 until today's runs
+    const data = await res.json();
+    if (!data || !data.body) { card.style.display = 'none'; return; }
+    document.getElementById('digest-body').innerHTML = formatNewsBody(data.body);
+    if (data.generated_at) {
+      document.getElementById('digest-updated').textContent =
+        new Date(data.generated_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    }
+    card.style.display = 'block';
+  } catch (e) {
+    card.style.display = 'none';
+  }
+}
+
 async function loadGeneralNews() {
   const el = document.getElementById('general-news');
   try {
@@ -1611,6 +1680,7 @@ async function loadMe() {
         'up to ' + (meProfile.digest_tickers_limit || 3);
     }
     renderChatQuota(meProfile.chat_quota);
+    initDeepDive();
   } catch (e) {}
 }
 
@@ -1844,18 +1914,122 @@ async function sendChat() {
   addMsg(message, 'user');
   const pending = addMsg('Thinking…', 'bot');
   try {
-    const resp = await api('/chat', { method: 'POST', body: JSON.stringify({ message }) });
-    const data = await resp.json().catch(() => ({}));
-    if (!resp.ok) {
-      pending.textContent = data.detail || 'Something went wrong.';
-    } else {
-      pending.textContent = data.answer || '(no answer)';
-      if (data.chat_quota) renderChatQuota(data.chat_quota);
-    }
+    await sendChatStream(message, pending);
   } catch (e) {
-    pending.textContent = 'Network error. Try again.';
+    // Transport failed before the stream produced anything (proxy buffering,
+    // old deploy without /chat/stream): retry once via the JSON endpoint.
+    try { await sendChatFallback(message, pending); }
+    catch (e2) { pending.textContent = 'Network error. Try again.'; }
   } finally {
     sendBtn.disabled = false; input.focus();
+  }
+}
+
+// SSE over fetch: EventSource can't POST or send the Bearer header, so we
+// parse text/event-stream frames off the response body by hand.
+async function sendChatStream(message, pending) {
+  const resp = await api('/chat/stream', { method: 'POST', body: JSON.stringify({ message }) });
+  if (!resp.ok) {
+    // Quota/concurrency errors are real answers, not transport failures.
+    const data = await resp.json().catch(() => ({}));
+    pending.textContent = data.detail || 'Something went wrong.';
+    return;
+  }
+  if (!resp.body) throw new Error('streaming unsupported');
+  pending.textContent = '';
+  const steps = document.createElement('div');
+  const live = document.createElement('div');
+  pending.appendChild(steps); pending.appendChild(live);
+  const openSteps = {};   // tool name -> [step elements awaiting tool_end]
+  let webStep = null;
+  let gotEvent = false, finished = false;
+
+  function addStep(icon, text) {
+    const step = document.createElement('div');
+    step.className = 'chat-step';
+    const st = document.createElement('span'); st.className = 'st'; st.textContent = icon;
+    const label = document.createElement('span'); label.textContent = text;
+    step.appendChild(st); step.appendChild(label);
+    steps.appendChild(step);
+    return step;
+  }
+
+  function handleEvent(name, data) {
+    gotEvent = true;
+    if (name === 'text_delta') {
+      live.textContent += data.text || '';
+    } else if (name === 'tool_start') {
+      // Narration before a tool call is thinking-out-loud, not the answer:
+      // demote it to a muted note. The final answer arrives via 'done'.
+      if (live.textContent.trim()) {
+        const note = document.createElement('div');
+        note.className = 'chat-note';
+        note.textContent = live.textContent.trim();
+        steps.appendChild(note);
+        live.textContent = '';
+      }
+      const suffix = data.input_summary ? ' — ' + data.input_summary : '';
+      const step = addStep('⚙', (data.label || data.name) + suffix + '…');
+      (openSteps[data.name] = openSteps[data.name] || []).push(step);
+    } else if (name === 'tool_end') {
+      const step = (openSteps[data.name] || []).shift();
+      if (step) {
+        step.classList.add(data.ok ? 'done' : 'fail');
+        step.firstChild.textContent = data.ok ? '✓' : '✗';
+      }
+    } else if (name === 'server_tool') {
+      if (!webStep) webStep = addStep('⚙', 'Searching the web…');
+    } else if (name === 'done') {
+      finished = true;
+      pending.textContent = data.answer || '(no answer)';   // authoritative
+      if (data.chat_quota) renderChatQuota(data.chat_quota);
+    } else if (name === 'error') {
+      finished = true;
+      pending.textContent = data.detail || 'Something went wrong.';
+    }
+    log.scrollTop = log.scrollHeight;
+  }
+
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf('\\n\\n')) >= 0) {
+        const frame = buf.slice(0, idx); buf = buf.slice(idx + 2);
+        let ev = 'message', dataStr = '';
+        for (const line of frame.split('\\n')) {
+          if (line.startsWith('event:')) ev = line.slice(6).trim();
+          else if (line.startsWith('data:')) dataStr += line.slice(5).trim();
+          // lines starting with ':' are heartbeats — ignored
+        }
+        if (!dataStr) continue;
+        try { handleEvent(ev, JSON.parse(dataStr)); } catch (e) { /* skip bad frame */ }
+      }
+    }
+  } catch (e) {
+    if (!gotEvent) throw e;   // nothing received yet -> caller may fall back
+  }
+  if (!finished) {
+    if (!gotEvent) throw new Error('stream ended without events');
+    // Mid-run drop: the run finishes server-side; history has the answer.
+    pending.textContent = 'Connection lost — refresh to see the answer in chat history.';
+  }
+}
+
+async function sendChatFallback(message, pending) {
+  pending.textContent = 'Thinking…';
+  const resp = await api('/chat', { method: 'POST', body: JSON.stringify({ message }) });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    pending.textContent = data.detail || 'Something went wrong.';
+  } else {
+    pending.textContent = data.answer || '(no answer)';
+    if (data.chat_quota) renderChatQuota(data.chat_quota);
   }
 }
 
@@ -1881,6 +2055,277 @@ async function loadChatHistory() {
 }
 
 loadChatHistory();
+
+// --- deep dive (multi-agent research) ----------------------------------------
+// POST /deep-dive kicks off the pipeline server-side; progress arrives over
+// SSE (fetch + reader, same reason as chat: EventSource can't send the Bearer
+// header). The server persists a progress snapshot, so a refresh mid-run
+// rehydrates from the first dd_snapshot frame.
+
+const DD_STAGES = [
+  ['plan', 'Plan research questions'],
+  ['research', 'Specialists investigate in parallel'],
+  ['verify', 'Adversarial verification'],
+  ['synthesize', 'Write the report'],
+];
+const DD_SPECIALISTS = {
+  fundamentals: 'Fundamentals', technical: 'Technical',
+  risk: 'Risk', news_macro: 'News & macro',
+};
+
+async function readSse(resp, handle) {
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let idx;
+    while ((idx = buf.indexOf('\\n\\n')) >= 0) {
+      const frame = buf.slice(0, idx); buf = buf.slice(idx + 2);
+      let ev = 'message', dataStr = '';
+      for (const line of frame.split('\\n')) {
+        if (line.startsWith('event:')) ev = line.slice(6).trim();
+        else if (line.startsWith('data:')) dataStr += line.slice(5).trim();
+      }
+      if (!dataStr) continue;
+      try { handle(ev, JSON.parse(dataStr)); } catch (e) { /* skip bad frame */ }
+    }
+  }
+}
+
+function ddStatusIcon(status) {
+  return status === 'completed' ? '✓' : status === 'failed' ? '✗'
+    : status === 'started' || status === 'running' ? '◌' : '·';
+}
+
+function ddRenderProgress(progress) {
+  const box = document.getElementById('dd-progress');
+  box.style.display = 'block';
+  document.getElementById('dd-report').style.display = 'none';
+  const ul = document.createElement('ul');
+  ul.className = 'dd-stages';
+  for (const [key, label] of DD_STAGES) {
+    const status = progress[key] || 'pending';
+    const li = document.createElement('li');
+    if (status === 'completed') li.className = 'done';
+    if (status === 'failed') li.className = 'fail';
+    const st = document.createElement('span'); st.className = 'st';
+    st.textContent = ddStatusIcon(status);
+    const lbl = document.createElement('span'); lbl.textContent = label;
+    li.appendChild(st); li.appendChild(lbl);
+    if (key === 'research') {
+      const chips = document.createElement('span'); chips.className = 'dd-chips';
+      const specs = progress.specialists || {};
+      for (const [name, human] of Object.entries(DD_SPECIALISTS)) {
+        const chip = document.createElement('span');
+        const s = specs[name] || 'pending';
+        chip.className = 'dd-chip ' +
+          (s === 'completed' ? 'done' : s === 'failed' ? 'fail' : s === 'running' ? 'running' : '');
+        chip.textContent = human;
+        chips.appendChild(chip);
+      }
+      li.appendChild(chips);
+    }
+    ul.appendChild(li);
+  }
+  box.innerHTML = '';
+  box.appendChild(ul);
+}
+
+function ddBadge(verification) {
+  const b = document.createElement('span');
+  b.className = 'dd-badge ' + (verification === 'verified' ? 'verified'
+    : verification === 'challenged' ? 'challenged' : '');
+  b.textContent = verification === 'verified' ? '✓ verified'
+    : verification === 'challenged' ? '⚠ challenged' : 'unverified';
+  return b;
+}
+
+function ddRenderReport(r) {
+  const box = document.getElementById('dd-report');
+  const report = r.report || {};
+  document.getElementById('dd-progress').style.display = 'none';
+  document.getElementById('dd-activity').style.display = 'none';
+  box.innerHTML = '';
+  box.style.display = 'block';
+
+  const meta = document.createElement('p');
+  meta.className = 'muted-note';
+  const when = r.completed_at || r.created_at;
+  meta.textContent = (r.status === 'partial' ? 'Partial report · ' : '') +
+    (when ? new Date(when).toLocaleString() : '');
+  box.appendChild(meta);
+
+  if (report.headline) {
+    const h = document.createElement('h4'); h.textContent = report.headline;
+    box.appendChild(h);
+  }
+  for (const para of String(report.overview || r.summary || '').split('\\n\\n')) {
+    if (!para.trim()) continue;
+    const p = document.createElement('p'); p.textContent = para.trim();
+    box.appendChild(p);
+  }
+  for (const section of report.sections || []) {
+    const h = document.createElement('h4');
+    h.textContent = section.title || DD_SPECIALISTS[section.specialist] || section.specialist;
+    box.appendChild(h);
+    for (const f of section.findings || []) {
+      const div = document.createElement('div'); div.className = 'dd-finding';
+      const claim = document.createElement('div');
+      const strong = document.createElement('strong'); strong.textContent = f.claim || '';
+      claim.appendChild(strong);
+      claim.appendChild(ddBadge(f.verification));
+      div.appendChild(claim);
+      const ev = document.createElement('div'); ev.className = 'ev';
+      ev.textContent = (f.evidence || '') +
+        (f.verification === 'challenged' && f.verification_note ? ' — verifier: ' + f.verification_note : '');
+      div.appendChild(ev);
+      box.appendChild(div);
+    }
+  }
+  const lists = [['Risks', report.risks], ['Opportunities', report.opportunities]];
+  for (const [title, items] of lists) {
+    if (!items || !items.length) continue;
+    const h = document.createElement('h4'); h.textContent = title;
+    box.appendChild(h);
+    const ul = document.createElement('ul');
+    for (const item of items) {
+      const li = document.createElement('li');
+      li.textContent = item.text + (item.severity ? ' (' + item.severity + ')' : '');
+      ul.appendChild(li);
+    }
+    box.appendChild(ul);
+  }
+  const foot = document.createElement('p'); foot.className = 'muted-note';
+  const vs = report.verification_summary || {};
+  let footText = '';
+  if (vs.checked) footText += vs.checked + ' claims checked, ' + vs.verified + ' verified, ' + vs.challenged + ' challenged. ';
+  if ((report.failed_specialists || []).length) {
+    footText += 'No findings from: ' + report.failed_specialists.join(', ') + '. ';
+  }
+  foot.textContent = footText + (report.disclaimer || 'Informational only — not investment advice.');
+  box.appendChild(foot);
+}
+
+async function ddOpenStream(reportId) {
+  const activity = document.getElementById('dd-activity');
+  let progress = {};
+  let sawDone = false;
+  try {
+    const resp = await api('/deep-dive/' + reportId + '/events');
+    if (!resp.ok || !resp.body) throw new Error('stream unavailable');
+    await readSse(resp, (ev, data) => {
+      if (ev === 'dd_snapshot') {
+        progress = data.progress || {};
+        ddRenderProgress(progress);
+        if (data.status && data.status !== 'running') { sawDone = true; ddLoadLatest(reportId); }
+        else activity.style.display = 'block';
+      } else if (ev === 'dd_stage') {
+        progress[data.stage] = data.status;
+        ddRenderProgress(progress);
+      } else if (ev === 'dd_specialist') {
+        progress.specialists = progress.specialists || {};
+        progress.specialists[data.name] = data.status;
+        ddRenderProgress(progress);
+      } else if (ev === 'dd_tool') {
+        activity.style.display = 'block';
+        activity.textContent = (data.specialist_label || data.specialist) + ': ' + (data.label || data.name) + '…';
+      } else if (ev === 'dd_done') {
+        sawDone = true;
+        ddLoadLatest(data.report_id);
+      }
+    });
+  } catch (e) { /* fall through to polling below */ }
+  if (!sawDone) ddLoadLatest(reportId); // stream dropped: state is in the DB
+}
+
+async function ddLoadLatest(reportId) {
+  try {
+    const r = await (await api('/deep-dive/' + reportId)).json();
+    if (r.status === 'running') {
+      ddRenderProgress(r.progress || {});
+    } else if (r.status === 'error') {
+      document.getElementById('dd-progress').style.display = 'none';
+      document.getElementById('dd-activity').style.display = 'none';
+      const err = document.getElementById('dd-error');
+      err.textContent = 'The deep dive failed — nothing was charged beyond the work done. Try again.';
+      err.style.display = 'block';
+    } else {
+      ddRenderReport(r);
+    }
+  } catch (e) {}
+}
+
+async function ddRefreshHistory() {
+  try {
+    const data = await (await api('/deep-dive')).json();
+    const reports = data.reports || [];
+    const sel = document.getElementById('dd-history');
+    if (!reports.length) { sel.style.display = 'none'; return null; }
+    sel.innerHTML = '';
+    for (const r of reports) {
+      const opt = document.createElement('option');
+      opt.value = r.report_id;
+      const when = r.completed_at || r.created_at;
+      opt.textContent = (when ? new Date(when).toLocaleDateString() : '?') + ' · ' + r.status;
+      sel.appendChild(opt);
+    }
+    sel.style.display = reports.length > 1 ? 'inline-block' : 'none';
+    return reports[0];
+  } catch (e) { return null; }
+}
+
+document.getElementById('dd-history').addEventListener('change', (e) => {
+  ddLoadLatest(e.target.value);
+});
+
+document.getElementById('dd-run-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('dd-run-btn');
+  const err = document.getElementById('dd-error');
+  err.style.display = 'none';
+  const eff = meProfile && (meProfile.effective_plan || meProfile.plan);
+  if (eff !== 'pro') {
+    window.location.href = '/app/settings?billing=upgrade';
+    return;
+  }
+  btn.disabled = true;
+  try {
+    const resp = await api('/deep-dive', { method: 'POST' });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      err.textContent = data.detail || 'Could not start the deep dive.';
+      err.style.display = 'block';
+      return;
+    }
+    document.getElementById('dd-report').style.display = 'none';
+    ddRenderProgress({ plan: 'started' });
+    await ddOpenStream(data.report_id);
+    await ddRefreshHistory();
+  } catch (e) {
+    err.textContent = 'Network error. Try again.';
+    err.style.display = 'block';
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+async function initDeepDive() {
+  const eff = meProfile && (meProfile.effective_plan || meProfile.plan);
+  if (eff !== 'pro') {
+    document.getElementById('dd-run-btn').textContent = 'Upgrade to run';
+    return;
+  }
+  const latest = await ddRefreshHistory();
+  if (!latest) return;
+  if (latest.status === 'running') {
+    ddRenderProgress(latest.progress || {});
+    ddOpenStream(latest.report_id);
+  } else if (latest.status !== 'error') {
+    ddRenderReport(latest);
+  }
+}
 
 // --- delivery-setup nudge ----------------------------------------------------
 // Shown when no verified, non-opted-out channel is active: the digest only
@@ -1985,6 +2430,7 @@ document.getElementById('reconnect-btn').addEventListener('click', async () => {
 
 loadMe().then(() => {
   loadHoldings();
+  loadDigest();
   reloadNewsFeeds();
   checkConnection().then(checkDeliverySetup);
 });
@@ -2400,7 +2846,7 @@ document.querySelectorAll('#chart-controls button').forEach((btn) => {
 // as headings. Applied to already-escaped text, so no injection surface.
 function formatNewsBody(body) {
   return esc(body).replace(
-    /^(PORTFOLIO:|TOP RISK|NOTABLE|WATCH TODAY:)/gm, '<strong>$1</strong>');
+    /^(PORTFOLIO:|TOP RISK|NOTABLE|WATCH TODAY:|HOLDINGS|QUIET:)/gm, '<strong>$1</strong>');
 }
 
 // Day buckets use publish time when known, insertion time otherwise, in the
@@ -2934,6 +3380,206 @@ def dashboard_page(supabase_url: str, anon_key: str) -> str:
     )
 
 
+# --------------------------------------------------------------------------
+# /app/risk — the visual "Risk Lab" (Pro): portfolio-level quant analytics
+# --------------------------------------------------------------------------
+
+_RISK_BODY = """
+<section class="risk-head">
+  <h1>Risk Lab</h1>
+  <p class="sub">How your holdings behave <em>together</em> — the portfolio-level view a single stock's numbers can't give you.</p>
+</section>
+<div id="risk-loading" class="muted-note">Computing portfolio risk&hellip;</div>
+<div id="risk-gate" class="card gate-card" style="display:none;">
+  <h2>A Pro feature</h2>
+  <p>Portfolio risk analytics — the return covariance, risk decomposition, Value at Risk, and a Monte&nbsp;Carlo projection — are part of Cirvia&nbsp;Pro.</p>
+  <a class="btn" href="/app/settings?billing=upgrade">Upgrade to Pro</a>
+</div>
+<div id="risk-empty" class="muted-note" style="display:none;"></div>
+<div id="risk-content" style="display:none;">
+  <div class="stat-row" id="risk-stats"></div>
+  <div class="card">
+    <h2>Risk concentration</h2>
+    <p class="card-sub">Each holding's share of portfolio <strong>risk</strong> next to its share of <strong>capital</strong>. A risk bar taller than the weight bar is a hidden concentration.</p>
+    <div id="risk-bars" class="svg-box"></div>
+  </div>
+  <div class="card">
+    <h2>Correlation map</h2>
+    <p class="card-sub">How tightly each pair of holdings moves together — <span class="corr-lo">blue</span> is independent, <span class="corr-hi">red</span> is moving as one.</p>
+    <div id="risk-heatmap" class="svg-box"></div>
+  </div>
+  <div class="card">
+    <h2>One-year projection</h2>
+    <p class="card-sub" id="mc-sub"></p>
+    <div id="risk-fan" class="svg-box"></div>
+  </div>
+  <div id="risk-notes" class="muted-note"></div>
+  <p class="disclaimer">Statistical estimates from ~2 years of history — descriptive, not predictions or advice. Not financial advice.</p>
+</div>
+"""
+
+_RISK_JS = r"""
+const fmtCad = (n) => '$' + Math.round(n).toLocaleString('en-CA');
+const pct = (n) => (n >= 0 ? '+' : '') + n.toFixed(1) + '%';
+
+function statCard(label, value, sub) {
+  return '<div class="stat-card"><span class="stat-label">' + label + '</span>' +
+    '<span class="stat-value">' + value + '</span>' +
+    (sub ? '<span class="stat-sub">' + sub + '</span>' : '') + '</div>';
+}
+
+function renderStats(s) {
+  const el = document.getElementById('risk-stats');
+  const cards = [
+    statCard('Portfolio volatility', s.annualized_volatility_pct.toFixed(1) + '%',
+      'vs ' + s.weighted_avg_volatility_pct.toFixed(1) + '% weighted average'),
+    statCard('Diversification', s.diversification_ratio.toFixed(2) + '×',
+      s.diversification_benefit_pct.toFixed(1) + ' pts of vol cancelled'),
+    statCard('Effective bets', s.effective_number_of_bets.toFixed(1),
+      'of ' + s.holdings_analyzed + ' holdings'),
+    statCard('1-day VaR (95%)', fmtCad(s.var95_1d_cad),
+      s.var95_1d_pct.toFixed(1) + '% • CVaR ' + s.cvar95_1d_pct.toFixed(1) + '%'),
+  ];
+  if (s.sharpe_ratio !== null) cards.push(statCard('Sharpe ratio', s.sharpe_ratio.toFixed(2), 'risk-adjusted return'));
+  if (s.portfolio_beta !== null) cards.push(statCard('Market beta', s.portfolio_beta.toFixed(2), 'vs S&P 500 (CAD)'));
+  el.innerHTML = cards.join('');
+}
+
+function renderBars(holdings) {
+  const el = document.getElementById('risk-bars');
+  const maxv = Math.max(1, ...holdings.map(h => Math.max(h.weight_pct, h.risk_contribution_pct)));
+  const rowH = 34, pad = 8, labelW = 74, barW = 320, W = labelW + barW + 96, H = holdings.length * rowH + pad * 2;
+  let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Risk contribution versus weight">';
+  holdings.forEach((h, i) => {
+    const y = pad + i * rowH;
+    const wLen = (h.weight_pct / maxv) * barW;
+    const rLen = (h.risk_contribution_pct / maxv) * barW;
+    svg += '<text x="0" y="' + (y + 13) + '" class="svg-lbl">' + h.ticker + '</text>';
+    svg += '<rect x="' + labelW + '" y="' + (y + 2) + '" width="' + wLen.toFixed(1) + '" height="10" rx="2" class="bar-weight"></rect>';
+    svg += '<rect x="' + labelW + '" y="' + (y + 15) + '" width="' + rLen.toFixed(1) + '" height="10" rx="2" class="bar-risk"></rect>';
+    svg += '<text x="' + (labelW + Math.max(wLen, rLen) + 6) + '" y="' + (y + 17) + '" class="svg-val">' +
+      h.risk_contribution_pct.toFixed(0) + '% risk / ' + h.weight_pct.toFixed(0) + '% wt</text>';
+  });
+  svg += '</svg>';
+  el.innerHTML = svg +
+    '<div class="legend"><span><i class="sw bar-weight"></i>Weight</span><span><i class="sw bar-risk"></i>Risk contribution</span></div>';
+}
+
+function corrColor(c) {
+  // Diverging: -1 blue (210°) -> 0 pale -> +1 red (8°). Lightness tracks |c|.
+  const h = c >= 0 ? 8 : 210;
+  const l = 92 - 42 * Math.abs(c);
+  const sat = 20 + 60 * Math.abs(c);
+  return 'hsl(' + h + ' ' + sat + '% ' + l + '%)';
+}
+
+function renderHeatmap(corr) {
+  const el = document.getElementById('risk-heatmap');
+  const n = corr.tickers.length;
+  const cell = n > 14 ? 22 : 30, lbl = 58, W = lbl + n * cell + 6, H = lbl + n * cell + 6;
+  let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Correlation matrix">';
+  corr.tickers.forEach((t, j) => {
+    svg += '<text x="' + (lbl + j * cell + cell / 2) + '" y="' + (lbl - 6) + '" class="svg-lbl heat-col">' + t + '</text>';
+    svg += '<text x="' + (lbl - 6) + '" y="' + (lbl + j * cell + cell / 2 + 3) + '" class="svg-lbl heat-row">' + t + '</text>';
+  });
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j < n; j++) {
+      const c = corr.matrix[i][j];
+      const x = lbl + j * cell, y = lbl + i * cell;
+      svg += '<rect x="' + x + '" y="' + y + '" width="' + (cell - 2) + '" height="' + (cell - 2) +
+        '" rx="2" fill="' + corrColor(c) + '"><title>' + corr.tickers[i] + ' · ' + corr.tickers[j] + ': ' + c.toFixed(2) + '</title></rect>';
+      if (n <= 12) svg += '<text x="' + (x + cell / 2 - 1) + '" y="' + (y + cell / 2 + 2) + '" class="heat-val">' + c.toFixed(1) + '</text>';
+    }
+  }
+  svg += '</svg>';
+  el.innerHTML = svg;
+}
+
+function renderFan(mc) {
+  const el = document.getElementById('risk-fan');
+  const b = mc.bands_pct, p5 = b.p5, p95 = b.p95, p25 = b.p25, p75 = b.p75, p50 = b.p50;
+  const m = p5.length, W = 640, H = 260, padL = 44, padR = 12, padT = 12, padB = 22;
+  const lo = Math.min(...p5), hi = Math.max(...p95);
+  const span = Math.max(1e-6, hi - lo);
+  const x = (i) => padL + (i / (m - 1)) * (W - padL - padR);
+  const y = (v) => padT + (1 - (v - lo) / span) * (H - padT - padB);
+  const path = (arr) => arr.map((v, i) => (i ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(v).toFixed(1)).join(' ');
+  const band = (top, bot) => 'M' + top.map((v, i) => x(i).toFixed(1) + ' ' + y(v).toFixed(1)).join(' L') +
+    ' L' + bot.map((v, i) => x(i).toFixed(1) + ' ' + y(v).toFixed(1)).reverse().join(' L') + ' Z';
+  let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Monte Carlo projection fan">';
+  // Zero line.
+  if (lo < 0 && hi > 0) { const yz = y(0); svg += '<line x1="' + padL + '" x2="' + (W - padR) + '" y1="' + yz + '" y2="' + yz + '" class="fan-zero"></line>'; }
+  svg += '<path d="' + band(p95, p5) + '" class="fan-outer"></path>';
+  svg += '<path d="' + band(p75, p25) + '" class="fan-inner"></path>';
+  svg += '<path d="' + path(p50) + '" class="fan-median" fill="none"></path>';
+  // Y labels (min, 0, max).
+  [hi, 0, lo].forEach((v) => { if (v === 0 && !(lo < 0 && hi > 0)) return; svg += '<text x="4" y="' + (y(v) + 3) + '" class="svg-val">' + pct(v) + '</text>'; });
+  svg += '</svg>';
+  el.innerHTML = svg;
+  document.getElementById('mc-sub').textContent =
+    'A ' + mc.simulations.toLocaleString() + '-path simulation from your holdings’ covariance (zero assumed drift). ' +
+    'Shaded 5th–95th percentile range; solid line is the median. ' +
+    mc.probability_of_loss_pct.toFixed(0) + '% of paths end below today’s value.';
+}
+
+async function loadRisk() {
+  let resp;
+  try { resp = await api('/portfolio/risk-analytics'); }
+  catch (e) { return; }
+  document.getElementById('risk-loading').style.display = 'none';
+  if (resp.status === 402) { document.getElementById('risk-gate').style.display = 'block'; return; }
+  if (!resp.ok) { const el = document.getElementById('risk-empty'); el.style.display = 'block'; el.textContent = 'Risk analytics are unavailable right now.'; return; }
+  const data = await resp.json();
+  if (!data.available) { const el = document.getElementById('risk-empty'); el.style.display = 'block'; el.textContent = data.note || 'Not enough data to analyze.'; return; }
+  document.getElementById('risk-content').style.display = 'block';
+  renderStats(data.summary);
+  renderBars(data.holdings);
+  renderHeatmap(data.correlation);
+  renderFan(data.monte_carlo);
+  if (data.notes && data.notes.length) document.getElementById('risk-notes').textContent = data.notes.join(' ');
+  document.querySelectorAll('.svg-box svg').forEach((s) => riseIn(s));
+}
+
+requireSession().then((ok) => { if (ok) loadRisk(); });
+"""
+
+_RISK_CSS = """
+.risk-head h1 { margin-bottom: 0.2rem; }
+.risk-head .sub { color: var(--muted); margin-bottom: 1.2rem; }
+.svg-box { overflow-x: auto; margin-top: 0.6rem; }
+.svg-box svg { width: 100%; height: auto; display: block; }
+.svg-lbl { fill: var(--text); font-size: 11px; font-weight: 600; }
+.svg-val { fill: var(--muted); font-size: 10px; }
+.heat-col { text-anchor: middle; }
+.heat-row { text-anchor: end; }
+.heat-val { fill: #1c1c22; font-size: 9px; text-anchor: middle; opacity: 0.75; }
+.bar-weight { fill: var(--line-strong, #b9c0cc); }
+.bar-risk { fill: var(--accent-deep, #3b6ef5); }
+.legend { display: flex; gap: 1rem; font-size: 0.8rem; color: var(--muted); margin-top: 0.4rem; }
+.legend .sw { display: inline-block; width: 11px; height: 11px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+.corr-lo { color: hsl(210 70% 45%); font-weight: 600; }
+.corr-hi { color: hsl(8 70% 50%); font-weight: 600; }
+.fan-outer { fill: var(--accent-deep, #3b6ef5); opacity: 0.16; }
+.fan-inner { fill: var(--accent-deep, #3b6ef5); opacity: 0.28; }
+.fan-median { stroke: var(--accent-deep, #3b6ef5); stroke-width: 2; }
+.fan-zero { stroke: var(--line-strong, #b9c0cc); stroke-dasharray: 3 3; }
+.gate-card { text-align: center; }
+.gate-card .btn { margin-top: 0.6rem; }
+.disclaimer { font-size: 0.75rem; color: var(--muted); margin-top: 1rem; }
+"""
+
+
+def risk_lab_page(supabase_url: str, anon_key: str) -> str:
+    return _page(
+        "Risk Lab — Cirvia",
+        f"<style>{_RISK_CSS}</style>{_RISK_BODY}",
+        supabase_url=supabase_url,
+        anon_key=anon_key,
+        extra_js=_RISK_JS,
+        wrap_class="app-wrap risk-wrap",
+    )
+
+
 def settings_page(supabase_url: str, anon_key: str) -> str:
     return _page(
         "Settings — Cirvia",
@@ -3044,7 +3690,7 @@ document.getElementById('delivery-change-btn').addEventListener('click', async (
 function renderSchedule() {
   if (!meProfile) return;
   document.getElementById('schedule-text').textContent =
-    'Digest at ' + (meProfile.digest_send_time || '07:45') +
+    'Digest at ' + (meProfile.digest_send_time || '09:00') +
     ' · ' + (meProfile.timezone || 'America/Toronto');
   document.getElementById('schedule-row').style.display = 'block';
 }
@@ -3054,7 +3700,7 @@ document.getElementById('schedule-edit-btn').addEventListener('click', () => {
   if (editor.style.display !== 'none') { editor.style.display = 'none'; return; }
   fillTzSelect(document.getElementById('dash-tz'), meProfile && meProfile.timezone);
   document.getElementById('dash-send-time').value =
-    (meProfile && meProfile.digest_send_time) || '07:45';
+    (meProfile && meProfile.digest_send_time) || '09:00';
   editor.style.display = 'block';
   riseIn(editor);
 });

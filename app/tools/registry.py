@@ -19,6 +19,7 @@ from app.tools import (
     news,
     portfolio,
     portfolio_risk,
+    recall,
     risk,
 )
 
@@ -238,6 +239,57 @@ ANALYZE_PORTFOLIO_RISK_SCHEMA = {
 }
 
 
+RECALL_MEMORY_SCHEMA = {
+    "name": "recall_memory",
+    "description": (
+        "Semantic search over this user's OWN history: past morning digests, "
+        "stored news headlines, and your prior chat answers. Use when the user "
+        "asks what was previously said or reported — 'what did you tell me "
+        "about NVDA last month?', 'have we discussed X before?', 'what was in "
+        "my digest last week?'. Returns the most relevant snippets with their "
+        "date and source; always cite the snippet's date when you use one. "
+        "NOT for current prices or fresh news — use get_quote / search_news."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "What to look for, in natural language.",
+            },
+            "tickers": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Optional Yahoo-format tickers to filter by.",
+            },
+            "date_from": {
+                "type": "string",
+                "description": "Optional ISO lower bound, e.g. 2026-06-01.",
+            },
+            "date_to": {
+                "type": "string",
+                "description": "Optional ISO upper bound.",
+            },
+            "source_types": {
+                "type": "array",
+                "items": {
+                    "type": "string",
+                    "enum": ["digest", "news", "chat", "alert"],
+                },
+                "description": "Optional filter by where the memory came from.",
+            },
+            "max_results": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 12,
+                "default": 6,
+            },
+        },
+        "required": ["query"],
+    },
+}
+
+
 # Chat runs (and digest investigations) expose these — never send_digest.
 CHAT_TOOLS: list[dict[str, Any]] = [
     GET_PORTFOLIO_SCHEMA,
@@ -279,13 +331,78 @@ ESTIMATE_DOWNSIDE_RISK_SCHEMA = {
 }
 
 
+ASSESS_RISK_ADJUSTED_PERFORMANCE_SCHEMA = {
+    "name": "assess_risk_adjusted_performance",
+    "description": (
+        "Risk-ADJUSTED performance and exposure of the portfolio: Sharpe and "
+        "Sortino ratios, annualized return and volatility, tracking error and "
+        "information ratio vs the benchmark, portfolio beta, and the sector "
+        "exposure breakdown (portfolio weight by sector). Use for 'what's my "
+        "Sharpe ratio', 'is my return worth the risk', 'how am I doing vs the "
+        "market on a risk-adjusted basis', 'what sectors am I exposed to', 'how "
+        "concentrated is my sector mix'. All numbers are precomputed over ~2 "
+        "years of history — report them. Descriptive only; never advice."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "tickers": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "Optional subset of holdings to analyze; omit for the whole "
+                    "portfolio."
+                ),
+            }
+        },
+        "additionalProperties": False,
+    },
+}
+
+
+PROJECT_PORTFOLIO_OUTCOMES_SCHEMA = {
+    "name": "project_portfolio_outcomes",
+    "description": (
+        "Forward-looking projection of the portfolio. Runs a Monte Carlo "
+        "simulation (multivariate, from the holdings' return covariance, zero "
+        "assumed drift) to show the range of where the portfolio value could "
+        "sit over the next year — p5/p25/p50/p75/p95 in CAD and %, plus the "
+        "probability of ending below today's value and 1/3/6/12-month "
+        "snapshots. Also returns where the portfolio sits on the risk/return "
+        "plane vs the minimum-variance and efficient-frontier reference "
+        "portfolios. Use for 'what could my portfolio be worth next year', "
+        "'what's my range of outcomes', 'how do I compare to an optimal "
+        "portfolio', 'am I on the efficient frontier'. These are STATISTICAL "
+        "projections from history, NOT forecasts, and the frontier is a "
+        "descriptive reference — never a recommendation to rebalance or trade."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "tickers": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "Optional subset of holdings to analyze; omit for the whole "
+                    "portfolio."
+                ),
+            }
+        },
+        "additionalProperties": False,
+    },
+}
+
+
 # Pro-only chat tools. The quant engine (covariance/risk decomposition + tail
-# risk) is the headline Pro differentiator and its history fetches are heavier,
-# so — like WEB_SEARCH_TOOL — these are appended to the roster only for Pro
-# chats (see app/main.py::_prepare_chat).
+# risk + risk-adjusted performance + Monte Carlo/frontier) is the headline Pro
+# differentiator and its history fetches are heavier, so — like WEB_SEARCH_TOOL
+# — these are appended to the roster only for Pro chats (see
+# app/main.py::_prepare_chat).
 PRO_CHAT_TOOLS: list[dict[str, Any]] = [
     ANALYZE_PORTFOLIO_RISK_SCHEMA,
     ESTIMATE_DOWNSIDE_RISK_SCHEMA,
+    ASSESS_RISK_ADJUSTED_PERFORMANCE_SCHEMA,
+    PROJECT_PORTFOLIO_OUTCOMES_SCHEMA,
 ]
 
 # The synthesize stage exposes ONLY send_digest so the run must terminate by
@@ -303,7 +420,10 @@ DISPATCH: dict[str, ToolFn] = {
     "get_portfolio_risk": risk.get_portfolio_risk,
     "analyze_portfolio_risk": portfolio_risk.analyze_portfolio_risk,
     "estimate_downside_risk": portfolio_risk.estimate_downside_risk,
+    "assess_risk_adjusted_performance": portfolio_risk.assess_risk_adjusted_performance,
+    "project_portfolio_outcomes": portfolio_risk.project_portfolio_outcomes,
     "scan_anomalies": anomalies.scan_anomalies,
+    "recall_memory": recall.recall_memory,
 }
 
 # Tools that fan out to live market-data fetches need more headroom than the
@@ -316,7 +436,13 @@ TOOL_TIMEOUTS: dict[str, float] = {
     # Same fan-out plus the benchmark; the adjusted-close cache makes a
     # back-to-back call with analyze_portfolio_risk cheap.
     "estimate_downside_risk": 35.0,
+    # Same fan-out plus a fundamentals read for sector exposure.
+    "assess_risk_adjusted_performance": 35.0,
+    # Same fan-out plus a 5000-path Monte Carlo and the frontier QP.
+    "project_portfolio_outcomes": 40.0,
     "scan_anomalies": 30.0,
+    # One Voyage embed round-trip + one indexed pgvector query.
+    "recall_memory": 15.0,
 }
 
 # Anthropic server-side web search (same tool the macro specialists use).

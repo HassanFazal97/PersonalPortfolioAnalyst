@@ -29,11 +29,18 @@ from app import billing
 from app.agent.anomaly.orchestrator import run_anomaly_scan, run_anomaly_scans_for_all
 from app.agent.budget import Budget
 from app.agent.chat_context import build_chat_context, compose_chat_system_prompt
+from app.agent.deep_dive import run_deep_dive, run_deep_dives_for_all
 from app.agent.digest_pipeline import run_digest_pipeline, run_digests_for_all
 from app.agent.loop import run_agent
 from app.agent.macro.orchestrator import run_macro_scan, run_macro_scans_for_all
 from app.agent.news_refresh import refresh_news_for_user, run_news_refresh_for_all
-from app.agent.prompts import CHAT_SYSTEM_PROMPT, CHAT_WEB_SEARCH_SUFFIX
+from app.agent.prompts import (
+    CHAT_ANALYZE_RISK_SUFFIX,
+    CHAT_MEMORY_SUFFIX,
+    CHAT_SYSTEM_PROMPT,
+    CHAT_WEB_SEARCH_SUFFIX,
+    PROMPT_VERSION,
+)
 from app.auth.context import set_current_user_id
 from app.auth.jwt import AuthError, jwks_url_for, verify_supabase_jwt
 from app.config import (
@@ -70,8 +77,17 @@ from app.plans import (
     trial_decision_pending,
 )
 from app.scheduler import DeliveryScheduler, DigestScheduler, IntervalScheduler
-from app.tools import fundamentals, market, portfolio
-from app.tools.registry import CHAT_TOOLS, WEB_SEARCH_TOOL, ToolContext
+from app.streaming import SENTINEL, ProgressBroker, sse_response
+from app.tools import fundamentals, market, portfolio, portfolio_risk
+from app.memory import ingest as memory_ingest
+from app.memory.embeddings import memory_enabled
+from app.tools.registry import (
+    CHAT_TOOLS,
+    PRO_CHAT_TOOLS,
+    RECALL_MEMORY_SCHEMA,
+    WEB_SEARCH_TOOL,
+    ToolContext,
+)
 from app.tools.tickers import normalize_ticker
 from app.webapp import (
     NOT_CONFIGURED_HTML,
@@ -80,6 +96,7 @@ from app.webapp import (
     login_page,
     onboarding_page,
     reset_page,
+    risk_lab_page,
     settings_page,
     stock_page,
 )
@@ -99,6 +116,7 @@ async def lifespan(app: FastAPI):
     app.state.anomaly_scheduler = None
     app.state.fundamentals_scheduler = None
     app.state.news_scheduler = None
+    app.state.deep_dive_scheduler = None
     app.state.delivery_scheduler = None
     # Which channels this deployment can send (drives verification + UI).
     app.state.delivery_adapters = build_adapters(settings)
@@ -177,6 +195,20 @@ async def lifespan(app: FastAPI):
             news_scheduler.start()
             app.state.news_scheduler = news_scheduler
 
+        if settings.deep_dive_cron:
+            async def _run_deep_dives() -> None:
+                await run_deep_dives_for_all(repo)
+
+            deep_dive_scheduler = DigestScheduler(
+                heartbeat_wrapped("deep_dive", repo, _run_deep_dives),
+                cron=settings.deep_dive_cron,
+                timezone=settings.tz,
+                job_id="deep_dive",
+                misfire_grace_seconds=settings.digest_misfire_grace_seconds,
+            )
+            deep_dive_scheduler.start()
+            app.state.deep_dive_scheduler = deep_dive_scheduler
+
         if settings.delivery_interval_seconds > 0:
             dispatcher = Dispatcher(
                 repo,
@@ -199,6 +231,8 @@ async def lifespan(app: FastAPI):
     finally:
         if app.state.delivery_scheduler is not None:
             app.state.delivery_scheduler.shutdown()
+        if app.state.deep_dive_scheduler is not None:
+            app.state.deep_dive_scheduler.shutdown()
         if app.state.news_scheduler is not None:
             app.state.news_scheduler.shutdown()
         if app.state.fundamentals_scheduler is not None:
@@ -412,7 +446,7 @@ async def _me_payload(repo: Repo, user_id: uuid.UUID) -> dict:
             "plan": "pro" if is_owner else "free",
             "effective_plan": "pro" if is_owner else "free",
             "timezone": "America/Toronto",
-            "digest_send_time": "07:45",
+            "digest_send_time": "09:00",
             "digest_enabled": True,
             "preferred_channel": None,
             "digest_tickers": [],
@@ -626,6 +660,70 @@ async def _enforce_usage_limits(repo: Repo, user_id: uuid.UUID, settings) -> Non
     )
 
 
+async def _prepare_chat(
+    repo: Repo, user_id: uuid.UUID, settings
+) -> tuple[str, Budget, ToolContext, list[dict], str, list[dict]]:
+    """Everything ``/chat`` and ``/chat/stream`` share — plan resolution,
+    budget, tool context, portfolio context, history, and tool roster — in one
+    place so the two endpoints cannot drift. Returns
+    (plan, budget, ctx, tools, system_prompt, history)."""
+    user = await repo.get_user(user_id)
+    plan = effective_plan(user)
+    if user_id == _OWNER_USER_ID:
+        max_cost = settings.chat_max_cost_usd
+    else:
+        max_cost = chat_run_budget(plan, settings)
+    budget = Budget(
+        max_iterations=settings.chat_max_iterations,
+        max_cost_usd=max_cost,
+        model=settings.model,
+    )
+    tz = getattr(user, "timezone", None) or settings.tz
+    ctx = ToolContext(settings=settings, repo=repo, user_id=user_id, timezone=tz)
+    context = await build_chat_context(ctx, tz=tz)
+    history = await _chat_history_messages(repo, user_id, settings)
+    # Server-side web search is a Pro perk: its per-search cost doesn't fit
+    # the Free tier's economics.
+    base_prompt = CHAT_SYSTEM_PROMPT
+    tools = CHAT_TOOLS
+    if plan == "pro" or user_id == _OWNER_USER_ID:
+        base_prompt = (
+            CHAT_SYSTEM_PROMPT + CHAT_ANALYZE_RISK_SUFFIX + CHAT_WEB_SEARCH_SUFFIX
+        )
+        tools = [*CHAT_TOOLS, *PRO_CHAT_TOOLS, WEB_SEARCH_TOOL]
+    # Semantic memory is for all plans (embedding cost is negligible next to
+    # the model spend, and quotas already bound chat volume); offered only
+    # when the deployment has an embedding key.
+    if memory_enabled(settings):
+        base_prompt = base_prompt + CHAT_MEMORY_SUFFIX
+        tools = [*tools, RECALL_MEMORY_SCHEMA]
+    system_prompt = compose_chat_system_prompt(base_prompt, context)
+    return plan, budget, ctx, tools, system_prompt, history
+
+
+def _ingest_chat_memory(repo: Repo, user_id: uuid.UUID, question: str, result) -> None:
+    """Fire-and-forget: embed a finished chat Q&A into semantic memory.
+    No-op when memory is disabled or the run produced no answer."""
+    if not memory_enabled(get_settings()):
+        return
+    if result.status == "error" or not result.answer:
+        return
+
+    async def _embed() -> None:
+        positions = await repo.list_positions(user_id=user_id)
+        await memory_ingest.embed_chat_run(
+            repo,
+            user_id=user_id,
+            run_id=result.run_id,
+            question=question,
+            answer=result.answer,
+            created_at=datetime.now(timezone.utc),
+            holdings_tickers=sorted({p.ticker for p in positions}),
+        )
+
+    memory_ingest.schedule(_embed())
+
+
 # Funnel visibility (PRODUCT.md: visitor -> signup -> connected portfolio).
 # One structured log line per page render; no cookies, no client-side JS.
 _funnel_logger = logging.getLogger("cirvia.funnel")
@@ -706,6 +804,12 @@ def create_app() -> FastAPI:
         """Full-page view of one holding: chart, fundamentals, position, news."""
         t = _validated_ticker(ticker)  # 404s anything outside the symbol alphabet
         return _webapp_html(lambda url, key: stock_page(t, url, key))
+
+    @app.get("/app/risk", response_class=HTMLResponse)
+    async def app_risk() -> HTMLResponse:
+        """Visual Risk Lab: portfolio-level quant analytics (Pro-gated by the
+        /portfolio/risk-analytics API the page calls)."""
+        return _webapp_html(risk_lab_page)
 
     @app.get("/app/settings", response_class=HTMLResponse)
     async def app_settings() -> HTMLResponse:
@@ -797,34 +901,13 @@ def create_app() -> FastAPI:
         active_chats.add(user_id)
         try:
             await _enforce_usage_limits(repo, user_id, settings)
-            user = await repo.get_user(user_id)
-            plan = effective_plan(user)
-            if user_id == _OWNER_USER_ID:
-                max_cost = settings.chat_max_cost_usd
-            else:
-                max_cost = chat_run_budget(plan, settings)
-            budget = Budget(
-                max_iterations=settings.chat_max_iterations,
-                max_cost_usd=max_cost,
-                model=settings.model,
+            plan, budget, ctx, tools, system_prompt, history = await _prepare_chat(
+                repo, user_id, settings
             )
-            tz = getattr(user, "timezone", None) or settings.tz
-            ctx = ToolContext(
-                settings=settings, repo=repo, user_id=user_id, timezone=tz
-            )
-            context = await build_chat_context(ctx, tz=tz)
-            history = await _chat_history_messages(repo, user_id, settings)
-            # Server-side web search is a Pro perk: its per-search cost
-            # doesn't fit the Free tier's economics.
-            base_prompt = CHAT_SYSTEM_PROMPT
-            tools = CHAT_TOOLS
-            if plan == "pro" or user_id == _OWNER_USER_ID:
-                base_prompt = CHAT_SYSTEM_PROMPT + CHAT_WEB_SEARCH_SUFFIX
-                tools = [*CHAT_TOOLS, WEB_SEARCH_TOOL]
             result = await run_agent(
                 req.message,
                 trigger="chat",
-                system_prompt=compose_chat_system_prompt(base_prompt, context),
+                system_prompt=system_prompt,
                 tools=tools,
                 budget=budget,
                 db=repo,
@@ -833,6 +916,7 @@ def create_app() -> FastAPI:
                 history=history,
             )
             quota = await _chat_quota_payload(repo, user_id, plan, settings)
+            _ingest_chat_memory(repo, user_id, req.message, result)
         finally:
             active_chats.discard(user_id)
         return {
@@ -847,6 +931,88 @@ def create_app() -> FastAPI:
             "tool_calls": result.tool_summaries,
             "chat_quota": quota,
         }
+
+    # Keep strong references to driver tasks: asyncio only holds weak refs,
+    # and a GC'd task would silently kill an in-flight streamed chat.
+    stream_tasks: set[asyncio.Task] = set()
+
+    @app.post("/chat/stream")
+    async def chat_stream(req: ChatRequest, request: Request):
+        """SSE variant of /chat: emits agent progress (tool steps, text
+        deltas) live, then a terminal ``done`` event with the full answer.
+        Pre-run failures (quota, concurrency) raise proper 4xx JSON before
+        the stream starts; the browser falls back to POST /chat on transport
+        errors."""
+        settings = get_settings()
+        repo = _require_repo(app)
+        user_id = _user_id(request)
+        if user_id in active_chats:
+            raise HTTPException(
+                status_code=429,
+                detail="A chat is already running for this account; wait for it to finish.",
+            )
+        active_chats.add(user_id)
+        try:
+            await _enforce_usage_limits(repo, user_id, settings)
+            plan, budget, ctx, tools, system_prompt, history = await _prepare_chat(
+                repo, user_id, settings
+            )
+        except BaseException:
+            active_chats.discard(user_id)
+            raise
+
+        queue: asyncio.Queue = asyncio.Queue()
+
+        async def on_event(event: dict) -> None:
+            await queue.put(event)
+
+        async def drive() -> None:
+            # Owns run completion: a disconnected client stops the SSE
+            # generator, but the run still finishes, persists, and bills.
+            try:
+                result = await run_agent(
+                    req.message,
+                    trigger="chat",
+                    system_prompt=system_prompt,
+                    tools=tools,
+                    budget=budget,
+                    db=repo,
+                    ctx=ctx,
+                    user_id=user_id,
+                    history=history,
+                    on_event=on_event,
+                )
+                quota = await _chat_quota_payload(repo, user_id, plan, settings)
+                _ingest_chat_memory(repo, user_id, req.message, result)
+                await queue.put(
+                    {
+                        "type": "done",
+                        "run_id": str(result.run_id),
+                        "answer": result.answer,
+                        "status": result.status,
+                        "iterations": result.iterations,
+                        "cost_usd": result.cost_usd,
+                        "latency_ms": result.latency_ms,
+                        "tool_calls": result.tool_summaries,
+                        "chat_quota": quota,
+                    }
+                )
+            except Exception:
+                logging.getLogger(__name__).exception("streamed chat run failed")
+                await queue.put(
+                    {
+                        "type": "error",
+                        "detail": "Something went wrong answering that. Please try again.",
+                    }
+                )
+            finally:
+                active_chats.discard(user_id)
+                await queue.put(SENTINEL)
+
+        task = asyncio.create_task(drive())
+        stream_tasks.add(task)
+        task.add_done_callback(stream_tasks.discard)
+        return sse_response(queue, request)
 
     @app.get("/chat/history")
     async def chat_history(request: Request, limit: int = 10) -> dict:
@@ -873,6 +1039,171 @@ def create_app() -> FastAPI:
                     }
                 )
         return {"turns": turns[-limit:]}
+
+    # ---- Portfolio Deep Dive (multi-agent research; Pro-only) -----------
+
+    # Same single-process reasoning as active_chats: one dive in flight per
+    # user, and an in-process broker fans progress events out to SSE readers.
+    active_deep_dives: set[uuid.UUID] = set()
+    deep_dive_broker = ProgressBroker()
+    app.state.deep_dive_broker = deep_dive_broker
+
+    def _deep_dive_payload(row) -> dict:
+        return {
+            "report_id": str(row.id),
+            "run_id": str(row.run_id),
+            "status": row.status,
+            "progress": row.progress or {},
+            "report": row.report,
+            "summary": row.summary,
+            "cost_usd": float(row.cost_usd) if row.cost_usd is not None else None,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+            "completed_at": row.completed_at.isoformat() if row.completed_at else None,
+        }
+
+    @app.post("/deep-dive", status_code=202)
+    async def start_deep_dive(request: Request) -> dict:
+        settings = get_settings()
+        repo = _require_repo(app)
+        user_id = _user_id(request)
+        user = await repo.get_user(user_id)
+        plan = effective_plan(user)
+        if plan != "pro" and user_id != _OWNER_USER_ID:
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "Deep dives are a Pro feature — a team of research agents "
+                    "analyzing your whole portfolio. Upgrade to run one."
+                ),
+            )
+        if user_id in active_deep_dives:
+            raise HTTPException(
+                status_code=429,
+                detail="A deep dive is already running for this account.",
+            )
+        if user_id != _OWNER_USER_ID:
+            if await repo.monthly_cost_usd(user_id) >= monthly_cost_cap(plan, settings):
+                raise HTTPException(
+                    status_code=402,
+                    detail=(
+                        "You've reached this month's fair-use compute cap. "
+                        "It resets at the start of next month."
+                    ),
+                )
+            window = timedelta(days=7)
+            used, oldest = await repo.deep_dive_usage_since(
+                user_id, datetime.now(timezone.utc) - window
+            )
+            if used >= settings.deep_dive_weekly_limit:
+                unlocks = (oldest or datetime.now(timezone.utc)) + window
+                local = unlocks.astimezone(_user_tz(user))
+                raise HTTPException(
+                    status_code=429,
+                    detail=(
+                        f"Deep dive limit reached ({settings.deep_dive_weekly_limit} "
+                        f"per week). Your next one unlocks {local:%a %b %-d}."
+                    ),
+                )
+        if not await repo.list_positions(user_id=user_id):
+            raise HTTPException(
+                status_code=400,
+                detail="Connect a brokerage and sync holdings before running a deep dive.",
+            )
+
+        active_deep_dives.add(user_id)
+        try:
+            run_id = await repo.create_run(
+                trigger="deep_dive",
+                user_message="[portfolio deep dive]",
+                model=settings.model,
+                prompt_version=PROMPT_VERSION,
+                user_id=user_id,
+            )
+            report_id = await repo.create_deep_dive_report(
+                run_id=run_id, user_id=user_id
+            )
+        except BaseException:
+            active_deep_dives.discard(user_id)
+            raise
+
+        async def on_event(event: dict) -> None:
+            deep_dive_broker.publish(report_id, event)
+
+        async def drive() -> None:
+            try:
+                await run_deep_dive(
+                    repo,
+                    user_id=user_id,
+                    report_id=report_id,
+                    run_id=run_id,
+                    on_event=on_event,
+                )
+            except Exception:
+                logging.getLogger(__name__).exception("deep dive failed")
+            finally:
+                active_deep_dives.discard(user_id)
+                deep_dive_broker.close(report_id)
+
+        task = asyncio.create_task(drive())
+        stream_tasks.add(task)
+        task.add_done_callback(stream_tasks.discard)
+        return {"report_id": str(report_id), "run_id": str(run_id)}
+
+    @app.get("/deep-dive")
+    async def list_deep_dives(request: Request, limit: int = 10) -> dict:
+        repo = _require_repo(app)
+        user_id = _user_id(request)
+        rows = await repo.list_deep_dive_reports(user_id, limit=max(1, min(limit, 25)))
+        return {"reports": [_deep_dive_payload(r) for r in rows]}
+
+    @app.get("/deep-dive/{report_id}")
+    async def get_deep_dive(report_id: uuid.UUID, request: Request) -> dict:
+        repo = _require_repo(app)
+        caller = _user_id(request)
+        row = await repo.get_deep_dive_report(report_id)
+        # 404-not-403 so report ids can't be probed (same as /runs/{id}).
+        if row is not None and caller != _OWNER_USER_ID and row.user_id != caller:
+            row = None
+        if row is None:
+            raise HTTPException(status_code=404, detail="report not found")
+        return _deep_dive_payload(row)
+
+    @app.get("/deep-dive/{report_id}/events")
+    async def deep_dive_events(report_id: uuid.UUID, request: Request):
+        """SSE progress tail: a snapshot frame first (so reconnects rehydrate),
+        then live events until the dive finishes."""
+        repo = _require_repo(app)
+        caller = _user_id(request)
+        row = await repo.get_deep_dive_report(report_id)
+        if row is not None and caller != _OWNER_USER_ID and row.user_id != caller:
+            row = None
+        if row is None:
+            raise HTTPException(status_code=404, detail="report not found")
+
+        queue = deep_dive_broker.subscribe(report_id)
+        await queue.put(
+            {
+                "type": "dd_snapshot",
+                "status": row.status,
+                "progress": row.progress or {},
+            }
+        )
+        if row.status != "running":
+            # Already terminal: snapshot is all there is.
+            await queue.put(SENTINEL)
+        response = sse_response(queue, request)
+        # Unsubscribe when the response generator is exhausted/aborted.
+        original_iterator = response.body_iterator
+
+        async def cleanup_iterator():
+            try:
+                async for chunk in original_iterator:
+                    yield chunk
+            finally:
+                deep_dive_broker.unsubscribe(report_id, queue)
+
+        response.body_iterator = cleanup_iterator()
+        return response
 
     @app.get("/runs/{run_id}")
     async def get_run(run_id: uuid.UUID, request: Request) -> dict:
@@ -1486,6 +1817,26 @@ def create_app() -> FastAPI:
             for t, data in funds.items()
         }
         return {"metrics": metrics}
+
+    @app.get("/portfolio/risk-analytics")
+    async def portfolio_risk_analytics(request: Request) -> dict:
+        """Portfolio-level quant analytics for the visual Risk Lab page:
+        covariance-based volatility, risk decomposition, correlation matrix,
+        VaR, and the Monte Carlo fan. Pro-only (same economics as the Pro chat
+        quant tools); Free callers get a 402 the page renders as an upgrade
+        prompt. All numbers precomputed in app/quant/ — descriptive, not advice."""
+        repo = _require_repo(app)
+        settings = get_settings()
+        user_id = _user_id(request)
+        user = await repo.get_user(user_id)
+        if effective_plan(user) != "pro" and user_id != _OWNER_USER_ID:
+            raise HTTPException(
+                status_code=402,
+                detail="Portfolio risk analytics are a Pro feature.",
+            )
+        tz = getattr(user, "timezone", None) or settings.tz
+        ctx = ToolContext(settings=settings, repo=repo, user_id=user_id, timezone=tz)
+        return await portfolio_risk.risk_analytics_payload(ctx)
 
     @app.get("/stocks/{ticker}")
     async def stock_detail(ticker: str, request: Request) -> dict:
