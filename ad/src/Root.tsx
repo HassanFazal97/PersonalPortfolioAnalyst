@@ -1,8 +1,27 @@
 import React from "react";
 import { Composition, Series } from "remotion";
+import { DemoChat, DemoConnect, DemoHook, DemoPricing, DemoStock } from "./demo";
 import { Scene1, Scene2, Scene3, Scene4, Scene5, Scene6, Scene7 } from "./scenes";
 
 const FPS = 30;
+
+const Scene7WithUrl: React.FC<{ dur: number }> = ({ dur }) => (
+  <Scene7 dur={dur} showUrl />
+);
+
+// Product demo, 16:9 — hook → connect → dashboard → macro alert → chat →
+// channel fan-out → stock deep-dive → pricing/trial → end card
+const DEMO: Array<[React.FC<{ dur: number }>, number]> = [
+  [DemoHook, 180],
+  [DemoConnect, 300],
+  [Scene2, 240],
+  [Scene3, 240],
+  [DemoChat, 330],
+  [Scene5, 240],
+  [DemoStock, 240],
+  [DemoPricing, 240],
+  [Scene7WithUrl, 210],
+];
 
 // 16:9 master, 50s
 const MASTER: Array<[React.FC<{ dur: number }>, number]> = [
@@ -45,6 +64,14 @@ const total = (scenes: Array<[React.FC<{ dur: number }>, number]>) =>
 
 export const Root: React.FC = () => (
   <>
+    <Composition
+      id="CirviaDemo"
+      component={() => <Sequence scenes={DEMO} />}
+      durationInFrames={total(DEMO)}
+      fps={FPS}
+      width={1920}
+      height={1080}
+    />
     <Composition
       id="CirviaAd"
       component={() => <Sequence scenes={MASTER} />}

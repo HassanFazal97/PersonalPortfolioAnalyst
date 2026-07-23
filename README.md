@@ -2,18 +2,49 @@
 
 **Cirvia** (`cirvia.ca`) is an AI portfolio analyst for Canadian investors. It
 answers on-demand questions about real holdings via a hand-written tool-using
-agent loop, runs every weekday morning to produce a compressed digest, and logs
-every model call and tool call to Postgres so any run is fully replayable.
+agent loop (with live token/tool streaming), runs every weekday morning to
+produce a compressed digest, and logs every model call and tool call to Postgres
+so any run is fully replayable.
+
+On top of that core it layers several capabilities:
+
+- **Chat** — grounded Q&A over your real book, streamed step-by-step. Free and Pro.
+- **Morning digest** — a pre-market brief; Pro digests add a per-holding
+  breakdown, delivered channel-aware (short by SMS, full by email/Discord/web).
+- **Quant risk engine** (Pro) — portfolio-level risk decomposition, tail risk
+  (VaR/CVaR), and risk-adjusted performance, computed in pure numpy and narrated
+  by the model.
+- **Deep Dive** (Pro) — a team of specialist agents researches the whole
+  portfolio in parallel, an adversarial critic re-checks their claims, and a
+  final agent writes a structured report.
+- **Semantic memory** — recall over everything Cirvia has told you before (past
+  digests, news, and chat answers) via embeddings.
+- **Price-anomaly & macro alerts** — statistical detectors and macro specialists
+  surface what changed.
 
 No agent frameworks — the loop, tool dispatch, budgeting, and orchestration are
-written by hand. See `PROJECT_SPEC.md` for the full design.
+written by hand. See `PROJECT_SPEC.md` for the full design and
+[`docs/AI_ARCHITECTURE.md`](docs/AI_ARCHITECTURE.md) for a tour of the AI
+machinery: the agent loop, SSE streaming, the multi-agent Deep Dive pipeline,
+pgvector semantic memory, and the eval harness.
+
+Prompt quality is gated by an **eval harness** (`evals/`): golden chat cases
+replayed through the real loop with recorded tool fixtures, scored by
+deterministic checks plus a rubric-anchored LLM judge, and compared against a
+per-`PROMPT_VERSION` baseline (regressions confirmed at N=3 before failing the
+run). `python -m evals.run --suite all` — a full run costs ~$0.20.
 
 ## Requirements
 
 - Python 3.12+
-- A Postgres database (Supabase, or a local Postgres)
+- A Postgres database (Supabase, or a local Postgres) with the **`pgvector`**
+  extension available (used by semantic memory; `migrate.py` enables it)
 - An Anthropic API key
 - (Optional) a Finnhub API key — without it, news falls back to yfinance
+- (Optional) a Voyage AI API key — enables semantic memory/recall; the feature
+  stays off if unset
+- `numpy` (and `scipy`) are installed with the package and power the quant risk
+  engine
 
 ## Setup
 
@@ -38,8 +69,12 @@ cp .env.example .env
 | `CHAT_MAX_ITERATIONS` / `CHAT_MAX_COST_USD` | Chat run budget |
 | `DIGEST_MAX_ITERATIONS` / `DIGEST_MAX_COST_USD` | Digest run budget |
 | `MAX_TOOL_OUTPUT_TOKENS` | Per-tool output cap (~6000) |
-| `DIGEST_CRON` | Cron for the morning digest (`45 7 * * 1-5`) |
+| `DIGEST_CRON` | Cron for the morning digest (`0 9 * * 1-5`) |
+| `DEEP_DIVE_CRON` | Cron for the weekly Pro deep-dive fan-out (empty = manual only) |
+| `ANOMALY_SCAN_CRON` | Cron for price-anomaly scans, e.g. `30 16 * * 1-5` (empty = manual only) |
 | `FUNDAMENTALS_REFRESH_CRON` | Nightly pre-warm of per-ticker fundamentals (`30 18 * * 1-5`; empty = lazy refresh only) |
+| `VOYAGE_API_KEY` | Voyage AI embeddings for semantic memory/recall (optional; recall disabled if empty) |
+| `EMBEDDING_MODEL` | Voyage embedding model (`voyage-3.5-lite`) |
 | `TZ` | `America/Toronto` |
 | `DELIVERY_INTERVAL_SECONDS` | Outbound dispatcher poll interval (0 disables) |
 | `PUBLIC_BASE_URL` | Public origin, e.g. `https://app.example.com` (Twilio webhook signatures) |
@@ -148,6 +183,14 @@ of tool calls made. Benchmark questions to try:
 4. "Is my SHOP drawdown this month unusual versus its typical volatility?"
 5. "Any news in the last 3 days I should care about?"
 
+**Streaming.** `POST /chat/stream` runs the same agent and streams
+Server-Sent Events — `run_start`, per-tool `tool_start`/`tool_end` (with a
+friendly label + input hint), model `text_delta` tokens, and a terminal `done`
+event carrying the authoritative answer, cost, and refreshed quota. The web
+dashboard uses this to show the agent working live and silently falls back to
+plain `POST /chat` if the transport fails. The digest and Deep Dive pipelines
+pass no callback and stay on the non-streaming path unchanged.
+
 ### Inspect a run (full trajectory)
 
 ```bash
@@ -163,8 +206,19 @@ Trigger it manually:
 curl -s -X POST localhost:8000/digest/run -H "Authorization: Bearer $TOKEN" | jq
 ```
 
-It runs plan → investigate → synthesize and delivers a ≤900-char digest. The
-scheduler also runs it automatically on weekdays at 07:45 (`DIGEST_CRON`, `TZ`).
+It runs plan → investigate → synthesize and delivers a labeled brief
+(`PORTFOLIO` / `TOP RISK` / optional `NOTABLE` / `WATCH TODAY`). The scheduler
+also runs it automatically on weekdays at 09:00 (`DIGEST_CRON`, `TZ`); cadence is
+per plan (Free weekly on Mondays, Pro daily on weekdays).
+
+**Pro digests add a per-holding breakdown.** A deterministic scaffold computes
+each holding's stats (day/week move, P&L $ and %), aggregated by ticker across
+accounts, and splits them into movers/newsworthy (detailed, each with one
+grounded sentence) vs a one-line quiet summary. Delivery is **channel-aware**:
+the short core (≤1000 chars) is what goes out by **SMS**, while the full body
+(core + `HOLDINGS` section, up to ~4000 chars) is stored and delivered to
+**email/Discord** and rendered on the dashboard's *Today's digest* card. Tunable
+via `DIGEST_MOVER_THRESHOLD_PCT` and `DIGEST_HOLDINGS_MAX_CHARS`.
 
 Fetch today's digest:
 
@@ -172,6 +226,72 @@ Fetch today's digest:
 curl -s localhost:8000/digest/latest -H "Authorization: Bearer $TOKEN" | jq
 # 404 until today's digest has been generated
 ```
+
+## Portfolio risk engine (Pro)
+
+Three Pro-only chat tools expose a portfolio-level quant engine. All numbers are
+computed in **pure numpy** under `app/quant/` (I/O-free) from a date-aligned,
+CAD-based daily log-returns matrix (USD holdings carry their USD/CAD FX risk);
+**the model only narrates the precomputed JSON, never recomputes it**, and always
+describes — never advises.
+
+- **`analyze_portfolio_risk`** — Ledoit-Wolf (constant-correlation) shrunk
+  covariance → Euler risk decomposition: true portfolio volatility, the
+  diversification ratio/benefit, each holding's *risk* contribution vs its
+  *capital* weight (hidden concentration), the effective number of independent
+  bets, and the most-correlated pairs.
+- **`estimate_downside_risk`** — Value at Risk and Conditional VaR (Expected
+  Shortfall) at 95%/99% over 1-day and 1-month horizons, in % and CAD (headline
+  VaR is Cornish-Fisher fat-tail-adjusted with a validity guard, falling back to
+  historical); worst realized day/week/month, max drawdown, and beta-scaled
+  market-shock scenarios (−10/−20/−34%).
+- **`assess_risk_adjusted_performance`** — Sharpe and Sortino, annualized
+  return/volatility, tracking error and information ratio vs the benchmark,
+  portfolio beta, and sector-weight exposure.
+
+Ask in chat: "what's actually driving my risk?", "how much could I lose in a
+crash?", "what's my Sharpe ratio?". Free chats never receive these tools.
+
+## Deep Dive (Pro)
+
+A multi-agent research report over the whole portfolio. `POST /deep-dive` (202,
+returns `{report_id, run_id}`) kicks off a four-stage pipeline:
+
+1. **Plan** — one structured call proposes per-specialist research questions
+   tailored to the actual holdings.
+2. **Research** — four specialists (**fundamentals, technical, risk,
+   news/macro**) run in parallel, each its own budgeted sub-agent with its own
+   toolset.
+3. **Verify** — an adversarial critic re-checks the load-bearing quantitative
+   claims against first-party tools (no web search).
+4. **Synthesize** — a final agent merges everything into a structured report
+   (`headline`, `overview`, per-specialist `sections` with claim/evidence/
+   confidence/verification, `risks`, `opportunities`) plus a short summary that
+   is also delivered by SMS/email.
+
+Progress streams over SSE (`GET /deep-dive/{id}/events`, with a reconnect
+snapshot) and the report renders on the dashboard. Bounded by
+`DEEP_DIVE_MAX_COST_USD` (~$1/run) and `DEEP_DIVE_WEEKLY_LIMIT` (2/week per Pro
+user); `DEEP_DIVE_CRON` optionally runs a weekly fan-out. Reports live in
+`deep_dive_reports` (per-user, RLS-isolated). Free users get a 403 with an
+upgrade prompt.
+
+```bash
+curl -s -X POST localhost:8000/deep-dive -H "Authorization: Bearer $TOKEN" | jq
+curl -s localhost:8000/deep-dive -H "Authorization: Bearer $TOKEN" | jq   # list
+```
+
+## Semantic memory & recall
+
+When `VOYAGE_API_KEY` is set, Cirvia embeds each new digest, stored news item,
+and chat answer (Voyage AI embeddings, `input_type="document"`) into a pgvector
+`memory_chunks` table — fire-and-forget and fail-open, so an embedding outage
+never breaks a digest or chat. The chat agent then gains a **`recall_memory`**
+tool (all plans) that semantically searches the user's *own* history and cites
+each snippet's date: "what did you tell me about NVDA last month?", "what was in
+my digest last week?". It searches history only — live questions still use the
+live tools. `scripts/backfill_memory.py` (re)embeds existing rows idempotently
+(the recovery path after an outage), capped by `MEMORY_BACKFILL_MAX_COST_USD`.
 
 ## Fundamentals & stock detail pages
 
@@ -227,7 +347,7 @@ halves false alarms at identical drift lag — spikes are zscore's job.)
 ## Deploy to the cloud (production)
 
 The morning digest is driven by an **in-process** APScheduler, so the server must
-be running at 07:45 (`TZ`) for the digest to generate. Deploy to an always-on
+be running at 09:00 (`TZ`) for the digest to generate. Deploy to an always-on
 host — free tiers that spin down on idle will be asleep and silently skip it.
 
 **Single instance only.** Run exactly one container with one uvicorn worker. A
@@ -243,7 +363,8 @@ collides on the `digests.digest_date` unique constraint.
    `scripts/migrate.py` on boot, then `uvicorn`.
 3. **Env vars** (set on the host, never committed): `ANTHROPIC_API_KEY`,
    `FINNHUB_API_KEY`, `DATABASE_URL`, `DB_SSL=true`, `API_TOKEN`,
-   `TZ=America/Toronto`, and the `SNAPTRADE_*` keys if syncing a brokerage.
+   `TZ=America/Toronto`, the `SNAPTRADE_*` keys if syncing a brokerage, and
+   `VOYAGE_API_KEY` if you want semantic memory/recall enabled.
 4. **Smoke test** once deployed (replace `$HOST`/`$TOKEN`):
    ```bash
    curl -s $HOST/health                                   # public, no token
@@ -262,7 +383,7 @@ liveness probe; watch `"jobs_ok"` on your uptime dashboard instead.
 
 **Belt-and-suspenders scheduling (recommended):** rather than trusting the host
 to stay warm, add an external cron (Supabase `pg_cron`, cron-job.org, or a
-GitHub Actions scheduled workflow) that `POST`s `/digest/run` at 07:45 Toronto.
+GitHub Actions scheduled workflow) that `POST`s `/digest/run` at 09:00 Toronto.
 `/digest/latest` keys on the Toronto date and the digest is idempotent per day,
 so a redundant trigger is harmless.
 
@@ -312,7 +433,7 @@ address).
 iPhone Shortcuts personal automation:
 
 1. **Shortcuts app → Automation → New (＋) → Personal Automation → Time of Day.**
-2. Set **08:05**, **Daily**, and turn **Run Immediately** on (disable "Ask
+2. Set **09:15**, **Daily**, and turn **Run Immediately** on (disable "Ask
    Before Running").
 3. Add action **Get Contents of URL**:
    - URL: `https://<your-host>/digest/latest`
@@ -324,7 +445,7 @@ iPhone Shortcuts personal automation:
 6. Save. Optionally test with **Run**.
 
 If no digest exists yet the endpoint returns 404; the Shortcut simply sends
-nothing that morning. The scheduled 07:45 generation runs before the 08:05 pull.
+nothing that morning. The scheduled 09:00 generation runs before the 09:15 pull.
 
 > The original Mac-worker iMessage push (Phase B) was retired in favor of the
 > multi-channel dispatcher above (migration `008_retire_imessage.sql`).

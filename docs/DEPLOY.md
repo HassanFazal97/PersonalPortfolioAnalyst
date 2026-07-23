@@ -27,7 +27,7 @@ Host is **Railway** (single container). The image runs migrations, then serves.
 | `MACRO_SCAN_INTERVAL_MINUTES` | no | `0` disables in-process macro scan; e.g. `60` for hourly |
 | `MACRO_MAX_ITERATIONS` / `MACRO_MAX_COST_USD` | no | macro scan budget caps |
 | `MODEL` / `CLASSIFIER_MODEL` / `MACRO_MODEL` | no | model overrides |
-| `TZ` / `DIGEST_CRON` | no | schedule (default `America/Toronto`, `45 7 * * 1-5`) |
+| `TZ` / `DIGEST_CRON` | no | schedule (default `America/Toronto`, `0 9 * * 1-5`) |
 | `SNAPTRADE_*` | no | Wealthsimple sync |
 | `PUBLIC_BASE_URL` | billing, Twilio | public origin, e.g. `https://cirvia.ca` — builds Stripe redirect URLs |
 | `STRIPE_SECRET_KEY` | billing | `sk_live_…` (or `sk_test_…` locally) |

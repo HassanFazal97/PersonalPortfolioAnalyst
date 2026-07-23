@@ -44,7 +44,7 @@ disclaimers, privacy policy, encrypted broker secrets, and (eventually) SOC 2.
 `DigestScheduler` runs **one** APScheduler cron job in the API process. For N
 users that breaks on three axes:
 
-- **Timezones / send-times** — users want their digest at *their* 7:45am, not one
+- **Timezones / send-times** — users want their digest at *their* 9:00am, not one
   global time.
 - **Resilience** — if the process restarts mid-batch, some users silently get
   nothing. An in-memory scheduler has no durable record of "who still needs one."
@@ -82,7 +82,7 @@ scale — the constraint that forced one container today goes away.
 ### Data model additions
 ```sql
 -- on users
-digest_send_time  time    NOT NULL DEFAULT '07:45',
+digest_send_time  time    NOT NULL DEFAULT '09:00',
 timezone          text    NOT NULL DEFAULT 'America/Toronto',  -- IANA name
 digest_enabled    boolean NOT NULL DEFAULT true,
 
@@ -146,7 +146,7 @@ piece is reusable.
 - [ ] Set env vars; generate `API_TOKEN`
 - [ ] Smoke test `/health`, `/chat`, `/digest/run`, `/digest/latest`
 - [ ] iPhone Shortcut pulling `/digest/latest`
-- [ ] External cron backstop (cron-job.org) POSTing `/digest/run` at 07:45
+- [ ] External cron backstop (cron-job.org) POSTing `/digest/run` at 09:00
 - **Deployable end state:** your own daily digest, in production.
 
 ### Parallel track — Compliance (START ON DAY 1, runs in background)
@@ -193,7 +193,7 @@ See the deep dive above.
 - [ ] Worker consumes `digest` jobs → generates → INSERT (idempotent on unique)
 - [ ] Retire `DigestScheduler`
 - [ ] Remove the "single instance only" constraint for web + workers
-- **Deployable end state:** each user gets a digest at *their* 7:45am, resilient
+- **Deployable end state:** each user gets a digest at *their* 9:00am, resilient
   to restarts.
 
 ### Phase 5 — Multi-channel delivery (SMS/Email/Discord) — DONE (July 2026)

@@ -5,6 +5,7 @@
   "scripts": {
     "studio": "remotion studio src/index.ts",
     "render": "remotion render src/index.ts CirviaAd out/cirvia-ad-16x9.mp4",
+    "render:demo": "remotion render src/index.ts CirviaDemo out/cirvia-demo-16x9.mp4",
     "render:vertical": "remotion render src/index.ts CirviaAdVertical out/cirvia-ad-9x16.mp4",
     "render:square": "remotion render src/index.ts CirviaAdSquare out/cirvia-ad-1x1.mp4"
   },

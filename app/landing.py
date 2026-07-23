@@ -857,7 +857,7 @@ _HOME_BODY = """
     </div>
     <div class="float-card fc-digest" data-float aria-hidden="true">
       <div class="mock-top"><span class="mock-dot"></span>Morning digest
-        <span class="mock-date">7:45 AM</span></div>
+        <span class="mock-date">9:00 AM</span></div>
       <div class="mock-val"><span class="v" data-tick>$48,214</span>
         <span class="d loss">&minus;0.4% today</span></div>
       <div class="mock-row"><span class="t">VFV</span>
@@ -972,7 +972,7 @@ _HOME_BODY = """
 </section>
 
 <div class="cta-final" data-reveal>
-  <h2>Know your portfolio by 7:45.</h2>
+  <h2>Know your portfolio by 9:00.</h2>
   <p>Start free. Connected in under three minutes.</p>
   <a class="btn lg" href="/app#signup" data-auth="cta">Get started free</a>
 </div>

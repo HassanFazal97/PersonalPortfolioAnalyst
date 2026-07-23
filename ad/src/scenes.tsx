@@ -589,7 +589,7 @@ export const Scene6: React.FC<SceneProps> = ({ dur }) => {
 // Scene 7 — end card: silk glow rises, logo, line, CTA
 // ---------------------------------------------------------------------------
 
-export const Scene7: React.FC<SceneProps> = ({ dur }) => {
+export const Scene7: React.FC<SceneProps & { showUrl?: boolean }> = ({ dur, showUrl }) => {
   const frame = useCurrentFrame();
   const { width, height } = useVideoConfig();
   const hSize = Math.min(72, width * 0.058);
@@ -642,6 +642,20 @@ export const Scene7: React.FC<SceneProps> = ({ dur }) => {
           <div style={rise(frame, 56, 22)}>
             <PillButton size={Math.min(26, width * 0.021)}>Get started free</PillButton>
           </div>
+          {showUrl ? (
+            <div
+              style={{
+                marginTop: 30,
+                fontSize: Math.min(28, width * 0.022),
+                fontWeight: 600,
+                color: C.accentText,
+                letterSpacing: "0.01em",
+                ...rise(frame, 72, 20, 8),
+              }}
+            >
+              cirvia.ca
+            </div>
+          ) : null}
         </Center>
         <div
           style={{
