@@ -102,3 +102,32 @@ async def test_budget_exceeded_ends_with_summary_turn(monkeypatch):
     assert result.answer == "Summary: NVDA at 1.0."
     # Final summary call was made WITHOUT tools
     assert "tools" not in client.calls[-1]
+
+
+async def test_custom_dispatch_table_overrides_global():
+    """The eval harness's seam: a per-call dispatch dict replaces DISPATCH."""
+
+    async def fake_quote(payload, ctx):
+        return {"quotes": [{"ticker": "NVDA", "last_price": 123.45}]}
+
+    client = ScriptedAnthropic(
+        [
+            tool_use_turn("t1", "get_quote", {"tickers": ["NVDA"]}),
+            text_turn("NVDA is at 123.45."),
+        ]
+    )
+    repo = FakeRepo()
+    result = await run_agent(
+        "What's NVDA at?",
+        trigger="eval",
+        system_prompt=CHAT_SYSTEM_PROMPT,
+        tools=CHAT_TOOLS,
+        budget=Budget(max_iterations=5, max_cost_usd=0.5, model="claude-sonnet-4-6"),
+        db=repo,
+        client=client,
+        dispatch={"get_quote": fake_quote},
+    )
+    assert result.status == "completed"
+    quote_call = next(t for t in repo.tool_calls if t["tool_name"] == "get_quote")
+    assert quote_call["is_error"] is False
+    assert "123.45" in str(quote_call["output"])
