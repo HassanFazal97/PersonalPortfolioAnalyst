@@ -113,6 +113,24 @@ def test_news_tickers_free_uses_watchlist_then_book_value():
     assert fallback == ["B", "C", "A"]
 
 
+def test_news_tickers_appends_watchlist_deduped_and_capped():
+    settings = get_settings()  # free watchlist cap defaults to 3
+    positions = [_pos("NVDA", 10, 90), _pos("SHOP.TO", 5, 40)]
+    out = _news_tickers_for_user(
+        positions, plan="pro", settings=settings, digest_tickers=[],
+        watchlist=["AAPL", "NVDA", "TSLA"],
+    )
+    # Held tickers first, watched-not-held appended, held dupes dropped.
+    assert out == ["NVDA", "SHOP.TO", "AAPL", "TSLA"]
+
+    free = _news_tickers_for_user(
+        positions, plan="free", settings=settings, digest_tickers=[],
+        watchlist=["AAPL", "TSLA", "MSFT", "AMZN"],
+    )
+    # Free watchlist coverage capped oldest-first at free_max_watchlist.
+    assert free == ["NVDA", "SHOP.TO", "AAPL", "TSLA", "MSFT"]
+
+
 # --- refresh pipeline -----------------------------------------------------------
 
 
@@ -211,3 +229,29 @@ async def test_refresh_skips_users_without_positions():
     repo = FakeRepo()
     result = await refresh_news_for_user(repo, client=None)
     assert result["status"] == "skipped_no_positions"
+
+
+async def test_refresh_runs_for_watchlist_only_user(monkeypatch):
+    news.cache_clear()
+    classify.cache_clear()
+    repo = FakeRepo()  # no positions at all
+    import uuid as _uuid
+
+    from app.config import DEFAULT_USER_ID
+
+    owner = _uuid.UUID(DEFAULT_USER_ID)
+    await repo.add_watchlist_ticker(owner, "AAPL")
+
+    async def fake_prefetch(tickers, **kwargs):
+        assert tickers == ["AAPL"]
+        _seed_cache("AAPL", [
+            _article("AAPL launches new phone", "2026-07-18T10:00:00+00:00"),
+        ])
+
+    monkeypatch.setattr(news, "prefetch_news_for_tickers", fake_prefetch)
+    monkeypatch.setattr(news_refresh, "_get_client", lambda client: None)
+
+    result = await refresh_news_for_user(repo, client=None)
+    assert result["status"] == "completed"
+    assert result["inserted"] == 1
+    assert repo._news_items[0].ticker == "AAPL"

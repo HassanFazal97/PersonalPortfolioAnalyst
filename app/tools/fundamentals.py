@@ -502,10 +502,13 @@ async def get_fundamentals_tool(payload: dict[str, Any], ctx: Any) -> dict[str, 
 
 
 async def run_fundamentals_refresh(repo: Any, settings: Any) -> dict[str, Any]:
-    """Nightly job body: re-fetch fundamentals for every held ticker, serially
-    with spacing — the one place we deliberately trade latency for not getting
-    rate-limited by Yahoo."""
-    tickers = await repo.list_distinct_tickers()
+    """Nightly job body: re-fetch fundamentals for every held or watched
+    ticker, serially with spacing — the one place we deliberately trade
+    latency for not getting rate-limited by Yahoo."""
+    tickers = sorted(
+        set(await repo.list_distinct_tickers())
+        | set(await repo.list_distinct_watchlist_tickers())
+    )
     refreshed = 0
     failed = 0
     for i, ticker in enumerate(tickers):

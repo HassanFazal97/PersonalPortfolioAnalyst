@@ -46,6 +46,7 @@ from app.db.models import (
     Transaction,
     User,
     VerificationCode,
+    WatchlistItem,
 )
 from app.delivery.channels import CHANNELS
 
@@ -157,6 +158,56 @@ class Repo:
             user.digest_tickers = tickers
             await s.commit()
 
+    # ---- watchlist ---------------------------------------------------------
+
+    async def list_watchlist(self, user_id: uuid.UUID) -> list[WatchlistItem]:
+        """The user's watched tickers, oldest first — this ordering is also
+        the coverage-cap order after a Pro→Free downgrade."""
+        async with self._session() as s:
+            result = await s.execute(
+                select(WatchlistItem)
+                .where(WatchlistItem.user_id == user_id)
+                .order_by(WatchlistItem.created_at.asc(), WatchlistItem.ticker.asc())
+            )
+            return list(result.scalars().all())
+
+    async def get_watchlist_tickers(self, user_id: uuid.UUID) -> list[str]:
+        return [item.ticker for item in await self.list_watchlist(user_id)]
+
+    async def add_watchlist_ticker(self, user_id: uuid.UUID, ticker: str) -> bool:
+        """Idempotent insert; False when the ticker was already watched."""
+        async with self._session() as s:
+            result = await s.execute(
+                pg_insert(WatchlistItem)
+                .values(user_id=user_id, ticker=ticker)
+                .on_conflict_do_nothing(index_elements=["user_id", "ticker"])
+            )
+            await s.commit()
+            return bool(result.rowcount)
+
+    async def remove_watchlist_ticker(self, user_id: uuid.UUID, ticker: str) -> bool:
+        async with self._session() as s:
+            result = await s.execute(
+                delete(WatchlistItem).where(
+                    WatchlistItem.user_id == user_id,
+                    WatchlistItem.ticker == ticker,
+                )
+            )
+            await s.commit()
+            return bool(result.rowcount)
+
+    async def list_distinct_watchlist_tickers(
+        self, user_ids: list[uuid.UUID] | None = None
+    ) -> list[str]:
+        """Distinct watched tickers (optionally limited to some users) — the
+        nightly data jobs and the global anomaly scan run once per ticker."""
+        async with self._session() as s:
+            q = select(WatchlistItem.ticker).distinct()
+            if user_ids is not None:
+                q = q.where(WatchlistItem.user_id.in_(user_ids))
+            result = await s.execute(q)
+            return sorted(result.scalars().all())
+
     async def get_or_create_user(
         self, *, auth_id: uuid.UUID, email: str | None = None, trial_days: int = 0
     ) -> uuid.UUID:
@@ -218,6 +269,34 @@ class Repo:
                     select(Position.id).where(Position.user_id == uid).limit(1)
                 )
                 if pos.scalar_one_or_none() is not None:
+                    out.append(uid)
+            return sorted(out) if out else [_OWNER_USER_ID]
+
+    async def list_news_refresh_recipients(self) -> list[uuid.UUID]:
+        """Users whose ticker news should refresh daily: digest enabled and
+        at least one position OR one watched ticker (watchlist-only users get
+        feed coverage even before syncing a brokerage)."""
+        async with self._session() as s:
+            enabled = await s.execute(
+                select(User.id).where(User.digest_enabled.is_(True))
+            )
+            ids = list(enabled.scalars().all())
+            if not ids:
+                return [_OWNER_USER_ID]
+            out: list[uuid.UUID] = []
+            for uid in ids:
+                pos = await s.execute(
+                    select(Position.id).where(Position.user_id == uid).limit(1)
+                )
+                if pos.scalar_one_or_none() is not None:
+                    out.append(uid)
+                    continue
+                watch = await s.execute(
+                    select(WatchlistItem.id)
+                    .where(WatchlistItem.user_id == uid)
+                    .limit(1)
+                )
+                if watch.scalar_one_or_none() is not None:
                     out.append(uid)
             return sorted(out) if out else [_OWNER_USER_ID]
 
@@ -383,6 +462,9 @@ class Repo:
                 delete(VerificationCode).where(VerificationCode.user_id == user_id)
             )
             await s.execute(delete(Position).where(Position.user_id == user_id))
+            await s.execute(
+                delete(WatchlistItem).where(WatchlistItem.user_id == user_id)
+            )
             await s.execute(delete(Transaction).where(Transaction.user_id == user_id))
             await s.execute(
                 delete(SnaptradeCredentials).where(

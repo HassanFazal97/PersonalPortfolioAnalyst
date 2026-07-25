@@ -53,7 +53,9 @@ def pg_dsn():
         _docker(
             "run", "-d", "--rm", "--name", name,
             "-e", "POSTGRES_PASSWORD=test",
-            "-p", "127.0.0.1:0:5432", "postgres:16-alpine",
+            # pgvector image: migration 019 (semantic memory) needs the
+            # vector extension, which plain postgres:16-alpine doesn't ship.
+            "-p", "127.0.0.1:0:5432", "pgvector/pgvector:pg16",
         )
     except subprocess.CalledProcessError as exc:
         pytest.skip(f"could not start postgres container: {exc.stderr}")
@@ -117,6 +119,14 @@ async def _seed_and_connect_restricted(dsn: str) -> asyncpg.Connection:
             """,
             uuid.UUID(TENANT_A), uuid.UUID(TENANT_B),
         )
+        await owner.execute(
+            """
+            INSERT INTO watchlist_items (user_id, ticker)
+            VALUES ($1, 'SHOP.TO'), ($2, 'AAPL')
+            ON CONFLICT (user_id, ticker) DO NOTHING
+            """,
+            uuid.UUID(TENANT_A), uuid.UUID(TENANT_B),
+        )
     finally:
         await owner.close()
     return await asyncpg.connect(dsn.replace("postgres:test@", "app_restricted:test@"))
@@ -177,6 +187,10 @@ async def test_tenant_context_sees_only_own_rows(pg_dsn):
         assert [str(r["id"]) for r in users] == [TENANT_A]
         positions = await conn.fetch("SELECT user_id FROM positions")
         assert {str(r["user_id"]) for r in positions} == {TENANT_A}
+        watchlist = await conn.fetch("SELECT user_id, ticker FROM watchlist_items")
+        assert {(str(r["user_id"]), r["ticker"]) for r in watchlist} == {
+            (TENANT_A, "SHOP.TO")
+        }
         # Writing another tenant's row must be rejected.
         with pytest.raises(asyncpg.InsufficientPrivilegeError):
             await conn.execute(
@@ -195,8 +209,8 @@ async def test_no_context_sees_nothing(pg_dsn):
     # The Data API shape: a role with grants but no way to set the GUC.
     conn = await _seed_and_connect_restricted(pg_dsn)
     try:
-        for table in ("users", "positions", "agent_runs", "model_calls",
-                      "schema_migrations", "snaptrade_credentials"):
+        for table in ("users", "positions", "watchlist_items", "agent_runs",
+                      "model_calls", "schema_migrations", "snaptrade_credentials"):
             assert await conn.fetchval(f"SELECT count(*) FROM {table}") == 0, (
                 f"{table} leaked rows without a user context"
             )

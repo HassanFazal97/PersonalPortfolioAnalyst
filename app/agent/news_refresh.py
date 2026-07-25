@@ -24,7 +24,7 @@ from app.config import DEFAULT_USER_ID, Settings, get_settings
 from app.db.repo import Repo
 from app.memory import ingest as memory_ingest
 from app.memory.embeddings import memory_enabled
-from app.plans import max_digest_holdings, user_plan_and_tz
+from app.plans import max_digest_holdings, max_watchlist, user_plan_and_tz
 from app.tools import news
 from app.tools.classify import classify_news
 
@@ -128,9 +128,12 @@ def _news_tickers_for_user(
     plan: str,
     settings: Settings,
     digest_tickers: list[str],
+    watchlist: list[str] | None = None,
 ) -> list[str]:
     """Which tickers get feed news — mirrors the digest's holdings scope so
-    Free users don't receive news for holdings their digest never covers."""
+    Free users don't receive news for holdings their digest never covers,
+    plus the user's watched tickers (plan-capped oldest-first, so a Pro→Free
+    downgrade shrinks coverage instead of dropping it)."""
     cap = max_digest_holdings(plan, settings)
     book_value: dict[str, float] = {}
     for p in positions:
@@ -140,13 +143,20 @@ def _news_tickers_for_user(
             bv = 0.0
         book_value[p.ticker] = book_value.get(p.ticker, 0.0) + bv
     if cap is None:
-        return sorted(book_value)
-    picked = [t for t in digest_tickers if t in book_value][:cap]
-    if picked:
-        return picked
-    # No watchlist: largest holdings by book value (market value needs live
-    # quotes, which this daily job deliberately avoids).
-    return sorted(book_value, key=lambda t: book_value[t], reverse=True)[:cap]
+        holdings_scope = sorted(book_value)
+    else:
+        picked = [t for t in digest_tickers if t in book_value][:cap]
+        if picked:
+            holdings_scope = picked
+        else:
+            # No digest selection: largest holdings by book value (market value
+            # needs live quotes, which this daily job deliberately avoids).
+            holdings_scope = sorted(
+                book_value, key=lambda t: book_value[t], reverse=True
+            )[:cap]
+    watch_cap = max_watchlist(plan, settings)
+    watched = [t for t in (watchlist or []) if t not in holdings_scope][:watch_cap]
+    return holdings_scope + watched
 
 
 async def refresh_news_for_user(
@@ -158,12 +168,17 @@ async def refresh_news_for_user(
     plan, _tz = user_plan_and_tz(user, user_id=uid, settings=settings)
 
     positions = await db.list_positions(user_id=uid)
-    if not positions:
+    watchlist = await db.get_watchlist_tickers(uid)
+    if not positions and not watchlist:
         return {"user_id": str(uid), "status": "skipped_no_positions", "plan": plan}
 
     digest_tickers = await db.get_digest_tickers(uid)
     tickers = _news_tickers_for_user(
-        positions, plan=plan, settings=settings, digest_tickers=digest_tickers
+        positions,
+        plan=plan,
+        settings=settings,
+        digest_tickers=digest_tickers,
+        watchlist=watchlist,
     )
 
     set_current_user_id(uid)
@@ -192,10 +207,11 @@ async def refresh_news_for_user(
 async def run_news_refresh_for_all(
     db: Repo, *, client: Any = None
 ) -> list[dict[str, Any]]:
-    """Scheduled entry point: one refresh per digest recipient, best-effort."""
+    """Scheduled entry point: one refresh per recipient (holders and
+    watchlist-only users alike), best-effort."""
     client = _get_client(client)
     results: list[dict[str, Any]] = []
-    for uid in await db.list_digest_recipients():
+    for uid in await db.list_news_refresh_recipients():
         try:
             results.append(await refresh_news_for_user(db, uid, client=client))
         except Exception:  # noqa: BLE001 - one user must not block the rest

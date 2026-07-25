@@ -31,6 +31,7 @@ from app.observability.logging import Observer
 from app.plans import (
     digest_cadence_due,
     max_digest_holdings,
+    max_watchlist,
     trial_decision_pending,
     user_plan_and_tz,
 )
@@ -284,6 +285,45 @@ def build_holdings_scaffold(
     return "\n".join(lines)
 
 
+# Watched-not-held tickers get a compact, deterministic section (no model
+# involvement); this bounds the rich body regardless of the Pro 30-ticker cap.
+WATCHLIST_SECTION_MAX_CHARS = 1200
+
+
+def build_watchlist_section(
+    watch_tickers: list[str],
+    quotes: dict[str, dict[str, Any]],
+    news_tickers: set[str],
+) -> str | None:
+    """One preformatted line per watched (not held) ticker, e.g.
+    ``SHOP.TO  $98.12  +1.4% today · news``. Deterministic — the section is
+    appended to the rich digest body verbatim, never touched by the model.
+    Returns None when there is nothing to show."""
+    if not watch_tickers:
+        return None
+    lines: list[str] = []
+    for ticker in watch_tickers:
+        q = quotes.get(ticker) or {}
+        price = q.get("last_price")
+        price_s = f"${float(price):,.2f}" if price is not None else "n/a"
+        line = f"{ticker}  {price_s}  {_signed_pct(q.get('day_change_pct'))} today"
+        if ticker in news_tickers:
+            line += " · news"
+        lines.append(line)
+    section = "\n".join(lines)
+    if len(section) > WATCHLIST_SECTION_MAX_CHARS:
+        kept: list[str] = []
+        used = 0
+        for line in lines:
+            if used + len(line) + 1 > WATCHLIST_SECTION_MAX_CHARS - 24:
+                kept.append(f"(+{len(lines) - len(kept)} more)")
+                break
+            kept.append(line)
+            used += len(line) + 1
+        section = "\n".join(kept)
+    return section
+
+
 async def run_digest_pipeline(
     db: Repo,
     *,
@@ -369,22 +409,40 @@ async def run_digest_pipeline(
             db, uid, anchor_run_id, tickers, client=client, budget=budget
         )
 
+        since = datetime(
+            local_today.year,
+            local_today.month,
+            local_today.day,
+            tzinfo=ZoneInfo(tz),
+        )
+        todays_news = await db.list_news_items(user_id=uid, since=since, limit=200)
+        news_tickers = {n.ticker for n in todays_news}
+
         # Pro-only per-holding breakdown (Free has capped holdings -> no cap None).
         holdings_scaffold: str | None = None
         if max_digest_holdings(plan, settings) is None:
-            since = datetime(
-                local_today.year,
-                local_today.month,
-                local_today.day,
-                tzinfo=ZoneInfo(tz),
-            )
-            todays_news = await db.list_news_items(user_id=uid, since=since, limit=200)
-            news_tickers = {n.ticker for n in todays_news}
             holdings_scaffold = build_holdings_scaffold(
                 ctx_data.get("positions", []),
                 ctx_data.get("week_return_pct_by_ticker", {}),
                 news_tickers=news_tickers,
                 settings=settings,
+            )
+
+        # Watched-not-held tickers: a deterministic WATCHLIST section appended
+        # to the rich body by send_digest (all plans; SMS keeps the short core).
+        held_tickers = {p.ticker for p in positions}
+        watch_tickers = [
+            t
+            for t in await db.get_watchlist_tickers(uid)
+            if t not in held_tickers
+        ][: max_watchlist(plan, settings)]
+        if watch_tickers:
+            quote_result = await market.get_quote({"tickers": watch_tickers})
+            watch_quotes = {
+                q["ticker"]: q for q in quote_result.get("quotes", [])
+            }
+            ctx.watchlist_section = build_watchlist_section(
+                watch_tickers, watch_quotes, news_tickers
             )
 
         results: list[dict[str, str]] = []

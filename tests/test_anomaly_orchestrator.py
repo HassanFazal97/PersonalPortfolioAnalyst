@@ -75,6 +75,45 @@ async def test_one_alert_covers_multiple_flagged_holdings(monkeypatch):
     assert {f["ticker"] for f in payload["flags"]} == {"NVDA", "RY.TO"}
 
 
+async def test_watched_not_held_ticker_alerts(monkeypatch):
+    repo = FakeRepo()
+    await _seed_positions(repo, OWNER, ["QUIET"])
+    await repo.add_watchlist_ticker(OWNER, "TSLA")
+    _patch_scan(monkeypatch, {
+        "TSLA": [_flag("TSLA")],
+        "OTHER": [_flag("OTHER")],  # neither held nor watched — must not leak
+    })
+    client = ScriptedAnthropic([_narration("Unusual move in TSLA", "TSLA fell.")])
+
+    result = await orch.run_anomaly_scan(repo, client=client)
+
+    assert result["status"] == "completed"
+    assert len(result["alerts"]) == 1
+    alert = next(iter(repo.alerts.values()))
+    assert alert.tickers == ["TSLA"]
+    # The detector pass scanned the watched ticker (union of held + watched).
+    payload = json.loads(client.calls[0]["messages"][0]["content"])
+    assert {f["ticker"] for f in payload["flags"]} == {"TSLA"}
+
+
+async def test_watched_ticker_respects_cooldown(monkeypatch):
+    repo = FakeRepo()
+    await _seed_positions(repo, OWNER, ["QUIET"])
+    await repo.add_watchlist_ticker(OWNER, "TSLA")
+    await repo.create_alert_if_new(
+        run_id=None, category=CATEGORY, severity="medium",
+        headline="prior", body="prior", tickers=["TSLA"],
+        fingerprint=f"{CATEGORY}:2026-07-12:bbbb", user_id=OWNER,
+    )
+    _patch_scan(monkeypatch, {"TSLA": [_flag("TSLA")]})
+    client = ScriptedAnthropic([])  # must not be called
+
+    result = await orch.run_anomaly_scan(repo, client=client)
+
+    assert result["status"] == "no_anomalies"
+    assert client.calls == []
+
+
 async def test_same_day_rerun_dedups_by_fingerprint(monkeypatch):
     repo = FakeRepo()
     await _seed_positions(repo, OWNER, ["NVDA"])

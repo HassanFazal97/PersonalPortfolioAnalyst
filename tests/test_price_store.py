@@ -101,3 +101,25 @@ async def test_sync_covers_holdings_plus_benchmark_and_fx(monkeypatch):
     assert out["synced"] == 4
     for t in ("NVDA", "RY.TO", "^GSPC", "USDCAD=X"):
         assert t in repo.daily_prices
+
+
+async def test_sync_includes_watched_tickers(monkeypatch):
+    counter = {"n": 0}
+    _patch_live(monkeypatch, counter)
+    import uuid
+
+    from app.config import DEFAULT_USER_ID
+
+    repo = FakeRepo(
+        positions=[
+            SimpleNamespace(ticker="NVDA", quantity=1, avg_cost=1, currency="USD", account="taxable"),
+        ]
+    )
+    await repo.add_watchlist_ticker(uuid.UUID(DEFAULT_USER_ID), "SHOP.TO")
+    # A watched ticker that is also held must not be synced twice.
+    await repo.add_watchlist_ticker(uuid.UUID(DEFAULT_USER_ID), "NVDA")
+
+    out = await price_store.run_daily_prices_sync(repo, get_settings())
+    # NVDA + SHOP.TO (deduped) + ^GSPC + USDCAD=X.
+    assert out["tickers"] == 4
+    assert "SHOP.TO" in repo.daily_prices

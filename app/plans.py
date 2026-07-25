@@ -79,3 +79,10 @@ def max_digest_holdings(plan: str, settings: Settings) -> int | None:
     if plan == "pro":
         return None
     return settings.free_max_digest_holdings
+
+
+def max_watchlist(plan: str, settings: Settings) -> int:
+    """Max watched (not necessarily held) tickers for this plan."""
+    if plan == "pro":
+        return settings.pro_max_watchlist
+    return settings.free_max_watchlist

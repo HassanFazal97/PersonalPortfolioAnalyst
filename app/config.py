@@ -247,6 +247,11 @@ class Settings(BaseSettings):
     free_monthly_cost_cap_usd: float = Field(default=1.50, alias="FREE_MONTHLY_COST_CAP_USD")
     pro_monthly_cost_cap_usd: float = Field(default=9.00, alias="PRO_MONTHLY_COST_CAP_USD")
     free_max_digest_holdings: int = Field(default=3, alias="FREE_MAX_DIGEST_HOLDINGS")
+    # Watchlist caps (arbitrary tickers the user follows without holding them).
+    # Watched tickers ride the serial nightly yfinance jobs (~0.75s/ticker over
+    # globally distinct symbols), so these bound job runtime and API quota.
+    free_max_watchlist: int = Field(default=3, alias="FREE_MAX_WATCHLIST")
+    pro_max_watchlist: int = Field(default=30, alias="PRO_MAX_WATCHLIST")
     # ---- Pro per-holding digest breakdown ----------------------------------
     # A Pro digest details each "mover/newsworthy" holding and summarizes the
     # rest. A holding is detailed when its abs day move >= this, its abs week

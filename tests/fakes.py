@@ -40,6 +40,8 @@ class FakeRepo:
         self.job_heartbeats: dict[str, SimpleNamespace] = {}
         self.ticker_fundamentals: dict[str, SimpleNamespace] = {}
         self.daily_prices: dict[str, list[SimpleNamespace]] = {}
+        # Insertion-ordered (user_id, ticker) -> row; dict order = created_at order.
+        self._watchlist: dict[tuple[Any, str], SimpleNamespace] = {}
 
     def seed_user(self, user_id, *, plan="free", digest_enabled=True, email=None,
                   digest_tickers=None, stripe_customer_id=None,
@@ -154,6 +156,40 @@ class FakeRepo:
         if not ids and (self._positions or getattr(self, "_position_rows", {})):
             return [owner]
         return sorted(ids) if ids else []
+
+    async def list_watchlist(self, user_id):
+        return [row for (uid, _), row in self._watchlist.items() if uid == user_id]
+
+    async def get_watchlist_tickers(self, user_id):
+        return [row.ticker for row in await self.list_watchlist(user_id)]
+
+    async def add_watchlist_ticker(self, user_id, ticker):
+        key = (user_id, ticker)
+        if key in self._watchlist:
+            return False
+        self._watchlist[key] = SimpleNamespace(
+            id=uuid.uuid4(), user_id=user_id, ticker=ticker,
+            created_at=datetime.now(timezone.utc),
+        )
+        return True
+
+    async def remove_watchlist_ticker(self, user_id, ticker):
+        return self._watchlist.pop((user_id, ticker), None) is not None
+
+    async def list_distinct_watchlist_tickers(self, user_ids=None):
+        return sorted({
+            t for (uid, t) in self._watchlist
+            if user_ids is None or uid in user_ids
+        })
+
+    async def list_news_refresh_recipients(self):
+        recipients = set(await self.list_digest_recipients())
+        for u in self._users_by_id.values():
+            if not getattr(u, "digest_enabled", True):
+                continue
+            if any(uid == u.id for (uid, _) in self._watchlist):
+                recipients.add(u.id)
+        return sorted(recipients)
 
     async def list_macro_recipients(self):
         now = datetime.now(timezone.utc)
@@ -645,6 +681,9 @@ class FakeRepo:
             self._position_rows = {
                 k: v for k, v in self._position_rows.items() if k[0] != user_id
             }
+        self._watchlist = {
+            k: v for k, v in self._watchlist.items() if k[0] != user_id
+        }
         self._notification_channels = {
             k: v for k, v in self._notification_channels.items() if k[0] != user_id
         }

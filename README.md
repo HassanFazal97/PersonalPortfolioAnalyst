@@ -311,6 +311,29 @@ beta (common for `.TO` tickers). `GET /portfolio` is untouched — metrics
 arrive on a second `GET /portfolio/metrics` call so the holdings table renders
 instantly.
 
+## Stock search & watchlist
+
+The app nav has a stock search (`GET /stocks/search`, Yahoo's symbol
+directory via yfinance, 1h cached, results filtered to instrument types the
+stock page can render). Any real ticker opens the full stock detail page —
+held or not; non-held pages take a live quote and show a **Watch** button
+instead of a position card. Junk symbols 404 before they can cost a fetch.
+
+Watching a stock (`POST /watchlist/{ticker}`, presence = opted in) buys it
+coverage in three existing pipelines: the daily news refresh (stock page +
+dashboard feed), a deterministic `WATCHLIST` section appended to the rich
+digest body (email/Discord/dashboard — the SMS core stays short; zero model
+cost), and the price-anomaly detectors (alerts remain Pro-scoped). Watched
+tickers also join the nightly fundamentals and daily-prices syncs, deduped
+globally.
+
+Limits are plan-tiered and enforced on add like the chat quota
+(`FREE_MAX_WATCHLIST=3`, `PRO_MAX_WATCHLIST=30`, owner exempt): each watched
+ticker rides the serial ~0.75s-per-ticker nightly Yahoo loops, so the caps
+bound job runtime. A Pro→Free downgrade keeps the rows but blocks adds and
+caps job/digest coverage oldest-first. Rows live in `watchlist_items`
+(migration 021, standard tenant RLS).
+
 ## Price-anomaly alerts (statistical, model-free)
 
 Deterministic detectors (ported from Shizen) run over each holding's daily log

@@ -314,6 +314,8 @@ tr:last-child td { border-bottom: none; }
 .stock-head { display: flex; align-items: baseline; gap: 0.85rem; flex-wrap: wrap;
   margin-top: 0.4rem; }
 .stock-head .sub { color: var(--ink-3); font-size: 0.9rem; }
+.watch-wrap { text-align: right; }
+.watch-wrap .muted-note { max-width: 30ch; margin-top: 0.45rem; font-size: 0.82rem; }
 .stock-price { font-size: 1.25rem; font-weight: 700;
   font-variant-numeric: tabular-nums; }
 .metric-trio { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
@@ -356,10 +358,36 @@ tr:last-child td { border-bottom: none; }
 .plan-limits li { margin: 0.3rem 0; }
 .danger-card { border-color: oklch(72% 0.14 25 / 0.45); }
 .danger-card h3 { color: var(--loss); }
+/* nav stock search: inline input between logo and links, absolute dropdown */
+.nav-search { position: relative; flex: 1; max-width: 300px; margin: 0 1.25rem; }
+.nav-search input[type=search] { width: 100%; padding: 0.42rem 0.75rem;
+  border-radius: var(--r-s); border: 1px solid var(--line);
+  background: var(--surface-2); color: var(--ink); font-family: var(--font);
+  font-size: 0.88rem; outline: none;
+  transition: border-color 0.15s var(--ease); }
+.nav-search input[type=search]:focus { border-color: var(--accent-hover); }
+.search-results { position: absolute; top: calc(100% + 6px); left: 0; right: 0;
+  background: var(--surface-1); border: 1px solid var(--line-strong);
+  border-radius: var(--r-m); overflow: hidden; display: none; z-index: 60;
+  box-shadow: 0 12px 32px oklch(8% 0.01 300 / 0.55); }
+.search-results.open { display: block; }
+.search-results a { display: flex; align-items: baseline; gap: 0.55rem;
+  padding: 0.6rem 0.8rem; text-decoration: none; font-size: 0.88rem;
+  color: var(--ink); border-bottom: 1px solid var(--line); }
+.search-results a:last-child { border-bottom: none; }
+.search-results a:hover, .search-results a.focused { background: var(--surface-2); }
+.search-results .sym { font-weight: 700; flex: none; }
+.search-results .nm { color: var(--ink-2); overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
+.search-results .exch { color: var(--ink-3); font-size: 0.78rem; flex: none; }
+.search-results .empty { padding: 0.6rem 0.8rem; color: var(--ink-3);
+  font-size: 0.85rem; }
 /* phone tier: tighter shell, wrapping headers, 16px inputs (stops iOS
    focus-zoom), and >=44px tap targets */
 @media (max-width: 640px) {
   .app-wrap { padding: 1.4rem 1rem 3rem; }
+  .nav-search { margin: 0 0.7rem; min-width: 0; }
+  .nav-search input[type=search] { font-size: 1rem; }
   .nav-links { gap: 0.9rem; font-size: 0.88rem; }
   .nav-links a.keep, .nav-links .link-btn { padding: 0.6rem 0.1rem; }
   .topbar { flex-wrap: wrap; gap: 0.25rem 1rem; }
@@ -435,6 +463,57 @@ function staggerIn(els, duration = 0.25, gap = 0.04) {
   if (REDUCED || !window.Motion || !els || !els.length) return;
   Motion.animate(els, { opacity: [0, 1] }, { duration, delay: Motion.stagger(gap), ease: EASE });
 }
+
+// Nav stock search: debounced type-ahead against /stocks/search; every chrome
+// page has the input. Enter opens the first result, Escape/blur closes.
+(function initNavSearch() {
+  const input = document.getElementById('nav-search');
+  const box = document.getElementById('nav-search-results');
+  if (!input || !box) return;
+  const escText = (s) => String(s ?? '').replace(/[&<>"']/g,
+    (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  let timer = null;
+  let seq = 0;
+  function close() { box.classList.remove('open'); box.innerHTML = ''; }
+  function render(results) {
+    if (!results.length) {
+      box.innerHTML = '<div class="empty">No matches.</div>';
+      box.classList.add('open');
+      return;
+    }
+    box.innerHTML = results.map((r) =>
+      '<a href="/app/stock/' + encodeURIComponent(r.symbol) + '">' +
+      '<span class="sym">' + escText(r.symbol) + '</span>' +
+      '<span class="nm">' + escText(r.name) + '</span>' +
+      (r.exchange ? '<span class="exch">' + escText(r.exchange) + '</span>' : '') +
+      '</a>').join('');
+    box.classList.add('open');
+  }
+  async function search(q) {
+    const mySeq = ++seq;
+    try {
+      const resp = await api('/stocks/search?q=' + encodeURIComponent(q));
+      if (!resp.ok || mySeq !== seq) return;
+      const data = await resp.json();
+      if (mySeq !== seq || document.activeElement !== input) return;
+      render(data.results || []);
+    } catch (e) { /* search is a convenience; stay quiet */ }
+  }
+  input.addEventListener('input', () => {
+    clearTimeout(timer);
+    const q = input.value.trim();
+    if (q.length < 2) { close(); return; }
+    timer = setTimeout(() => search(q), 250);
+  });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { close(); input.blur(); }
+    if (e.key === 'Enter') {
+      const first = box.querySelector('a');
+      if (first) window.location.href = first.getAttribute('href');
+    }
+  });
+  input.addEventListener('blur', () => setTimeout(close, 150));
+})();
 """
 
 
@@ -457,6 +536,11 @@ def _page(
     if chrome:
         shell = f"""<nav><div class="nav-inner">
 <a class="logo" href="/">Cir<span>via</span></a>
+<div class="nav-search">
+<input id="nav-search" type="search" placeholder="Search stocks…" autocomplete="off"
+ spellcheck="false" aria-label="Search stocks">
+<div class="search-results" id="nav-search-results" role="listbox"></div>
+</div>
 <div class="nav-links"><a class="keep" href="/app/dashboard">Dashboard</a>
 <a class="keep" href="/app/risk">Risk Lab</a>
 <a class="keep" href="/app/settings">Settings</a>
@@ -1498,6 +1582,14 @@ _DASHBOARD_BODY = """
       <div class="skl"></div><div class="skl"></div><div class="skl short"></div>
     </div></div>
   </div>
+
+  <div class="dash-card" id="watching-card" style="display:none;">
+    <h3>Watching <span class="tag" id="watching-count"></span></h3>
+    <p class="muted-note" style="margin-top:0.5rem;">Stocks you follow without
+    holding them: news coverage, a digest line, and anomaly alerts. Find more
+    with the search bar above.</p>
+    <div id="watching-list"></div>
+  </div>
 </div>
 
 <aside class="dash-rail">
@@ -1513,7 +1605,7 @@ _DASHBOARD_BODY = """
   </div>
 
   <div class="dash-card" id="watchlist-card" style="display:none;">
-    <h3>Digest watchlist <span class="tag" id="watchlist-limit-tag"></span></h3>
+    <h3>Digest coverage <span class="tag" id="watchlist-limit-tag"></span></h3>
     <p class="muted-note" style="margin-top:0.5rem;">Free plan: choose which holdings get news in your digest.</p>
     <div class="watchlist-grid" id="dash-watchlist-grid"></div>
     <button class="btn" id="save-watchlist-btn" style="margin-top:0.75rem;">Save watchlist</button>
@@ -1575,7 +1667,7 @@ function newsQuery(extra) {
 // as headings. Applied to already-escaped text, so no injection surface.
 function formatNewsBody(body) {
   return esc(body).replace(
-    /^(PORTFOLIO:|TOP RISK|NOTABLE|WATCH TODAY:|HOLDINGS|QUIET:)/gm, '<strong>$1</strong>');
+    /^(PORTFOLIO:|TOP RISK|NOTABLE|WATCH TODAY:|HOLDINGS|WATCHLIST|QUIET:)/gm, '<strong>$1</strong>');
 }
 
 // Day buckets use the item's publish time when known (holding articles) and
@@ -1834,6 +1926,52 @@ async function loadMetrics() {
   } catch (e) { /* cells fall through to em dashes */ }
   document.querySelectorAll('#holdings .holdings-row').forEach((row) => {
     fillMetricCells(row, metrics[row.dataset.ticker] || {});
+  });
+}
+
+async function loadWatching() {
+  const card = document.getElementById('watching-card');
+  const list = document.getElementById('watching-list');
+  let data;
+  try {
+    data = await (await api('/watchlist')).json();
+  } catch (e) { return; }
+  const items = data.items || [];
+  if (!items.length) { card.style.display = 'none'; return; }
+  document.getElementById('watching-count').textContent =
+    data.limit == null ? String(data.used) : data.used + '/' + data.limit;
+  let rows = '';
+  for (const it of items) {
+    const held = it.held ? '<span class="watchlist-badge">held</span>' : '';
+    const price = it.last_price == null ? '—'
+      : Number(it.last_price).toLocaleString('en-CA',
+          { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    rows += `<tr class="watching-row" data-ticker="${esc(it.ticker)}">` +
+      `<td><a class="ticker-link" href="/app/stock/${encodeURIComponent(it.ticker)}">` +
+      `<strong>${esc(it.ticker)}</strong></a>${held}</td>` +
+      `<td>${price}</td>` + pctCell(it.day_change_pct) +
+      `<td style="text-align:right;"><button class="link-btn unwatch-btn" ` +
+      `data-ticker="${esc(it.ticker)}" title="Stop watching">&#10005;</button></td></tr>`;
+  }
+  list.innerHTML = '<div class="table-scroll"><table><thead><tr><th>Ticker</th>' +
+    '<th>Price</th><th>Day</th><th></th></tr></thead><tbody>' + rows +
+    '</tbody></table></div>';
+  card.style.display = 'block';
+  list.querySelectorAll('.unwatch-btn').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      btn.disabled = true;
+      try {
+        await api('/watchlist/' + encodeURIComponent(btn.dataset.ticker),
+          { method: 'DELETE' });
+      } catch (err) { /* api() handles auth redirects */ }
+      loadWatching();
+    });
+  });
+  list.querySelectorAll('.watching-row').forEach((row) => {
+    row.addEventListener('click', () => {
+      window.location.href = '/app/stock/' + encodeURIComponent(row.dataset.ticker);
+    });
   });
 }
 
@@ -2430,6 +2568,7 @@ document.getElementById('reconnect-btn').addEventListener('click', async () => {
 
 loadMe().then(() => {
   loadHoldings();
+  loadWatching();
   loadDigest();
   reloadNewsFeeds();
   checkConnection().then(checkDeliverySetup);
@@ -2444,13 +2583,17 @@ loadMe().then(() => {
 _STOCK_BODY = """
 <div class="topbar">
   <div>
-    <a class="back-link" href="/app/dashboard">&larr; Holdings</a>
+    <a class="back-link" href="/app/dashboard">&larr; Dashboard</a>
     <div class="stock-head">
       <h1 id="stock-title" style="font-size:1.5rem;">&hellip;</h1>
       <span class="sub" id="stock-sub"></span>
       <span class="stock-price" id="stock-price"></span>
       <span id="stock-day"></span>
     </div>
+  </div>
+  <div class="watch-wrap">
+    <button class="btn ghost" id="watch-btn" style="display:none;"></button>
+    <div class="muted-note" id="watch-note" style="display:none;"></div>
   </div>
 </div>
 <div class="stock-layout">
@@ -2580,7 +2723,14 @@ function fillHeader(d) {
 }
 
 function fillPosition(d) {
-  const pos = d.position || {};
+  if (!d.position) {
+    document.getElementById('position').innerHTML =
+      '<p class="muted-note">You don\\u2019t hold this stock.' +
+      (d.watching ? '' :
+        ' Watch it to get news coverage and a line in your digest.') + '</p>';
+    return;
+  }
+  const pos = d.position;
   const cur = pos.currency;
   const pairs = [
     ['Quantity', fmtNum(pos.quantity, 4)],
@@ -2696,6 +2846,43 @@ function fillPriceAction(d) {
   ]);
 }
 
+// --- watchlist ---------------------------------------------------------------
+
+let watchingNow = false;
+
+function setWatchButton(watching) {
+  watchingNow = !!watching;
+  const btn = document.getElementById('watch-btn');
+  btn.textContent = watchingNow ? '\\u2605 Watching' : '\\u2606 Watch';
+  btn.title = watchingNow
+    ? 'Watching: news, digest coverage, and alerts. Click to stop.'
+    : 'Get news coverage, a digest line, and alerts for this stock.';
+  btn.style.display = 'inline-flex';
+}
+
+async function toggleWatch() {
+  const btn = document.getElementById('watch-btn');
+  const note = document.getElementById('watch-note');
+  note.style.display = 'none';
+  btn.disabled = true;
+  try {
+    const resp = await api('/watchlist/' + encodeURIComponent(TICKER),
+      { method: watchingNow ? 'DELETE' : 'POST' });
+    if (resp.ok) {
+      setWatchButton(!watchingNow);
+    } else {
+      const data = await resp.json().catch(() => ({}));
+      note.innerHTML = esc(data.detail || 'Could not update your watchlist.')
+        .replace('Upgrade to Pro to watch more.',
+          '<a href="/app/settings?billing=upgrade">Upgrade to Pro</a> to watch more.');
+      note.style.display = 'block';
+    }
+  } catch (e) { /* api() already redirected on auth loss */ }
+  btn.disabled = false;
+}
+
+document.getElementById('watch-btn').addEventListener('click', toggleWatch);
+
 async function loadDetail() {
   let resp;
   try {
@@ -2705,7 +2892,7 @@ async function loadDetail() {
     document.querySelector('.stock-main').innerHTML =
       '<div class="dash-card"><p class="muted-note">' +
       (resp.status === 404
-        ? 'This ticker isn\\u2019t in your holdings.'
+        ? 'Couldn\\u2019t find this ticker.'
         : 'Could not load this stock.') +
       ' <a href="/app/dashboard">Back to dashboard</a></p></div>';
     return;
@@ -2713,6 +2900,7 @@ async function loadDetail() {
   const d = await resp.json();
   fillHeader(d);
   fillPosition(d);
+  setWatchButton(d.watching);
   fillKeyDates(d);
   const qt = (d.profile || {}).quote_type;
   if (qt === 'ETF') {
@@ -2846,7 +3034,7 @@ document.querySelectorAll('#chart-controls button').forEach((btn) => {
 // as headings. Applied to already-escaped text, so no injection surface.
 function formatNewsBody(body) {
   return esc(body).replace(
-    /^(PORTFOLIO:|TOP RISK|NOTABLE|WATCH TODAY:|HOLDINGS|QUIET:)/gm, '<strong>$1</strong>');
+    /^(PORTFOLIO:|TOP RISK|NOTABLE|WATCH TODAY:|HOLDINGS|WATCHLIST|QUIET:)/gm, '<strong>$1</strong>');
 }
 
 // Day buckets use publish time when known, insertion time otherwise, in the

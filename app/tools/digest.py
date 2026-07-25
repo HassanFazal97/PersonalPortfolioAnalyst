@@ -99,6 +99,12 @@ async def send_digest(payload: dict[str, Any], ctx: Any = None) -> dict[str, Any
             )
         rich_body = f"{body}\n\nHOLDINGS\n{holdings}"
 
+    # Deterministic watched-tickers section built by the digest pipeline; long
+    # channels only — the SMS core stays the model-written short body.
+    watchlist_section = getattr(ctx, "watchlist_section", None)
+    if isinstance(watchlist_section, str) and watchlist_section.strip():
+        rich_body = f"{rich_body}\n\nWATCHLIST\n{watchlist_section.strip()}"
+
     tz = getattr(ctx, "timezone", None) or settings.tz
     digest_date = _today(tz)
     run_id = getattr(ctx, "run_id", None)

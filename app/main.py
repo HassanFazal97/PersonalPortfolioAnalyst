@@ -75,12 +75,20 @@ from app.memory.embeddings import memory_enabled
 from app.plans import (
     effective_plan,
     max_digest_holdings,
+    max_watchlist,
     trial_active,
     trial_decision_pending,
 )
 from app.scheduler import DeliveryScheduler, DigestScheduler, IntervalScheduler
 from app.streaming import SENTINEL, ProgressBroker, sse_response
-from app.tools import fundamentals, market, portfolio, portfolio_risk, price_store
+from app.tools import (
+    fundamentals,
+    market,
+    portfolio,
+    portfolio_risk,
+    price_store,
+    symbol_search,
+)
 from app.tools.registry import (
     CHAT_TOOLS,
     PRO_CHAT_TOOLS,
@@ -534,6 +542,42 @@ async def _validate_digest_tickers(
         if t not in normalized:
             normalized.append(t)
     return normalized
+
+
+async def _watchlist_payload(repo: Repo, user_id: uuid.UUID) -> dict:
+    """The user's watchlist with live quotes plus the plan-cap quota block
+    (shape mirrors the chat quota: limit/used/remaining)."""
+    settings = get_settings()
+    is_owner = user_id == _OWNER_USER_ID
+    if is_owner:
+        cap = None
+    else:
+        user = await repo.get_user(user_id)
+        cap = max_watchlist(effective_plan(user), settings)
+    items = await repo.list_watchlist(user_id)
+    positions = await repo.list_positions(user_id=user_id)
+    held = {p.ticker for p in positions}
+    quotes: dict[str, dict] = {}
+    if items:
+        result = await market.get_quote({"tickers": [i.ticker for i in items]})
+        quotes = {q["ticker"]: q for q in result.get("quotes", [])}
+    used = len(items)
+    return {
+        "items": [
+            {
+                "ticker": i.ticker,
+                "created_at": i.created_at.isoformat() if i.created_at else None,
+                "last_price": quotes.get(i.ticker, {}).get("last_price"),
+                "day_change_pct": quotes.get(i.ticker, {}).get("day_change_pct"),
+                "held": i.ticker in held,
+            }
+            for i in items
+        ],
+        "limit": cap,
+        "used": used,
+        # A Pro→Free downgrade can leave used > cap; clamp instead of going negative.
+        "remaining": None if cap is None else max(0, cap - used),
+    }
 
 
 async def _delete_supabase_auth_user(settings, auth_id: uuid.UUID | None) -> bool:
@@ -1488,6 +1532,63 @@ def create_app() -> FastAPI:
         auth_user_deleted = await _delete_supabase_auth_user(settings, auth_id)
         return {"deleted": True, "auth_user_deleted": auth_user_deleted}
 
+    # ---- Watchlist ---------------------------------------------------------
+
+    @app.get("/watchlist")
+    async def get_watchlist(request: Request) -> dict:
+        """The caller's watched tickers with live quotes and the plan cap."""
+        repo = _require_repo(app)
+        return await _watchlist_payload(repo, _user_id(request))
+
+    @app.post("/watchlist/{ticker}")
+    async def add_to_watchlist(ticker: str, request: Request) -> dict:
+        """Watch a ticker (idempotent). Presence = opted into coverage: news
+        refresh, the digest WATCHLIST section, and anomaly scans (Pro)."""
+        t = _validated_ticker(ticker)
+        repo = _require_repo(app)
+        user_id = _user_id(request)
+        settings = get_settings()
+
+        current = await repo.get_watchlist_tickers(user_id)
+        if t not in current and user_id != _OWNER_USER_ID:
+            user = await repo.get_user(user_id)
+            plan = effective_plan(user)
+            cap = max_watchlist(plan, settings)
+            if len(current) >= cap:
+                hint = (
+                    " Upgrade to Pro to watch more."
+                    if plan != "pro"
+                    else ""
+                )
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"{'Pro' if plan == 'pro' else 'Free'} plan allows at "
+                        f"most {cap} watched stocks.{hint}"
+                    ),
+                )
+
+        # The ticker must resolve to a real instrument before it can ride the
+        # serial nightly fetch loops — junk stays out of the jobs entirely.
+        funds = await fundamentals.get_fundamentals([t], repo=repo, settings=settings)
+        if not funds.get(t):
+            quote_result = await market.get_quote({"tickers": [t]})
+            quotes = {q["ticker"]: q for q in quote_result.get("quotes", [])}
+            if quotes.get(t, {}).get("last_price") is None:
+                raise HTTPException(status_code=404, detail="unknown ticker")
+
+        await repo.add_watchlist_ticker(user_id, t)
+        return await _watchlist_payload(repo, user_id)
+
+    @app.delete("/watchlist/{ticker}")
+    async def remove_from_watchlist(ticker: str, request: Request) -> dict:
+        """Stop watching a ticker; coverage stops with it."""
+        t = _validated_ticker(ticker)
+        repo = _require_repo(app)
+        user_id = _user_id(request)
+        await repo.remove_watchlist_ticker(user_id, t)
+        return await _watchlist_payload(repo, user_id)
+
     # ---- Billing (Stripe) ------------------------------------------------
 
     @app.post("/billing/checkout")
@@ -1855,43 +1956,63 @@ def create_app() -> FastAPI:
         ctx = ToolContext(settings=settings, repo=repo, user_id=user_id, timezone=tz)
         return await portfolio_risk.risk_analytics_payload(ctx)
 
+    @app.get("/stocks/search")
+    async def stocks_search(request: Request, q: str = "") -> dict:
+        """Find stocks by ticker or company name (Yahoo-format symbols).
+
+        Registered BEFORE /stocks/{ticker} — FastAPI matches routes in
+        registration order, so this must come first or "search" would be
+        treated as a ticker."""
+        return {"results": await symbol_search.search_symbols(q)}
+
     @app.get("/stocks/{ticker}")
     async def stock_detail(ticker: str, request: Request) -> dict:
         """Everything the stock detail page needs except history and news.
 
-        404 for tickers the user doesn't hold — the page is only reachable
-        from the holdings table, and the gate bounds fetch cost."""
+        Works for any real ticker, held or not: held tickers price from the
+        portfolio rows; others take a live quote. 404 only when neither
+        fundamentals nor a quote resolve (junk symbols stay cost-free)."""
         t = _validated_ticker(ticker)
         repo = _require_repo(app)
         settings = get_settings()
-        ctx = ToolContext(settings=settings, repo=repo, user_id=_user_id(request))
+        user_id = _user_id(request)
+        ctx = ToolContext(settings=settings, repo=repo, user_id=user_id)
         pf = await portfolio.get_portfolio({}, ctx)
         rows = [p for p in pf.get("positions", []) if p["ticker"] == t]
-        if not rows:
-            raise HTTPException(status_code=404, detail="not in your holdings")
 
         funds = await fundamentals.get_fundamentals([t], repo=repo, settings=settings)
         data = funds.get(t) or {}
         stored = await repo.get_ticker_fundamentals([t])
         fetched_at = stored[t].fetched_at.isoformat() if t in stored else None
+        watching = t in await repo.get_watchlist_tickers(user_id)
 
-        last_price = rows[0]["last_price"]
-        quantity = sum(r["quantity"] for r in rows)
-        cost_basis = sum(r["quantity"] * r["avg_cost"] for r in rows)
-        market_value = (
-            sum(r["market_value"] for r in rows)
-            if all(r["market_value"] is not None for r in rows)
-            else None
-        )
-        currency = rows[0]["currency"]
-        totals = pf.get("totals", {})
-        usdcad = totals.get("usdcad_rate")
-        total_mv_cad = totals.get("total_market_value_cad")
-        weight_pct = None
-        if market_value is not None and total_mv_cad:
-            mv_cad = portfolio._to_cad(market_value, currency, usdcad)
-            if mv_cad is not None:
-                weight_pct = round(mv_cad / total_mv_cad * 100, 2)
+        position = None
+        if rows:
+            last_price = rows[0]["last_price"]
+            day_change_pct = rows[0]["day_change_pct"]
+            quantity = sum(r["quantity"] for r in rows)
+            cost_basis = sum(r["quantity"] * r["avg_cost"] for r in rows)
+            market_value = (
+                sum(r["market_value"] for r in rows)
+                if all(r["market_value"] is not None for r in rows)
+                else None
+            )
+            currency = rows[0]["currency"]
+            totals = pf.get("totals", {})
+            usdcad = totals.get("usdcad_rate")
+            total_mv_cad = totals.get("total_market_value_cad")
+            weight_pct = None
+            if market_value is not None and total_mv_cad:
+                mv_cad = portfolio._to_cad(market_value, currency, usdcad)
+                if mv_cad is not None:
+                    weight_pct = round(mv_cad / total_mv_cad * 100, 2)
+        else:
+            quote_result = await market.get_quote({"tickers": [t]})
+            quotes = {q["ticker"]: q for q in quote_result.get("quotes", [])}
+            last_price = quotes.get(t, {}).get("last_price")
+            day_change_pct = quotes.get(t, {}).get("day_change_pct")
+            if not data and last_price is None:
+                raise HTTPException(status_code=404, detail="unknown ticker")
 
         dividends = dict(data.get("dividends") or {})
         dividends["dividend_yield_pct"] = fundamentals.dividend_yield_pct(
@@ -1907,26 +2028,8 @@ def create_app() -> FastAPI:
         profile["ticker"] = t
         profile["quote_type"] = data.get("quote_type")
 
-        return {
-            "profile": profile,
-            "quote": {
-                "last_price": last_price,
-                "day_change_pct": rows[0]["day_change_pct"],
-            },
-            "valuation": data.get("valuation"),
-            "growth": data.get("growth"),
-            "profitability": data.get("profitability"),
-            "financial_health": data.get("financial_health"),
-            "dividends": dividends,
-            "price_action": price_action,
-            "earnings": {
-                "next_earnings_date": fundamentals.next_earnings_date(
-                    data.get("earnings_dates"), today
-                ),
-                "ex_dividend_date": dividends.get("ex_dividend_date"),
-            },
-            "etf": data.get("etf"),
-            "position": {
+        if rows:
+            position = {
                 "quantity": quantity,
                 "avg_cost": round(cost_basis / quantity, 4) if quantity else None,
                 "cost_basis": round(cost_basis, 2),
@@ -1952,7 +2055,30 @@ def create_app() -> FastAPI:
                     }
                     for r in rows
                 ],
+            }
+
+        return {
+            "profile": profile,
+            "quote": {
+                "last_price": last_price,
+                "day_change_pct": day_change_pct,
             },
+            "valuation": data.get("valuation"),
+            "growth": data.get("growth"),
+            "profitability": data.get("profitability"),
+            "financial_health": data.get("financial_health"),
+            "dividends": dividends,
+            "price_action": price_action,
+            "earnings": {
+                "next_earnings_date": fundamentals.next_earnings_date(
+                    data.get("earnings_dates"), today
+                ),
+                "ex_dividend_date": dividends.get("ex_dividend_date"),
+            },
+            "etf": data.get("etf"),
+            "position": position,
+            "held": bool(rows),
+            "watching": watching,
             "fetched_at": fetched_at,
         }
 

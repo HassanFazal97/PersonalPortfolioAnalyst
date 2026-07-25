@@ -40,6 +40,10 @@ class ToolContext:
     # against the current run. Optional: absent in unit tests / prefetch.
     client: Any | None = None
     budget: Any | None = None
+    # Preformatted digest WATCHLIST section (watched-not-held tickers), built
+    # deterministically by the digest pipeline; send_digest appends it to the
+    # rich body only (SMS keeps the short core). None = no section.
+    watchlist_section: str | None = None
 
 
 ToolFn = Callable[[dict[str, Any], ToolContext], Awaitable[Any]]

@@ -171,12 +171,61 @@ async def test_stock_detail_etf_branch(monkeypatch, repo):
     assert body["etf"]["top_holdings"][0]["symbol"] == "NVDA"
 
 
-async def test_stock_detail_404_when_not_held(monkeypatch, repo):
+async def test_stock_detail_not_held_serves_live_quote(monkeypatch, repo):
     await _seed_positions(repo)
     await _seed_fundamentals(repo)
     _seed_market(monkeypatch)
+    monkeypatch.setitem(PRICES, "AAPL", 210.0)
+    await repo.upsert_ticker_fundamentals(
+        ticker="AAPL",
+        quote_type="EQUITY",
+        data={
+            "ticker": "AAPL",
+            "quote_type": "EQUITY",
+            "profile": {"name": "Apple Inc.", "sector": "Technology"},
+            "valuation": {"forward_pe": 28.0},
+            "dividends": {"dividend_rate": 1.0},
+            "price_action": {"high_52w": 260.0},
+            "earnings_dates": [],
+            "etf": None,
+        },
+    )
     resp = _client(monkeypatch, repo).get("/stocks/AAPL", headers=_AUTH)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["position"] is None
+    assert body["held"] is False
+    assert body["watching"] is False
+    # Quote comes from the live-quote path, not a position row.
+    assert body["quote"]["last_price"] == 210.0
+    assert body["quote"]["day_change_pct"] is not None
+    # Serve-time computations still work against the live quote.
+    assert body["price_action"]["pct_from_52w_high"] == round(
+        (210.0 - 260.0) / 260.0 * 100, 2
+    )
+
+
+async def test_stock_detail_unknown_ticker_404(monkeypatch, repo):
+    _seed_market(monkeypatch)
+
+    def boom(_t):
+        raise RuntimeError("no such ticker")
+
+    monkeypatch.setattr(fundamentals, "_fetch_fundamentals_raw", boom)
+    # PRICES has no ZZZQ entry, so the quote seam raises too -> no price.
+    resp = _client(monkeypatch, repo).get("/stocks/ZZZQ", headers=_AUTH)
     assert resp.status_code == 404
+
+
+async def test_stock_detail_watching_flag(monkeypatch, repo):
+    await _seed_positions(repo)
+    await _seed_fundamentals(repo)
+    _seed_market(monkeypatch)
+    await repo.add_watchlist_ticker(_OWNER, "NVDA")
+    body = _client(monkeypatch, repo).get("/stocks/NVDA", headers=_AUTH).json()
+    assert body["held"] is True
+    assert body["watching"] is True
+    assert body["position"] is not None
 
 
 async def test_stock_detail_rejects_garbage_ticker(monkeypatch, repo):

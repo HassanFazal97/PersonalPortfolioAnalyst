@@ -3,7 +3,11 @@ from types import SimpleNamespace
 import pytest
 
 import app.tools.market as market
-from app.agent.digest_pipeline import resolve_digest_positions, run_digest_pipeline
+from app.agent.digest_pipeline import (
+    build_watchlist_section,
+    resolve_digest_positions,
+    run_digest_pipeline,
+)
 from app.agent.planner import parse_plan
 from app.config import get_settings
 from app.tools.digest import DIGEST_MAX_CHARS, send_digest, validate_digest_structure
@@ -167,6 +171,69 @@ async def test_send_digest_rejects_unstructured_body():
     ctx = SimpleNamespace(repo=FakeRepo(), run_id=None)
     with pytest.raises(ValueError):
         await send_digest({"body": "Portfolio steady today. Watch today: nothing."}, ctx)
+
+
+# --- watchlist section --------------------------------------------------------
+
+
+def test_build_watchlist_section_formats_lines():
+    section = build_watchlist_section(
+        ["SHOP.TO", "AAPL"],
+        {
+            "SHOP.TO": {"last_price": 98.123, "day_change_pct": 1.4},
+            "AAPL": {"last_price": None, "day_change_pct": None},
+        },
+        news_tickers={"SHOP.TO"},
+    )
+    lines = section.splitlines()
+    assert lines[0] == "SHOP.TO  $98.12  +1.4% today · news"
+    assert lines[1] == "AAPL  n/a  n/a today"
+
+
+def test_build_watchlist_section_empty_returns_none():
+    assert build_watchlist_section([], {}, news_tickers=set()) is None
+
+
+def test_build_watchlist_section_truncates_long_rosters():
+    tickers = [f"TICKER{i}" for i in range(200)]
+    quotes = {t: {"last_price": 100.0, "day_change_pct": 0.5} for t in tickers}
+    section = build_watchlist_section(tickers, quotes, news_tickers=set())
+    from app.agent.digest_pipeline import WATCHLIST_SECTION_MAX_CHARS
+
+    assert len(section) <= WATCHLIST_SECTION_MAX_CHARS
+    assert section.splitlines()[-1].startswith("(+")
+
+
+async def test_send_digest_appends_watchlist_to_rich_body_only():
+    repo = FakeRepo()
+    import uuid as _uuid
+
+    uid = _uuid.uuid4()
+    # SMS user: the outbound body is the short core, never the rich body.
+    repo.seed_user(uid, plan="pro")
+    repo._users_by_id[uid].preferred_channel = "sms"
+    ctx = SimpleNamespace(
+        repo=repo, run_id=None, user_id=uid,
+        watchlist_section="SHOP.TO  $98.12  +1.4% today · news",
+    )
+    out = await send_digest({"body": STRUCTURED_BODY}, ctx)
+    assert out["status"] == "sent"
+
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    today = datetime.now(ZoneInfo(get_settings().tz)).date()
+    stored = repo._digests_by_user[(uid, today)].body
+    assert "\n\nWATCHLIST\nSHOP.TO  $98.12  +1.4% today · news" in stored
+    # The queued SMS body is the short core without the section.
+    assert repo.outbound[-1] == STRUCTURED_BODY
+
+
+async def test_send_digest_without_watchlist_section_unchanged():
+    repo = FakeRepo()
+    ctx = SimpleNamespace(repo=repo, run_id=None)
+    await send_digest({"body": STRUCTURED_BODY}, ctx)
+    assert "WATCHLIST" not in repo.outbound[-1]
 
 
 def test_validate_structure_requires_portfolio_first_line():

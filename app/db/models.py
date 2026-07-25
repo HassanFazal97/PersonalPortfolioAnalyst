@@ -168,6 +168,26 @@ class Position(Base):
     )
 
 
+class WatchlistItem(Base):
+    """A ticker the user opted to follow (need not be held) — migration 021.
+
+    Presence = subscribed: watched tickers get news-refresh coverage, a digest
+    WATCHLIST section, and anomaly-scan coverage. Plan-capped at write time.
+    """
+
+    __tablename__ = "watchlist_items"
+    __table_args__ = (UniqueConstraint("user_id", "ticker"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    user_id: Mapped[uuid.UUID] = _user_id_column()
+    ticker: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class Transaction(Base):
     __tablename__ = "transactions"
     __table_args__ = (CheckConstraint("side IN ('buy','sell')", name="transactions_side_check"),)

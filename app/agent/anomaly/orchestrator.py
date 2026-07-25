@@ -46,8 +46,8 @@ async def scan_global_anomalies(
     *,
     recipients: list[uuid.UUID] | None = None,
 ) -> tuple[uuid.UUID, dict[str, list[AnomalyFlag]]]:
-    """Run the detectors once over every distinct ticker held by ``recipients``
-    (default: the scheduled anomaly audience).
+    """Run the detectors once over every distinct ticker held or watched by
+    ``recipients`` (default: the scheduled anomaly audience).
 
     Model-free (cost 0), but still recorded as an owner-attributed run so
     every scan is auditable in /runs alongside macro scans."""
@@ -55,7 +55,10 @@ async def scan_global_anomalies(
     started = time.monotonic()
     if recipients is None:
         recipients = await db.list_anomaly_recipients()
-    tickers = await db.list_distinct_tickers(recipients)
+    tickers = sorted(
+        set(await db.list_distinct_tickers(recipients))
+        | set(await db.list_distinct_watchlist_tickers(recipients))
+    )
     run_id = await db.create_run(
         trigger="anomaly",
         user_message=f"[anomaly scan: {len(tickers)} tickers]",
@@ -114,12 +117,14 @@ async def synthesize_anomalies_for_user(
     user_id: uuid.UUID,
     flags_by_ticker: dict[str, list[AnomalyFlag]],
 ) -> dict[str, Any]:
-    """Cheap per-user step: intersect global flags with this user's holdings,
-    apply the cooldown, aggregate to ONE alert, narrate it, deliver it."""
+    """Cheap per-user step: intersect global flags with this user's holdings
+    and watchlist, apply the cooldown, aggregate to ONE alert, narrate it,
+    deliver it."""
     settings = get_settings()
 
     held = {p.ticker for p in await db.list_positions(user_id=user_id)}
-    hit_tickers = sorted(held & set(flags_by_ticker))
+    watched = set(await db.get_watchlist_tickers(user_id))
+    hit_tickers = sorted((held | watched) & set(flags_by_ticker))
 
     # Cooldown: a ticker that appeared in a recent price_anomaly alert stays
     # quiet — the cross-day fatigue backstop (fingerprints only dedup same-day).

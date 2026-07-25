@@ -88,10 +88,14 @@ async def sync_ticker(repo: Any, ticker: str, days: int) -> int:
 
 
 async def run_daily_prices_sync(repo: Any, settings: Any) -> dict[str, Any]:
-    """Nightly job body: refresh stored history for every held ticker plus the
-    benchmark and FX, serially with spacing so Yahoo doesn't rate-limit us."""
+    """Nightly job body: refresh stored history for every held or watched
+    ticker plus the benchmark and FX, serially with spacing so Yahoo doesn't
+    rate-limit us."""
     days = settings.daily_prices_history_days
-    tickers = await repo.list_distinct_tickers()
+    tickers = sorted(
+        set(await repo.list_distinct_tickers())
+        | set(await repo.list_distinct_watchlist_tickers())
+    )
     # The engine also needs these two, which are never "held".
     for extra in (_BENCHMARK_TICKER, _FX_TICKER):
         if extra not in tickers:

@@ -373,6 +373,26 @@ async def test_run_fundamentals_refresh_covers_all_tickers(monkeypatch):
     assert set(repo.ticker_fundamentals) == {"NVDA", "SHOP.TO"}
 
 
+async def test_run_fundamentals_refresh_includes_watchlist(monkeypatch):
+    import uuid
+
+    from app.config import DEFAULT_USER_ID
+
+    fundamentals.cache_clear()
+    repo = _repo()
+    await repo.upsert_position(
+        ticker="NVDA", quantity=1, avg_cost=100, currency="USD", account="TFSA"
+    )
+    owner = uuid.UUID(DEFAULT_USER_ID)
+    await repo.add_watchlist_ticker(owner, "AAPL")
+    await repo.add_watchlist_ticker(owner, "NVDA")  # held too -> deduped
+    monkeypatch.setattr(fundamentals, "REFRESH_SPACING_SECONDS", 0)
+    monkeypatch.setattr(fundamentals, "_fetch_fundamentals_raw", _fake_raw)
+    summary = await run_fundamentals_refresh(repo, SETTINGS)
+    assert summary == {"tickers": 2, "refreshed": 2, "failed": 0}
+    assert set(repo.ticker_fundamentals) == {"AAPL", "NVDA"}
+
+
 async def test_get_fundamentals_bounds_concurrency(monkeypatch):
     fundamentals.cache_clear()
     repo = _repo()
