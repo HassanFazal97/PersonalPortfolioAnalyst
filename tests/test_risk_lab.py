@@ -122,6 +122,13 @@ def test_risk_lab_page_renders():
     html = risk_lab_page("https://x.supabase.co", "anon-key")
     assert "<title>Risk Lab" in html
     assert "/portfolio/risk-analytics" in html
-    # The three SVG renderers and the Pro gate are wired in.
-    for token in ("renderHeatmap", "renderBars", "renderFan", "risk-gate"):
+    # The renderers, plain-language layers, and the Pro gate are wired in.
+    for token in (
+        "renderHeatmap", "renderBars", "renderFan", "risk-gate",
+        "renderVerdict", "risk-verdict", "risk-takeaway", "risk-tip",
+    ):
         assert token in html
+    # The chart CSS must use real design-system tokens; the old build shipped
+    # var(--text)/var(--muted), which don't exist and rendered black-on-black.
+    assert "var(--text)" not in html
+    assert "var(--muted)" not in html

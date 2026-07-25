@@ -3579,139 +3579,315 @@ def dashboard_page(supabase_url: str, anon_key: str) -> str:
 _RISK_BODY = """
 <section class="risk-head">
   <h1>Risk Lab</h1>
-  <p class="sub">How your holdings behave <em>together</em> — the portfolio-level view a single stock's numbers can't give you.</p>
+  <p class="risk-sub">What your portfolio's last two years of daily moves say about how it could behave next.</p>
 </section>
 <div id="risk-loading" class="muted-note">Computing portfolio risk&hellip;</div>
-<div id="risk-gate" class="card gate-card" style="display:none;">
+<div id="risk-gate" class="dash-card gate-card" style="display:none;">
   <h2>A Pro feature</h2>
-  <p>Portfolio risk analytics — the return covariance, risk decomposition, Value at Risk, and a Monte&nbsp;Carlo projection — are part of Cirvia&nbsp;Pro.</p>
+  <p>Portfolio risk analytics — how much you could lose, what's driving it, and a thousand simulated years ahead — are part of Cirvia&nbsp;Pro.</p>
   <a class="btn" href="/app/settings?billing=upgrade">Upgrade to Pro</a>
 </div>
 <div id="risk-empty" class="muted-note" style="display:none;"></div>
 <div id="risk-content" style="display:none;">
-  <div class="stat-row" id="risk-stats"></div>
-  <div class="card">
-    <h2>Risk concentration</h2>
-    <p class="card-sub">Each holding's share of portfolio <strong>risk</strong> next to its share of <strong>capital</strong>. A risk bar taller than the weight bar is a hidden concentration.</p>
+
+  <p class="risk-verdict" id="risk-verdict"></p>
+  <div class="tile-row" id="risk-stats"></div>
+
+  <div class="dash-card risk-card">
+    <h2>Where the risk sits</h2>
+    <p class="risk-card-sub">Each holding's share of the portfolio's risk, against the share
+    of your money it holds. When the colored bar runs past the gray one, that holding is
+    riskier than its size suggests.</p>
+    <p class="risk-takeaway" id="bars-takeaway"></p>
     <div id="risk-bars" class="svg-box"></div>
   </div>
-  <div class="card">
-    <h2>Correlation map</h2>
-    <p class="card-sub">How tightly each pair of holdings moves together — <span class="corr-lo">blue</span> is independent, <span class="corr-hi">red</span> is moving as one.</p>
+
+  <div class="dash-card risk-card">
+    <h2>Do your holdings move together?</h2>
+    <p class="risk-card-sub">Two holdings that always rise and fall together protect you less
+    than two that don't. Brighter purple means a pair moves as one; green means they tend to
+    move opposite ways.</p>
+    <p class="risk-takeaway" id="corr-takeaway"></p>
     <div id="risk-heatmap" class="svg-box"></div>
+    <div class="corr-scale" aria-hidden="true">
+      <span>moves opposite</span><span class="corr-grad"></span><span>moves as one</span>
+    </div>
   </div>
-  <div class="card">
-    <h2>One-year projection</h2>
-    <p class="card-sub" id="mc-sub"></p>
+
+  <div class="dash-card risk-card">
+    <h2>One year, a thousand ways</h2>
+    <p class="risk-card-sub" id="mc-sub"></p>
+    <p class="risk-takeaway" id="mc-takeaway"></p>
     <div id="risk-fan" class="svg-box"></div>
   </div>
+
   <div id="risk-notes" class="muted-note"></div>
-  <p class="disclaimer">Statistical estimates from ~2 years of history — descriptive, not predictions or advice. Not financial advice.</p>
+  <p class="disclaimer">Statistical estimates from ~2 years of daily prices. They describe how
+  your current mix has behaved, not what will happen. Not financial advice.</p>
 </div>
+<div id="risk-tip" class="risk-tip" role="status"></div>
 """
 
 _RISK_JS = r"""
 const fmtCad = (n) => '$' + Math.round(n).toLocaleString('en-CA');
-const pct = (n) => (n >= 0 ? '+' : '') + n.toFixed(1) + '%';
+const pct1 = (n) => (n >= 0 ? '+' : '') + n.toFixed(1) + '%';
+const esc = (s) => { const d = document.createElement('div'); d.textContent = s ?? '';
+  return d.innerHTML.replaceAll('"', '&quot;').replaceAll("'", '&#39;'); };
 
-function statCard(label, value, sub) {
-  return '<div class="stat-card"><span class="stat-label">' + label + '</span>' +
-    '<span class="stat-value">' + value + '</span>' +
-    (sub ? '<span class="stat-sub">' + sub + '</span>' : '') + '</div>';
+// --- shared hover tooltip -----------------------------------------------------
+
+const tip = document.getElementById('risk-tip');
+function tipShow(html, ev) {
+  tip.innerHTML = html;
+  tip.style.display = 'block';
+  const pad = 14, w = tip.offsetWidth, h = tip.offsetHeight;
+  let x = ev.clientX + pad, y = ev.clientY + pad;
+  if (x + w > innerWidth - 8) x = ev.clientX - w - pad;
+  if (y + h > innerHeight - 8) y = ev.clientY - h - pad;
+  tip.style.left = x + 'px'; tip.style.top = y + 'px';
+}
+function tipHide() { tip.style.display = 'none'; }
+function bindTips(root) {
+  root.querySelectorAll('[data-tip]').forEach((el) => {
+    el.addEventListener('pointermove', (ev) => tipShow(el.dataset.tip, ev));
+    el.addEventListener('pointerleave', tipHide);
+  });
+}
+
+// --- verdict + stat tiles -----------------------------------------------------
+
+function tile(label, value, sub) {
+  return '<div class="risk-tile"><span class="t-label">' + label + '</span>' +
+    '<span class="t-value">' + value + '</span>' +
+    '<span class="t-sub">' + sub + '</span></div>';
+}
+
+function renderVerdict(s, mc) {
+  const parts = ['Your <strong>' + fmtCad(s.portfolio_value_cad) + '</strong> portfolio has been swinging about <strong>&plusmn;' +
+    s.annualized_volatility_pct.toFixed(0) + '%</strong> a year.'];
+  if (s.portfolio_beta !== null) {
+    parts.push('When the market drops 1%, it has tended to drop about <strong>' +
+      s.portfolio_beta.toFixed(1) + '%</strong>.');
+  }
+  parts.push('On its worst 1-in-20 days it loses <strong>' + fmtCad(s.var95_1d_cad) + '</strong> or more.');
+  document.getElementById('risk-verdict').innerHTML = parts.join(' ');
 }
 
 function renderStats(s) {
-  const el = document.getElementById('risk-stats');
+  const dollarsPerPct = s.portfolio_value_cad / 100;
   const cards = [
-    statCard('Portfolio volatility', s.annualized_volatility_pct.toFixed(1) + '%',
-      'vs ' + s.weighted_avg_volatility_pct.toFixed(1) + '% weighted average'),
-    statCard('Diversification', s.diversification_ratio.toFixed(2) + '×',
-      s.diversification_benefit_pct.toFixed(1) + ' pts of vol cancelled'),
-    statCard('Effective bets', s.effective_number_of_bets.toFixed(1),
-      'of ' + s.holdings_analyzed + ' holdings'),
-    statCard('1-day VaR (95%)', fmtCad(s.var95_1d_cad),
-      s.var95_1d_pct.toFixed(1) + '% • CVaR ' + s.cvar95_1d_pct.toFixed(1) + '%'),
+    tile('Typical yearly swing', '&plusmn;' + s.annualized_volatility_pct.toFixed(0) + '%',
+      'about ' + fmtCad(s.annualized_volatility_pct * dollarsPerPct) +
+      ' up or down in an ordinary year'),
+    tile('A bad day', '&minus;' + fmtCad(s.var95_1d_cad),
+      'your worst 1-in-20 days lose at least this (' + s.var95_1d_pct.toFixed(1) +
+      '%); the average of those days is ' + s.cvar95_1d_pct.toFixed(1) + '%'),
+    tile('Really independent bets', '~' + s.effective_number_of_bets.toFixed(0),
+      'you hold ' + s.holdings_analyzed + ' names, but overlap makes them act like ' +
+      s.effective_number_of_bets.toFixed(0)),
+    tile('Diversification is working', '&minus;' + s.diversification_benefit_pct.toFixed(0) + ' pts',
+      'mixing holdings cancels volatility: ' + s.weighted_avg_volatility_pct.toFixed(0) +
+      '% if they moved alone, ' + s.annualized_volatility_pct.toFixed(0) + '% together'),
   ];
-  if (s.sharpe_ratio !== null) cards.push(statCard('Sharpe ratio', s.sharpe_ratio.toFixed(2), 'risk-adjusted return'));
-  if (s.portfolio_beta !== null) cards.push(statCard('Market beta', s.portfolio_beta.toFixed(2), 'vs S&P 500 (CAD)'));
-  el.innerHTML = cards.join('');
+  if (s.portfolio_beta !== null) {
+    cards.push(tile('Moves with the market', s.portfolio_beta.toFixed(2) + '×',
+      'a 1% market move has meant about ' + s.portfolio_beta.toFixed(1) + '% for you, both directions'));
+  }
+  if (s.sharpe_ratio !== null) {
+    cards.push(tile('Return earned per unit of risk', s.sharpe_ratio.toFixed(2),
+      s.sharpe_ratio >= 1 ? 'above 1 means the swings have been paying for themselves so far'
+        : 'below 1 means the returns have been small for the swings endured'));
+  }
+  document.getElementById('risk-stats').innerHTML = cards.join('');
 }
 
-function renderBars(holdings) {
+// --- where the risk sits (paired bars) ------------------------------------------
+
+function roundRight(x, y, w, h) {
+  // Bar with a 4px rounded data-end, square at the baseline.
+  const r = Math.min(4, w);
+  return 'M' + x + ' ' + y + ' h' + Math.max(0, w - r) +
+    ' a' + r + ' ' + r + ' 0 0 1 ' + r + ' ' + r +
+    ' v' + (h - 2 * r) + ' a' + r + ' ' + r + ' 0 0 1 ' + (-r) + ' ' + r +
+    ' h' + (-Math.max(0, w - r)) + ' Z';
+}
+
+function renderBars(holdings, s) {
   const el = document.getElementById('risk-bars');
+  const top = holdings[0];
+  if (top) {
+    document.getElementById('bars-takeaway').innerHTML =
+      '<strong>' + esc(top.ticker) + '</strong> alone drives ' +
+      top.risk_contribution_pct.toFixed(0) + '% of your risk with ' +
+      top.weight_pct.toFixed(0) + '% of your money.';
+  }
   const maxv = Math.max(1, ...holdings.map(h => Math.max(h.weight_pct, h.risk_contribution_pct)));
-  const rowH = 34, pad = 8, labelW = 74, barW = 320, W = labelW + barW + 96, H = holdings.length * rowH + pad * 2;
-  let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Risk contribution versus weight">';
+  const rowH = 42, pad = 6, labelW = 84, barW = 430, valW = 150;
+  const W = labelW + barW + valW, H = holdings.length * rowH + pad * 2;
+  let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="' + W + '" height="' + H +
+    '" style="min-width:560px;width:100%;height:auto;" role="img" aria-label="Each holding’s risk contribution versus its capital weight">';
   holdings.forEach((h, i) => {
     const y = pad + i * rowH;
-    const wLen = (h.weight_pct / maxv) * barW;
-    const rLen = (h.risk_contribution_pct / maxv) * barW;
-    svg += '<text x="0" y="' + (y + 13) + '" class="svg-lbl">' + h.ticker + '</text>';
-    svg += '<rect x="' + labelW + '" y="' + (y + 2) + '" width="' + wLen.toFixed(1) + '" height="10" rx="2" class="bar-weight"></rect>';
-    svg += '<rect x="' + labelW + '" y="' + (y + 15) + '" width="' + rLen.toFixed(1) + '" height="10" rx="2" class="bar-risk"></rect>';
-    svg += '<text x="' + (labelW + Math.max(wLen, rLen) + 6) + '" y="' + (y + 17) + '" class="svg-val">' +
-      h.risk_contribution_pct.toFixed(0) + '% risk / ' + h.weight_pct.toFixed(0) + '% wt</text>';
+    const wLen = Math.max(1.5, (h.weight_pct / maxv) * barW);
+    const rLen = Math.max(1.5, (h.risk_contribution_pct / maxv) * barW);
+    const t = esc(h.ticker);
+    const tipHtml = '<strong>' + t + '</strong><br>' + h.risk_contribution_pct.toFixed(1) +
+      '% of portfolio risk<br>' + h.weight_pct.toFixed(1) + '% of capital' +
+      '<br><span class=&quot;tip-sub&quot;>own volatility ' + h.annualized_vol_pct.toFixed(0) + '%/yr</span>';
+    svg += '<g class="bar-row" data-tip="' + tipHtml + '">';
+    svg += '<text x="0" y="' + (y + 20) + '" class="svg-lbl">' + t + '</text>';
+    svg += '<path d="' + roundRight(labelW, y + 4, rLen, 12) + '" class="bar-risk"></path>';
+    svg += '<path d="' + roundRight(labelW, y + 20, wLen, 12) + '" class="bar-weight"></path>';
+    svg += '<text x="' + (labelW + Math.max(wLen, rLen) + 8) + '" y="' + (y + 21) + '" class="svg-val">' +
+      h.risk_contribution_pct.toFixed(0) + '% risk &middot; ' + h.weight_pct.toFixed(0) + '% money</text>';
+    svg += '<rect x="0" y="' + y + '" width="' + W + '" height="' + rowH + '" class="bar-hit"></rect>';
+    svg += '</g>';
   });
   svg += '</svg>';
   el.innerHTML = svg +
-    '<div class="legend"><span><i class="sw bar-weight"></i>Weight</span><span><i class="sw bar-risk"></i>Risk contribution</span></div>';
+    '<div class="legend"><span><i class="sw bar-risk"></i>Share of risk</span>' +
+    '<span><i class="sw bar-weight"></i>Share of money</span></div>';
+  bindTips(el);
 }
 
+// --- correlation heatmap --------------------------------------------------------
+
 function corrColor(c) {
-  // Diverging: -1 blue (210°) -> 0 pale -> +1 red (8°). Lightness tracks |c|.
-  const h = c >= 0 ? 8 : 210;
-  const l = 92 - 42 * Math.abs(c);
-  const sat = 20 + 60 * Math.abs(c);
-  return 'hsl(' + h + ' ' + sat + '% ' + l + '%)';
+  // Diverging on the card surface: green (moves opposite) <- near-surface -> violet
+  // (moves as one). Lightness and chroma track |c|; hue only carries the sign.
+  const a = Math.abs(c);
+  const l = 22 + 46 * a;
+  const ch = 0.02 + (c >= 0 ? 0.17 : 0.11) * a;
+  const h = c >= 0 ? 295 : 155;
+  return 'oklch(' + l.toFixed(1) + '% ' + ch.toFixed(3) + ' ' + h + ')';
 }
 
 function renderHeatmap(corr) {
   const el = document.getElementById('risk-heatmap');
   const n = corr.tickers.length;
-  const cell = n > 14 ? 22 : 30, lbl = 58, W = lbl + n * cell + 6, H = lbl + n * cell + 6;
-  let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Correlation matrix">';
+  // Strongest off-diagonal pairs drive the takeaway sentence.
+  const pairs = [];
+  for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
+    pairs.push([corr.tickers[i], corr.tickers[j], corr.matrix[i][j]]);
+  }
+  pairs.sort((a, b) => Math.abs(b[2]) - Math.abs(a[2]));
+  if (pairs.length) {
+    const topPairs = pairs.slice(0, 2).map((p) =>
+      '<strong>' + esc(p[0]) + '</strong> and <strong>' + esc(p[1]) + '</strong> (' +
+      p[2].toFixed(2) + ')').join(', then ');
+    document.getElementById('corr-takeaway').innerHTML =
+      'Most joined at the hip: ' + topPairs + '. 1.00 means always together, 0 means unrelated.';
+  }
+  const cell = 26, gap = 2, lblL = 66, lblT = 56;
+  const W = lblL + n * cell + 40, H = lblT + n * cell + 6;
+  let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="' + W + '" height="' + H +
+    '" style="height:auto;" role="img" aria-label="Correlation between each pair of holdings">';
   corr.tickers.forEach((t, j) => {
-    svg += '<text x="' + (lbl + j * cell + cell / 2) + '" y="' + (lbl - 6) + '" class="svg-lbl heat-col">' + t + '</text>';
-    svg += '<text x="' + (lbl - 6) + '" y="' + (lbl + j * cell + cell / 2 + 3) + '" class="svg-lbl heat-row">' + t + '</text>';
+    const cx = lblL + j * cell + cell / 2;
+    svg += '<text x="' + cx + '" y="' + (lblT - 8) + '" class="svg-val heat-col" transform="rotate(-45 ' +
+      cx + ' ' + (lblT - 8) + ')">' + esc(t) + '</text>';
+    svg += '<text x="' + (lblL - 8) + '" y="' + (lblT + j * cell + cell / 2 + 4) + '" class="svg-val heat-row">' + esc(t) + '</text>';
   });
   for (let i = 0; i < n; i++) {
     for (let j = 0; j < n; j++) {
       const c = corr.matrix[i][j];
-      const x = lbl + j * cell, y = lbl + i * cell;
-      svg += '<rect x="' + x + '" y="' + y + '" width="' + (cell - 2) + '" height="' + (cell - 2) +
-        '" rx="2" fill="' + corrColor(c) + '"><title>' + corr.tickers[i] + ' · ' + corr.tickers[j] + ': ' + c.toFixed(2) + '</title></rect>';
-      if (n <= 12) svg += '<text x="' + (x + cell / 2 - 1) + '" y="' + (y + cell / 2 + 2) + '" class="heat-val">' + c.toFixed(1) + '</text>';
+      const x = lblL + j * cell, y = lblT + i * cell;
+      if (i === j) {
+        svg += '<rect x="' + x + '" y="' + y + '" width="' + (cell - gap) + '" height="' + (cell - gap) +
+          '" rx="3" fill="var(--surface-2)"></rect>';
+        continue;
+      }
+      const a = esc(corr.tickers[i]), b = esc(corr.tickers[j]);
+      const phrase = c >= 0.7 ? 'move as one' : c >= 0.4 ? 'often move together'
+        : c >= 0.15 ? 'loosely related' : c > -0.15 ? 'mostly unrelated' : 'tend to move opposite';
+      svg += '<rect x="' + x + '" y="' + y + '" width="' + (cell - gap) + '" height="' + (cell - gap) +
+        '" rx="3" fill="' + corrColor(c) + '" data-tip="<strong>' + a + ' &middot; ' + b +
+        '</strong><br>' + c.toFixed(2) + ' &mdash; ' + phrase + '"></rect>';
     }
   }
   svg += '</svg>';
   el.innerHTML = svg;
+  bindTips(el);
 }
 
-function renderFan(mc) {
+// --- one year, a thousand ways (Monte Carlo fan) ---------------------------------
+
+function renderFan(mc, s) {
   const el = document.getElementById('risk-fan');
+  const value = s.portfolio_value_cad;
   const b = mc.bands_pct, p5 = b.p5, p95 = b.p95, p25 = b.p25, p75 = b.p75, p50 = b.p50;
-  const m = p5.length, W = 640, H = 260, padL = 44, padR = 12, padT = 12, padB = 22;
+  const m = p5.length, W = 680, H = 300, padL = 52, padR = 132, padT = 14, padB = 28;
   const lo = Math.min(...p5), hi = Math.max(...p95);
   const span = Math.max(1e-6, hi - lo);
   const x = (i) => padL + (i / (m - 1)) * (W - padL - padR);
   const y = (v) => padT + (1 - (v - lo) / span) * (H - padT - padB);
-  const path = (arr) => arr.map((v, i) => (i ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(v).toFixed(1)).join(' ');
+  const line = (arr) => arr.map((v, i) => (i ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(v).toFixed(1)).join(' ');
   const band = (top, bot) => 'M' + top.map((v, i) => x(i).toFixed(1) + ' ' + y(v).toFixed(1)).join(' L') +
     ' L' + bot.map((v, i) => x(i).toFixed(1) + ' ' + y(v).toFixed(1)).reverse().join(' L') + ' Z';
-  let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Monte Carlo projection fan">';
-  // Zero line.
-  if (lo < 0 && hi > 0) { const yz = y(0); svg += '<line x1="' + padL + '" x2="' + (W - padR) + '" y1="' + yz + '" y2="' + yz + '" class="fan-zero"></line>'; }
+  let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="' + W + '" height="' + H +
+    '" style="min-width:560px;width:100%;height:auto;" role="img" aria-label="Simulated one-year outcomes">';
+  // Clean percent gridlines.
+  const step = span > 120 ? 50 : span > 60 ? 25 : 10;
+  for (let v = Math.ceil(lo / step) * step; v <= hi; v += step) {
+    if (v === 0) continue;
+    svg += '<line x1="' + padL + '" x2="' + (W - padR) + '" y1="' + y(v) + '" y2="' + y(v) + '" class="grid-line"></line>';
+    svg += '<text x="' + (padL - 8) + '" y="' + (y(v) + 4) + '" text-anchor="end" class="svg-tick">' + pct1(v) + '</text>';
+  }
+  if (lo < 0 && hi > 0) {
+    svg += '<line x1="' + padL + '" x2="' + (W - padR) + '" y1="' + y(0) + '" y2="' + y(0) + '" class="fan-zero"></line>';
+    svg += '<text x="' + (padL - 8) + '" y="' + (y(0) + 4) + '" text-anchor="end" class="svg-tick">today</text>';
+  }
   svg += '<path d="' + band(p95, p5) + '" class="fan-outer"></path>';
   svg += '<path d="' + band(p75, p25) + '" class="fan-inner"></path>';
-  svg += '<path d="' + path(p50) + '" class="fan-median" fill="none"></path>';
-  // Y labels (min, 0, max).
-  [hi, 0, lo].forEach((v) => { if (v === 0 && !(lo < 0 && hi > 0)) return; svg += '<text x="4" y="' + (y(v) + 3) + '" class="svg-val">' + pct(v) + '</text>'; });
+  svg += '<path d="' + line(p50) + '" class="fan-median"></path>';
+  // Month ticks (the last one anchors end so it can't run under the end labels).
+  [[0, 'now', 'middle'], [0.25, '3 mo', 'middle'], [0.5, '6 mo', 'middle'],
+   [0.75, '9 mo', 'middle'], [1, '1 yr', 'end']].forEach(([f, lbl, anchor]) => {
+    svg += '<text x="' + (padL + f * (W - padL - padR)) + '" y="' + (H - 8) +
+      '" text-anchor="' + anchor + '" class="svg-tick">' + lbl + '</text>';
+  });
+  // Direct end labels: the outcomes people should take away, in dollars.
+  // Two-line blocks, collision-resolved so converging bands can't overlap them.
+  const endDefs = [[p95, 'a great year'], [p50, 'the middle path'], [p5, 'a brutal year']]
+    .map(([arr, name]) => ({ v: arr[arr.length - 1], name, y: y(arr[arr.length - 1]) }))
+    .sort((a, b) => a.y - b.y);
+  const blockH = 32, minY = padT + 10, maxY = H - padB - 10;
+  endDefs.forEach((d, i) => { if (i) d.y = Math.max(d.y, endDefs[i - 1].y + blockH); });
+  for (let i = endDefs.length - 1; i >= 0; i--) {
+    const cap = i === endDefs.length - 1 ? maxY : endDefs[i + 1].y - blockH;
+    endDefs[i].y = Math.min(endDefs[i].y, cap);
+    if (i === 0) endDefs[i].y = Math.max(endDefs[i].y, minY);
+  }
+  endDefs.forEach((d) => {
+    svg += '<text x="' + (W - padR + 10) + '" y="' + (d.y + 4) + '" class="fan-endlbl">' +
+      fmtCad(value * (1 + d.v / 100)) + '</text>' +
+      '<text x="' + (W - padR + 10) + '" y="' + (d.y + 17) + '" class="fan-endsub">' +
+      d.name + ' (' + pct1(d.v) + ')</text>';
+  });
+  // Invisible hover columns: a readout per month position.
+  const months = 12;
+  for (let k = 0; k <= months; k++) {
+    const i = Math.round((k / months) * (m - 1));
+    const tipHtml = '<strong>' + (k === 0 ? 'Today' : k + ' month' + (k > 1 ? 's' : '') + ' out') +
+      '</strong><br>middle path ' + fmtCad(value * (1 + p50[i] / 100)) +
+      '<br><span class=&quot;tip-sub&quot;>90% of simulations between ' +
+      fmtCad(value * (1 + p5[i] / 100)) + ' and ' + fmtCad(value * (1 + p95[i] / 100)) + '</span>';
+    const cx = x(i), half = (W - padL - padR) / months / 2;
+    svg += '<rect x="' + (cx - half) + '" y="0" width="' + (2 * half) + '" height="' + H +
+      '" class="bar-hit" data-tip="' + tipHtml + '"></rect>';
+  }
   svg += '</svg>';
   el.innerHTML = svg;
+  bindTips(el);
   document.getElementById('mc-sub').textContent =
-    'A ' + mc.simulations.toLocaleString() + '-path simulation from your holdings’ covariance (zero assumed drift). ' +
-    'Shaded 5th–95th percentile range; solid line is the median. ' +
-    mc.probability_of_loss_pct.toFixed(0) + '% of paths end below today’s value.';
+    'We replayed the next 12 months ' + mc.simulations.toLocaleString() +
+    ' times, using only how your holdings have moved and co-moved for two years (no growth assumed). ' +
+    'The shaded range holds 90% of those futures; the line is the middle one.';
+  document.getElementById('mc-takeaway').innerHTML =
+    Math.round(mc.probability_of_loss_pct) + '% of the simulated years ended below today’s ' +
+    fmtCad(value) + '. The middle 90% landed between <strong>' +
+    fmtCad(value * (1 + p5[p5.length - 1] / 100)) + '</strong> and <strong>' +
+    fmtCad(value * (1 + p95[p95.length - 1] / 100)) + '</strong>.';
 }
 
 async function loadRisk() {
@@ -3724,40 +3900,86 @@ async function loadRisk() {
   const data = await resp.json();
   if (!data.available) { const el = document.getElementById('risk-empty'); el.style.display = 'block'; el.textContent = data.note || 'Not enough data to analyze.'; return; }
   document.getElementById('risk-content').style.display = 'block';
+  renderVerdict(data.summary, data.monte_carlo);
   renderStats(data.summary);
-  renderBars(data.holdings);
+  renderBars(data.holdings, data.summary);
   renderHeatmap(data.correlation);
-  renderFan(data.monte_carlo);
+  renderFan(data.monte_carlo, data.summary);
   if (data.notes && data.notes.length) document.getElementById('risk-notes').textContent = data.notes.join(' ');
-  document.querySelectorAll('.svg-box svg').forEach((s) => riseIn(s));
+  document.querySelectorAll('.risk-card, .risk-tile').forEach((s) => riseIn(s));
 }
 
 requireSession().then((ok) => { if (ok) loadRisk(); });
 """
 
 _RISK_CSS = """
-.risk-head h1 { margin-bottom: 0.2rem; }
-.risk-head .sub { color: var(--muted); margin-bottom: 1.2rem; }
-.svg-box { overflow-x: auto; margin-top: 0.6rem; }
-.svg-box svg { width: 100%; height: auto; display: block; }
-.svg-lbl { fill: var(--text); font-size: 11px; font-weight: 600; }
-.svg-val { fill: var(--muted); font-size: 10px; }
-.heat-col { text-anchor: middle; }
+/* Chart data colors. Risk/identity is the brand violet; the capital-weight
+   reference bar is a deliberate neutral (validated: CVD dE 15.5, contrast >3:1
+   on the card surface; its low chroma is covered by per-row value labels). */
+.risk-wrap { max-width: 880px; }
+.risk-head h1 { margin-bottom: 0.3rem; }
+.risk-head .risk-sub { color: var(--ink-2); margin-bottom: 1.4rem; max-width: 60ch; }
+.risk-verdict { font-size: 1.15rem; line-height: 1.5; color: var(--ink);
+  max-width: 62ch; margin: 0 0 1.1rem; text-wrap: pretty; }
+.risk-verdict strong { color: var(--accent-text); font-weight: 650; }
+/* stat tiles: label / value / plain-language sub */
+.tile-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 0.75rem; margin-bottom: 1rem; }
+.risk-tile { background: var(--surface-1); border: 1px solid var(--line);
+  border-radius: var(--r-m); padding: 0.85rem 1rem 0.9rem; }
+.risk-tile .t-label { display: block; font-size: 0.82rem; font-weight: 600;
+  color: var(--ink-3); }
+.risk-tile .t-value { display: block; font-size: 1.45rem; font-weight: 650;
+  color: var(--ink); margin: 0.1rem 0 0.15rem; letter-spacing: -0.01em; }
+.risk-tile .t-sub { display: block; font-size: 0.82rem; line-height: 1.45;
+  color: var(--ink-2); }
+.risk-card { margin-bottom: 1rem; }
+.risk-card h2 { font-size: 1.1rem; margin-bottom: 0.3rem; }
+.risk-card-sub { color: var(--ink-2); font-size: 0.9rem; line-height: 1.5;
+  max-width: 68ch; margin: 0 0 0.35rem; }
+.risk-takeaway { color: var(--ink); font-size: 0.92rem; line-height: 1.5;
+  max-width: 68ch; margin: 0 0 0.4rem; }
+.risk-takeaway strong { color: var(--accent-text); font-weight: 650; }
+.svg-box { overflow-x: auto; margin-top: 0.5rem; }
+.svg-box svg { display: block; }
+.svg-lbl { fill: var(--ink-2); font-size: 12px; font-weight: 600; }
+.svg-val { fill: var(--ink-3); font-size: 11px; font-variant-numeric: tabular-nums; }
+.svg-tick { fill: var(--ink-3); font-size: 11px; font-variant-numeric: tabular-nums; }
+.heat-col { text-anchor: start; }
 .heat-row { text-anchor: end; }
-.heat-val { fill: #1c1c22; font-size: 9px; text-anchor: middle; opacity: 0.75; }
-.bar-weight { fill: var(--line-strong, #b9c0cc); }
-.bar-risk { fill: var(--accent-deep, #3b6ef5); }
-.legend { display: flex; gap: 1rem; font-size: 0.8rem; color: var(--muted); margin-top: 0.4rem; }
-.legend .sw { display: inline-block; width: 11px; height: 11px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
-.corr-lo { color: hsl(210 70% 45%); font-weight: 600; }
-.corr-hi { color: hsl(8 70% 50%); font-weight: 600; }
-.fan-outer { fill: var(--accent-deep, #3b6ef5); opacity: 0.16; }
-.fan-inner { fill: var(--accent-deep, #3b6ef5); opacity: 0.28; }
-.fan-median { stroke: var(--accent-deep, #3b6ef5); stroke-width: 2; }
-.fan-zero { stroke: var(--line-strong, #b9c0cc); stroke-dasharray: 3 3; }
+.bar-weight { fill: oklch(60% 0.03 300); }
+.bar-risk { fill: oklch(58% 0.19 295); }
+.bar-hit { fill: transparent; }
+.bar-row:hover .bar-risk { fill: oklch(64% 0.19 295); }
+.legend { display: flex; gap: 1.1rem; font-size: 0.8rem; color: var(--ink-3);
+  margin-top: 0.5rem; }
+.legend .sw { display: inline-block; width: 11px; height: 11px; border-radius: 3px;
+  margin-right: 5px; vertical-align: -1px; }
+.corr-scale { display: flex; align-items: center; gap: 0.6rem; margin-top: 0.55rem;
+  font-size: 0.78rem; color: var(--ink-3); }
+.corr-grad { flex: 0 1 220px; height: 8px; border-radius: 4px;
+  background: linear-gradient(90deg, oklch(72% 0.13 155), oklch(22% 0.012 300) 50%, oklch(66% 0.19 295)); }
+.grid-line { stroke: var(--line); stroke-width: 1; }
+.fan-outer { fill: oklch(58% 0.19 295); opacity: 0.14; }
+.fan-inner { fill: oklch(58% 0.19 295); opacity: 0.30; }
+.fan-median { stroke: var(--accent-text); stroke-width: 2; fill: none;
+  stroke-linejoin: round; stroke-linecap: round; }
+.fan-zero { stroke: var(--line-strong); stroke-width: 1; }
+.fan-endlbl { fill: var(--ink-2); font-size: 11.5px; font-weight: 600;
+  font-variant-numeric: tabular-nums; }
+.fan-endsub { fill: var(--ink-3); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+/* shared hover tooltip */
+.risk-tip { position: fixed; z-index: 40; display: none; pointer-events: none;
+  background: var(--surface-3); border: 1px solid var(--line-strong);
+  border-radius: var(--r-s); padding: 0.4rem 0.6rem; font-size: 0.8rem;
+  color: var(--ink); max-width: 260px; line-height: 1.45;
+  box-shadow: 0 8px 24px oklch(8% 0.01 300 / 0.5); }
+.risk-tip .tip-sub { color: var(--ink-3); }
 .gate-card { text-align: center; }
 .gate-card .btn { margin-top: 0.6rem; }
-.disclaimer { font-size: 0.75rem; color: var(--muted); margin-top: 1rem; }
+.disclaimer { font-size: 0.78rem; color: var(--ink-3); margin-top: 1rem;
+  max-width: 68ch; }
+@media (max-width: 640px) { .risk-verdict { font-size: 1.02rem; } }
 """
 
 
