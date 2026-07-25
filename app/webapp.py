@@ -717,12 +717,16 @@ document.getElementById('forgot-btn').addEventListener('click', async () => {
 });
 
 async function routeAfterAuth() {
+  // Onboarding is for users with no portfolio yet. An existing portfolio
+  // (even with a dead brokerage link) routes to the dashboard — it shows a
+  // reconnect banner; onboarding would trap a fully set-up user.
   try {
     const resp = await api('/portfolio/status');
     const status = await resp.json();
-    window.location.href = status.connected ? '/app/dashboard' : '/app/onboarding';
+    window.location.href = (status.connected || status.has_positions)
+      ? '/app/dashboard' : '/app/onboarding';
   } catch (e) {
-    window.location.href = '/app/onboarding';
+    window.location.href = '/app/dashboard';
   }
 }
 

@@ -177,11 +177,16 @@ async def portfolio_status(
                 registered = user_id == _OWNER_USER_ID and bool(
                     settings.snaptrade_user_secret
                 )
+    # Whether a portfolio already exists (synced or seeded). Login routing
+    # needs this: a user whose brokerage link died must land on the dashboard
+    # (which shows a reconnect banner), not be trapped in onboarding.
+    has_positions = bool(await repo.list_positions(user_id=user_id))
     return {
         "registered": registered,
         "connected": connected,
         "connection_disabled": connection_disabled,
         "accounts_count": accounts_count,
+        "has_positions": has_positions,
         "last_sync_at": row.last_sync_at.isoformat() if row and row.last_sync_at else None,
         "last_sync_error": row.last_sync_error if row else None,
     }

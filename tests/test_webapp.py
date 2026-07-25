@@ -26,8 +26,8 @@ def client(monkeypatch):
 
 @pytest.mark.parametrize(
     "path",
-    ["/app", "/app/onboarding", "/app/dashboard", "/app/settings",
-     "/app/settings/delivery", "/app/reset"],
+    ["/app", "/app/onboarding", "/app/dashboard", "/app/risk",
+     "/app/settings", "/app/settings/delivery", "/app/reset"],
 )
 def test_app_pages_render_without_token(client, path):
     resp = client.get(path)
@@ -36,6 +36,13 @@ def test_app_pages_render_without_token(client, path):
     assert "https://example.supabase.co" in resp.text
     assert "sb_publishable_test123" in resp.text
     assert "supabase-js" in resp.text  # CDN script tag
+
+
+def test_login_routes_on_connection_or_positions(client):
+    # A user with a synced portfolio but a dead brokerage link must land on
+    # the dashboard (reconnect banner), never be trapped in onboarding.
+    resp = client.get("/app")
+    assert "status.connected || status.has_positions" in resp.text
 
 
 def test_dashboard_has_news_sections(client):
@@ -167,8 +174,8 @@ def test_app_pages_noindex(client):
 
 @pytest.mark.parametrize(
     "path",
-    ["/app", "/app/onboarding", "/app/dashboard", "/app/settings",
-     "/app/settings/delivery", "/app/reset"],
+    ["/app", "/app/onboarding", "/app/dashboard", "/app/risk",
+     "/app/settings", "/app/settings/delivery", "/app/reset"],
 )
 def test_app_pages_503_when_supabase_not_configured(monkeypatch, path):
     monkeypatch.setenv("API_TOKEN", "test-token")

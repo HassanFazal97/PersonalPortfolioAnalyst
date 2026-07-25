@@ -241,6 +241,29 @@ async def test_status_no_connections_is_not_disabled(monkeypatch):
     assert status["connection_disabled"] is False
 
 
+@pytest.mark.asyncio
+async def test_status_reports_existing_positions(monkeypatch):
+    # Login routing sends users with a portfolio to the dashboard even when
+    # the brokerage link is gone (e.g. the 1083 self-heal dropped the row) —
+    # has_positions is that signal.
+    repo = FakeRepo()
+    await repo.upsert_position(
+        ticker="NVDA", quantity=1, avg_cost=100.0, currency="USD", account="TFSA"
+    )
+    status = await portfolio_status(repo, _OWNER, MagicMock(snaptrade_user_secret=""))
+    assert status["registered"] is False
+    assert status["connected"] is False
+    assert status["has_positions"] is True
+
+
+@pytest.mark.asyncio
+async def test_status_no_positions_flag_false():
+    status = await portfolio_status(
+        FakeRepo(), uuid.uuid4(), MagicMock(snaptrade_user_secret="")
+    )
+    assert status["has_positions"] is False
+
+
 # --- stale credentials self-heal (test → prod key swap) ------------------------
 
 

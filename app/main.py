@@ -319,6 +319,7 @@ _AUTH_EXEMPT_PATHS = {
     "/app",
     "/app/onboarding",
     "/app/dashboard",
+    "/app/risk",
     "/app/settings",
     "/app/settings/delivery",
     "/app/reset",
