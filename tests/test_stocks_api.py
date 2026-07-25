@@ -217,6 +217,24 @@ async def test_stock_detail_unknown_ticker_404(monkeypatch, repo):
     assert resp.status_code == 404
 
 
+async def test_stock_detail_all_none_skeleton_404(monkeypatch, repo):
+    """Yahoo doesn't fail on garbage tickers — .info returns a minimal dict
+    that normalizes to an all-None skeleton. That must still 404."""
+    _seed_market(monkeypatch)
+    await repo.upsert_ticker_fundamentals(
+        ticker="ZZZQ", quote_type=None,
+        data={
+            "ticker": "ZZZQ", "quote_type": None,
+            "profile": {"name": None, "sector": None},
+            "valuation": {"forward_pe": None},
+            "dividends": {}, "price_action": {}, "earnings_dates": [],
+            "etf": None,
+        },
+    )
+    resp = _client(monkeypatch, repo).get("/stocks/ZZZQ", headers=_AUTH)
+    assert resp.status_code == 404
+
+
 async def test_stock_detail_watching_flag(monkeypatch, repo):
     await _seed_positions(repo)
     await _seed_fundamentals(repo)

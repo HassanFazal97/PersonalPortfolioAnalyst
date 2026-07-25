@@ -544,6 +544,20 @@ async def _validate_digest_tickers(
     return normalized
 
 
+def _is_real_instrument(data: dict | None, last_price) -> bool:
+    """Whether a ticker resolved to something real. Yahoo's ``.info`` for a
+    garbage symbol doesn't fail — it returns a minimal dict the fundamentals
+    normalizer expands into an all-None skeleton — so a truthy ``data`` alone
+    proves nothing; require an actual signal (quote type, name, or a price)."""
+    if last_price is not None:
+        return True
+    if not data:
+        return False
+    return bool(
+        data.get("quote_type") or (data.get("profile") or {}).get("name")
+    )
+
+
 async def _watchlist_payload(repo: Repo, user_id: uuid.UUID) -> dict:
     """The user's watchlist with live quotes plus the plan-cap quota block
     (shape mirrors the chat quota: limit/used/remaining)."""
@@ -1571,10 +1585,11 @@ def create_app() -> FastAPI:
         # The ticker must resolve to a real instrument before it can ride the
         # serial nightly fetch loops — junk stays out of the jobs entirely.
         funds = await fundamentals.get_fundamentals([t], repo=repo, settings=settings)
-        if not funds.get(t):
+        data = funds.get(t) or {}
+        if not _is_real_instrument(data, None):
             quote_result = await market.get_quote({"tickers": [t]})
             quotes = {q["ticker"]: q for q in quote_result.get("quotes", [])}
-            if quotes.get(t, {}).get("last_price") is None:
+            if not _is_real_instrument(data, quotes.get(t, {}).get("last_price")):
                 raise HTTPException(status_code=404, detail="unknown ticker")
 
         await repo.add_watchlist_ticker(user_id, t)
@@ -2011,7 +2026,7 @@ def create_app() -> FastAPI:
             quotes = {q["ticker"]: q for q in quote_result.get("quotes", [])}
             last_price = quotes.get(t, {}).get("last_price")
             day_change_pct = quotes.get(t, {}).get("day_change_pct")
-            if not data and last_price is None:
+            if not _is_real_instrument(data, last_price):
                 raise HTTPException(status_code=404, detail="unknown ticker")
 
         dividends = dict(data.get("dividends") or {})

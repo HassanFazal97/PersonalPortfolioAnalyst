@@ -164,6 +164,31 @@ async def test_watch_unknown_ticker_404(monkeypatch):
     assert await repo.get_watchlist_tickers(uid) == []
 
 
+async def test_watch_all_none_skeleton_404(monkeypatch):
+    """A garbage ticker whose Yahoo .info normalized to an all-None skeleton
+    row must not be watchable (it would join the nightly job loops)."""
+    repo = FakeRepo()
+    uid = uuid.uuid4()
+    repo.seed_user(uid, plan="free")
+    await repo.upsert_ticker_fundamentals(
+        ticker="ZZZQ", quote_type=None,
+        data={"ticker": "ZZZQ", "quote_type": None,
+              "profile": {"name": None}, "valuation": {}},
+    )
+    market.cache_clear()
+    fundamentals.cache_clear()
+
+    def no_quote(_t):
+        raise RuntimeError("no such ticker")
+
+    monkeypatch.setattr(market, "_fetch_quote_raw", no_quote)
+    client = _client(monkeypatch, repo)
+    _as_user(monkeypatch, uid)
+
+    assert client.post("/watchlist/ZZZQ", headers=_AUTH).status_code == 404
+    assert await repo.get_watchlist_tickers(uid) == []
+
+
 async def test_unwatch_removes(monkeypatch):
     repo = FakeRepo()
     uid = uuid.uuid4()
