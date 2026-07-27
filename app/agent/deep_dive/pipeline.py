@@ -37,6 +37,7 @@ from app.agent.prompts import (
     DEEP_DIVE_PLAN_RETRY_SUFFIX,
     DEEP_DIVE_SYNTHESIS_PROMPT,
     DEEP_DIVE_SYNTHESIS_RETRY_SUFFIX,
+    DEEP_DIVE_SYNTHESIS_TRUNCATED_SUFFIX,
     PROMPT_VERSION,
 )
 from app.auth.context import set_current_user_id
@@ -518,7 +519,7 @@ async def _synthesize(
     client: Any, model: str, observer: Observer, budget: Budget, blob: str
 ) -> dict[str, Any]:
     messages = [{"role": "user", "content": blob}]
-    content, _ = await call_and_log(
+    content, stop_reason = await call_and_log(
         client,
         model=model,
         system_prompt=DEEP_DIVE_SYNTHESIS_PROMPT,
@@ -527,14 +528,20 @@ async def _synthesize(
         observer=observer,
         iteration=budget.iterations + 1,
         budget=budget,
-        max_tokens=3000,  # the structured report JSON outgrows the 1024 default
+        max_tokens=8000,  # a full multi-section report JSON runs several
+        # thousand tokens; a cut-off response can never parse
     )
     text = _join_text(content)
     report = parse_report(text)
     if report is not None:
         return report
     messages.append({"role": "assistant", "content": content})
-    messages.append({"role": "user", "content": DEEP_DIVE_SYNTHESIS_RETRY_SUFFIX})
+    messages.append({
+        "role": "user",
+        "content": DEEP_DIVE_SYNTHESIS_TRUNCATED_SUFFIX
+        if stop_reason == "max_tokens"
+        else DEEP_DIVE_SYNTHESIS_RETRY_SUFFIX,
+    })
     content, _ = await call_and_log(
         client,
         model=model,
@@ -544,14 +551,21 @@ async def _synthesize(
         observer=observer,
         iteration=budget.iterations + 2,
         budget=budget,
-        max_tokens=3000,
+        max_tokens=8000,
     )
     text2 = _join_text(content)
     report = parse_report(text2)
     if report is not None:
         return report
-    # Text-only fallback: the user still gets something readable.
-    raw = text2 or text or "The deep dive could not produce a structured report."
+    # Text-only fallback: the user still gets something readable. A response
+    # that is itself broken JSON would render as a wall of braces, so swap it
+    # for an honest failure message instead of dumping it verbatim.
+    raw = text2 or text or ""
+    if not raw.strip() or raw.lstrip().startswith(("{", "[", "```")):
+        raw = (
+            "The research stages completed, but the final report could not be "
+            "formatted. Run the deep dive again to get a full report."
+        )
     return {"overview": raw, "summary": raw[:900], "sections": []}
 
 

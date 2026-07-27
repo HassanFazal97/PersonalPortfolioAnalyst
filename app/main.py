@@ -100,6 +100,7 @@ from app.tools.tickers import normalize_ticker
 from app.webapp import (
     NOT_CONFIGURED_HTML,
     dashboard_page,
+    deep_dives_page,
     delivery_settings_page,
     login_page,
     onboarding_page,
@@ -320,6 +321,7 @@ _AUTH_EXEMPT_PATHS = {
     "/app/onboarding",
     "/app/dashboard",
     "/app/risk",
+    "/app/deep-dives",
     "/app/settings",
     "/app/settings/delivery",
     "/app/reset",
@@ -886,6 +888,12 @@ def create_app() -> FastAPI:
         """Visual Risk Lab: portfolio-level quant analytics (Pro-gated by the
         /portfolio/risk-analytics API the page calls)."""
         return _webapp_html(risk_lab_page)
+
+    @app.get("/app/deep-dives", response_class=HTMLResponse)
+    async def app_deep_dives() -> HTMLResponse:
+        """Deep-dive report history and full report view (data comes from the
+        Pro-gated /deep-dive APIs the page calls)."""
+        return _webapp_html(deep_dives_page)
 
     @app.get("/app/settings", response_class=HTMLResponse)
     async def app_settings() -> HTMLResponse:

@@ -7,7 +7,7 @@ prompt below changes.
 
 from __future__ import annotations
 
-PROMPT_VERSION = "2026-07-22.7"
+PROMPT_VERSION = "2026-07-27.1"
 
 CHAT_SYSTEM_PROMPT = """\
 You are a personal portfolio analyst for a single user. You answer questions \
@@ -323,6 +323,12 @@ must quote the verifier's correction in "verification_note".
 DEEP_DIVE_SYNTHESIS_RETRY_SUFFIX = """\
 Your previous response was not valid JSON of the required shape. Respond again \
 with ONLY the JSON report object, exactly as specified."""
+
+DEEP_DIVE_SYNTHESIS_TRUNCATED_SUFFIX = """\
+Your previous response was cut off by the output length limit, so the JSON was \
+incomplete. Respond again with ONLY the JSON report object — keep it \
+substantially shorter: tighter evidence strings and only the strongest \
+findings per section."""
 
 # --- Macro alert specialists ------------------------------------------------
 

@@ -209,6 +209,20 @@ tr:last-child td { border-bottom: none; }
   border: 1px solid var(--line); color: var(--ink-3); margin-left: 0.4rem; white-space: nowrap; }
 .dd-badge.verified { color: var(--gain); border-color: var(--gain); }
 .dd-badge.challenged { color: var(--warn); border-color: var(--warn); }
+.dd-summary-actions { margin-top: 0.75rem; }
+.dd-layout { display: grid; grid-template-columns: 260px 1fr; gap: 1.25rem;
+  align-items: start; margin-top: 0.75rem; }
+@media (max-width: 780px) { .dd-layout { grid-template-columns: 1fr; } }
+.dd-list { display: flex; flex-direction: column; gap: 0.5rem; }
+.dd-list-item { text-align: left; padding: 0.6rem 0.75rem; border-radius: var(--r-s);
+  border: 1px solid var(--line); background: var(--surface-2); color: var(--ink-2);
+  font-family: var(--font); font-size: 0.85rem; cursor: pointer; line-height: 1.4; }
+.dd-list-item:hover { border-color: var(--accent-hover); }
+.dd-list-item.active { border-color: var(--accent-hover); color: var(--ink); }
+.dd-list-item .when { font-weight: 600; }
+.dd-list-item .head { display: block; color: var(--ink-3); font-size: 0.8rem;
+  margin-top: 0.15rem; overflow: hidden; display: -webkit-box;
+  -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .chat-row { display: flex; gap: 0.5rem; }
 .chat-row input { flex: 1; padding: 0.65rem 0.8rem; border-radius: var(--r-s);
   border: 1px solid var(--line); background: var(--surface-2); color: var(--ink);
@@ -543,6 +557,7 @@ def _page(
 </div>
 <div class="nav-links"><a class="keep" href="/app/dashboard">Dashboard</a>
 <a class="keep" href="/app/risk">Risk Lab</a>
+<a class="keep" href="/app/deep-dives">Deep Dives</a>
 <a class="keep" href="/app/settings">Settings</a>
 <button class="link-btn" onclick="signOut()">Sign out</button></div>
 </div></nav>
@@ -1518,7 +1533,7 @@ _DASHBOARD_BODY = """
   <div class="dash-card" id="deep-dive-card">
     <h3>Deep Dive <span class="tag">Pro</span>
       <span class="refresh-row">
-        <select id="dd-history" style="display:none;"></select>
+        <a class="link-btn" href="/app/deep-dives" id="dd-history-link">Past reports</a>
         <button class="btn" id="dd-run-btn">Run deep dive</button>
       </span>
     </h3>
@@ -2276,16 +2291,10 @@ function ddRenderProgress(progress) {
   box.appendChild(ul);
 }
 
-function ddBadge(verification) {
-  const b = document.createElement('span');
-  b.className = 'dd-badge ' + (verification === 'verified' ? 'verified'
-    : verification === 'challenged' ? 'challenged' : '');
-  b.textContent = verification === 'verified' ? '✓ verified'
-    : verification === 'challenged' ? '⚠ challenged' : 'unverified';
-  return b;
-}
-
-function ddRenderReport(r) {
+// The dashboard shows only the report's essence — headline, the short summary,
+// and verification counts. The full report (sections, findings, evidence)
+// lives on /app/deep-dives, which also keeps the history.
+function ddRenderSummary(r) {
   const box = document.getElementById('dd-report');
   const report = r.report || {};
   document.getElementById('dd-progress').style.display = 'none';
@@ -2304,51 +2313,26 @@ function ddRenderReport(r) {
     const h = document.createElement('h4'); h.textContent = report.headline;
     box.appendChild(h);
   }
-  for (const para of String(report.overview || r.summary || '').split('\\n\\n')) {
+  for (const para of String(r.summary || report.summary || report.overview || '').split('\\n\\n')) {
     if (!para.trim()) continue;
     const p = document.createElement('p'); p.textContent = para.trim();
     box.appendChild(p);
   }
-  for (const section of report.sections || []) {
-    const h = document.createElement('h4');
-    h.textContent = section.title || DD_SPECIALISTS[section.specialist] || section.specialist;
-    box.appendChild(h);
-    for (const f of section.findings || []) {
-      const div = document.createElement('div'); div.className = 'dd-finding';
-      const claim = document.createElement('div');
-      const strong = document.createElement('strong'); strong.textContent = f.claim || '';
-      claim.appendChild(strong);
-      claim.appendChild(ddBadge(f.verification));
-      div.appendChild(claim);
-      const ev = document.createElement('div'); ev.className = 'ev';
-      ev.textContent = (f.evidence || '') +
-        (f.verification === 'challenged' && f.verification_note ? ' — verifier: ' + f.verification_note : '');
-      div.appendChild(ev);
-      box.appendChild(div);
-    }
-  }
-  const lists = [['Risks', report.risks], ['Opportunities', report.opportunities]];
-  for (const [title, items] of lists) {
-    if (!items || !items.length) continue;
-    const h = document.createElement('h4'); h.textContent = title;
-    box.appendChild(h);
-    const ul = document.createElement('ul');
-    for (const item of items) {
-      const li = document.createElement('li');
-      li.textContent = item.text + (item.severity ? ' (' + item.severity + ')' : '');
-      ul.appendChild(li);
-    }
-    box.appendChild(ul);
-  }
   const foot = document.createElement('p'); foot.className = 'muted-note';
   const vs = report.verification_summary || {};
-  let footText = '';
-  if (vs.checked) footText += vs.checked + ' claims checked, ' + vs.verified + ' verified, ' + vs.challenged + ' challenged. ';
-  if ((report.failed_specialists || []).length) {
-    footText += 'No findings from: ' + report.failed_specialists.join(', ') + '. ';
-  }
-  foot.textContent = footText + (report.disclaimer || 'Informational only — not investment advice.');
+  foot.textContent = vs.checked
+    ? vs.checked + ' claims checked, ' + vs.verified + ' verified, ' + vs.challenged + ' challenged.'
+    : (report.disclaimer || 'Informational only — not investment advice.');
   box.appendChild(foot);
+
+  const actions = document.createElement('div');
+  actions.className = 'dd-summary-actions';
+  const link = document.createElement('a');
+  link.className = 'btn';
+  link.href = '/app/deep-dives?report=' + encodeURIComponent(r.report_id);
+  link.textContent = 'View full report';
+  actions.appendChild(link);
+  box.appendChild(actions);
 }
 
 async function ddOpenStream(reportId) {
@@ -2395,33 +2379,10 @@ async function ddLoadLatest(reportId) {
       err.textContent = 'The deep dive failed — nothing was charged beyond the work done. Try again.';
       err.style.display = 'block';
     } else {
-      ddRenderReport(r);
+      ddRenderSummary(r);
     }
   } catch (e) {}
 }
-
-async function ddRefreshHistory() {
-  try {
-    const data = await (await api('/deep-dive')).json();
-    const reports = data.reports || [];
-    const sel = document.getElementById('dd-history');
-    if (!reports.length) { sel.style.display = 'none'; return null; }
-    sel.innerHTML = '';
-    for (const r of reports) {
-      const opt = document.createElement('option');
-      opt.value = r.report_id;
-      const when = r.completed_at || r.created_at;
-      opt.textContent = (when ? new Date(when).toLocaleDateString() : '?') + ' · ' + r.status;
-      sel.appendChild(opt);
-    }
-    sel.style.display = reports.length > 1 ? 'inline-block' : 'none';
-    return reports[0];
-  } catch (e) { return null; }
-}
-
-document.getElementById('dd-history').addEventListener('change', (e) => {
-  ddLoadLatest(e.target.value);
-});
 
 document.getElementById('dd-run-btn').addEventListener('click', async () => {
   const btn = document.getElementById('dd-run-btn');
@@ -2444,7 +2405,6 @@ document.getElementById('dd-run-btn').addEventListener('click', async () => {
     document.getElementById('dd-report').style.display = 'none';
     ddRenderProgress({ plan: 'started' });
     await ddOpenStream(data.report_id);
-    await ddRefreshHistory();
   } catch (e) {
     err.textContent = 'Network error. Try again.';
     err.style.display = 'block';
@@ -2459,13 +2419,17 @@ async function initDeepDive() {
     document.getElementById('dd-run-btn').textContent = 'Upgrade to run';
     return;
   }
-  const latest = await ddRefreshHistory();
+  let latest = null;
+  try {
+    const data = await (await api('/deep-dive?limit=1')).json();
+    latest = (data.reports || [])[0] || null;
+  } catch (e) { return; }
   if (!latest) return;
   if (latest.status === 'running') {
     ddRenderProgress(latest.progress || {});
     ddOpenStream(latest.report_id);
   } else if (latest.status !== 'error') {
-    ddRenderReport(latest);
+    ddRenderSummary(latest);
   }
 }
 
@@ -3991,6 +3955,192 @@ def risk_lab_page(supabase_url: str, anon_key: str) -> str:
         anon_key=anon_key,
         extra_js=_RISK_JS,
         wrap_class="app-wrap risk-wrap",
+    )
+
+
+# --------------------------------------------------------------------------
+# /app/deep-dives — deep-dive report history + full report view
+# --------------------------------------------------------------------------
+
+_DEEP_DIVES_BODY = """\
+<div class="dash-card">
+  <h3>Deep Dive reports <span class="tag">Pro</span></h3>
+  <p class="muted-note" style="margin-top:0.5rem;">Every deep dive you run is
+  kept here. Pick a report on the left to read the full findings — each claim
+  carries the verifier's verdict.</p>
+  <div class="dd-layout">
+    <div class="dd-list" id="dd-list"></div>
+    <div id="dd-detail"><p class="muted-note">Loading…</p></div>
+  </div>
+</div>
+"""
+
+_DEEP_DIVES_JS = """\
+const DDP_SPECIALISTS = {
+  fundamentals: 'Fundamentals', technical: 'Technical',
+  risk: 'Risk', news_macro: 'News & macro',
+};
+let ddpReports = [];
+
+function ddpBadge(verification) {
+  const b = document.createElement('span');
+  b.className = 'dd-badge ' + (verification === 'verified' ? 'verified'
+    : verification === 'challenged' ? 'challenged' : '');
+  b.textContent = verification === 'verified' ? '✓ verified'
+    : verification === 'challenged' ? '⚠ challenged' : 'unverified';
+  return b;
+}
+
+function ddpNote(box, text) {
+  box.innerHTML = '';
+  const p = document.createElement('p');
+  p.className = 'muted-note';
+  p.textContent = text;
+  box.appendChild(p);
+}
+
+function ddpRenderReport(r) {
+  const box = document.getElementById('dd-detail');
+  const report = r.report || {};
+  box.innerHTML = '';
+
+  const meta = document.createElement('p');
+  meta.className = 'muted-note';
+  const when = r.completed_at || r.created_at;
+  meta.textContent = (r.status === 'partial' ? 'Partial report · ' : '') +
+    (when ? new Date(when).toLocaleString() : '');
+  box.appendChild(meta);
+
+  if (report.headline) {
+    const h = document.createElement('h4'); h.textContent = report.headline;
+    box.appendChild(h);
+  }
+  for (const para of String(report.overview || r.summary || '').split('\\n\\n')) {
+    if (!para.trim()) continue;
+    const p = document.createElement('p'); p.textContent = para.trim();
+    box.appendChild(p);
+  }
+  for (const section of report.sections || []) {
+    const h = document.createElement('h4');
+    h.textContent = section.title || DDP_SPECIALISTS[section.specialist] || section.specialist;
+    box.appendChild(h);
+    for (const f of section.findings || []) {
+      const div = document.createElement('div'); div.className = 'dd-finding';
+      const claim = document.createElement('div');
+      const strong = document.createElement('strong'); strong.textContent = f.claim || '';
+      claim.appendChild(strong);
+      claim.appendChild(ddpBadge(f.verification));
+      div.appendChild(claim);
+      const ev = document.createElement('div'); ev.className = 'ev';
+      ev.textContent = (f.evidence || '') +
+        (f.verification === 'challenged' && f.verification_note ? ' — verifier: ' + f.verification_note : '');
+      div.appendChild(ev);
+      box.appendChild(div);
+    }
+  }
+  const lists = [['Risks', report.risks], ['Opportunities', report.opportunities]];
+  for (const [title, items] of lists) {
+    if (!items || !items.length) continue;
+    const h = document.createElement('h4'); h.textContent = title;
+    box.appendChild(h);
+    const ul = document.createElement('ul');
+    for (const item of items) {
+      const li = document.createElement('li');
+      li.textContent = item.text + (item.severity ? ' (' + item.severity + ')' : '');
+      ul.appendChild(li);
+    }
+    box.appendChild(ul);
+  }
+  const foot = document.createElement('p'); foot.className = 'muted-note';
+  const vs = report.verification_summary || {};
+  let footText = '';
+  if (vs.checked) footText += vs.checked + ' claims checked, ' + vs.verified + ' verified, ' + vs.challenged + ' challenged. ';
+  if ((report.failed_specialists || []).length) {
+    footText += 'No findings from: ' + report.failed_specialists.join(', ') + '. ';
+  }
+  foot.textContent = footText + (report.disclaimer || 'Informational only — not investment advice.');
+  box.appendChild(foot);
+}
+
+async function ddpSelect(reportId) {
+  for (const el of document.querySelectorAll('.dd-list-item')) {
+    el.classList.toggle('active', el.dataset.reportId === reportId);
+  }
+  history.replaceState(null, '', '/app/deep-dives?report=' + encodeURIComponent(reportId));
+  const box = document.getElementById('dd-detail');
+  const cached = ddpReports.find((r) => r.report_id === reportId);
+  if (cached && cached.status === 'running') {
+    ddpNote(box, 'This deep dive is still running — watch it live on the dashboard.');
+    return;
+  }
+  if (cached && cached.status === 'error') {
+    ddpNote(box, 'This deep dive failed before producing a report.');
+    return;
+  }
+  try {
+    const r = await (await api('/deep-dive/' + reportId)).json();
+    ddpRenderReport(r);
+  } catch (e) {
+    ddpNote(box, 'Could not load this report.');
+  }
+}
+
+function ddpRenderList() {
+  const list = document.getElementById('dd-list');
+  list.innerHTML = '';
+  for (const r of ddpReports) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'dd-list-item';
+    btn.dataset.reportId = r.report_id;
+    const when = document.createElement('span');
+    when.className = 'when';
+    const ts = r.completed_at || r.created_at;
+    when.textContent = (ts ? new Date(ts).toLocaleDateString() : '?') +
+      (r.status === 'partial' ? ' · partial' : r.status === 'running' ? ' · running'
+        : r.status === 'error' ? ' · failed' : '');
+    btn.appendChild(when);
+    const head = document.createElement('span');
+    head.className = 'head';
+    head.textContent = ((r.report || {}).headline) || r.summary || '';
+    btn.appendChild(head);
+    btn.addEventListener('click', () => ddpSelect(r.report_id));
+    list.appendChild(btn);
+  }
+  staggerIn(list.querySelectorAll('.dd-list-item'));
+}
+
+async function initDeepDivesPage() {
+  const box = document.getElementById('dd-detail');
+  try {
+    const data = await (await api('/deep-dive?limit=25')).json();
+    ddpReports = data.reports || [];
+  } catch (e) {
+    ddpNote(box, 'Could not load your reports.');
+    return;
+  }
+  if (!ddpReports.length) {
+    ddpNote(box, 'No deep dives yet. Run one from the dashboard — it takes a few minutes.');
+    return;
+  }
+  ddpRenderList();
+  const wanted = new URLSearchParams(window.location.search).get('report');
+  const target = ddpReports.find((r) => r.report_id === wanted) || ddpReports[0];
+  ddpSelect(target.report_id);
+}
+
+initDeepDivesPage();
+"""
+
+
+def deep_dives_page(supabase_url: str, anon_key: str) -> str:
+    return _page(
+        "Deep Dives — Cirvia",
+        _DEEP_DIVES_BODY,
+        supabase_url=supabase_url,
+        anon_key=anon_key,
+        extra_js=_DEEP_DIVES_JS,
+        wrap_class="app-wrap dash-wrap",
     )
 
 

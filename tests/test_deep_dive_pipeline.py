@@ -229,6 +229,38 @@ async def test_synthesis_garbage_falls_back_to_text_report(monkeypatch, repo_use
     assert row.summary == "more prose"
 
 
+async def test_synthesis_broken_json_never_shows_raw_blob(monkeypatch, repo_user):
+    repo, uid = repo_user
+    truncated = '{"headline": "Portfolio down", "overview": "cut off mid-'
+    synthesis = [_text(truncated), _text(truncated)]
+    result, row, _ = await _run(
+        repo, uid, RoutedClient(_routes(synthesis=synthesis)), monkeypatch
+    )
+    assert result["status"] in ("completed", "partial")
+    assert not row.report["overview"].lstrip().startswith("{")
+    assert "could not be formatted" in row.report["overview"]
+
+
+async def test_synthesis_truncation_retries_with_shorter_instruction(
+    monkeypatch, repo_user
+):
+    repo, uid = repo_user
+    cut = dict(_text('{"headline": "Portfolio down", "overview": "cut mid-'))
+    cut["stop_reason"] = "max_tokens"
+    client = RoutedClient(_routes(synthesis=[cut, _text(_REPORT_JSON)]))
+    result, row, _ = await _run(repo, uid, client, monkeypatch)
+    assert row.report["headline"] == "Portfolio holding up"
+    retry_calls = [
+        c for c in client.calls
+        if any(
+            "cut off by the output length limit" in str(m.get("content"))
+            for m in c.get("messages", [])
+            if m.get("role") == "user"
+        )
+    ]
+    assert retry_calls, "retry should carry the truncated-response instruction"
+
+
 async def test_all_specialists_dead_is_an_error_report(monkeypatch, repo_user):
     repo, uid = repo_user
     specialists = [RuntimeError("boom")] * 4
