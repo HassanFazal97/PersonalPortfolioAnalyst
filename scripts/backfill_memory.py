@@ -32,10 +32,13 @@ from app.memory.embeddings import EmbeddingClient  # noqa: E402
 # ~4 chars/token; used only for the --dry-run cost estimate.
 _CHARS_PER_TOKEN = 4
 
-# Free-tier Voyage keys allow ~3 requests/min; the runtime client fails fast
-# (chat can't wait), but a one-off backfill can afford to sit out 429 windows.
+# Free-tier Voyage keys allow ~3 requests/min and ~10K tokens/min; the runtime
+# client fails fast (chat can't wait), but a one-off backfill can afford to sit
+# out 429 windows. News goes up in small groups so a single request always fits
+# under the token-per-minute cap (the client's own 128-text batch may not).
 _RATE_LIMIT_WAIT_SECONDS = 25.0
 _RATE_LIMIT_MAX_WAITS = 60
+_NEWS_GROUP_SIZE = 50
 
 
 async def _patient(coro_factory):
@@ -122,9 +125,13 @@ async def backfill_user(
             repo, user_id=user_id, digest_id=d.id, body=d.body,
             digest_date=d.digest_date, holdings_tickers=holdings, client=client,
         ))
-    if news_rows and client.cost_usd < max_cost:
-        counts["news"] += await _patient(lambda: ingest.embed_news_items(
-            repo, user_id=user_id, rows=news_rows, client=client
+    for start in range(0, len(news_rows), _NEWS_GROUP_SIZE):
+        if client.cost_usd >= max_cost:
+            print(f"  cost cap ${max_cost} reached — aborting; re-run to continue")
+            break
+        group = news_rows[start : start + _NEWS_GROUP_SIZE]
+        counts["news"] += await _patient(lambda g=group: ingest.embed_news_items(
+            repo, user_id=user_id, rows=g, client=client
         ))
     for c in chats:
         if client.cost_usd >= max_cost:
