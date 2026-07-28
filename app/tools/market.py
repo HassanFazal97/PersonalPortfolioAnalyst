@@ -131,6 +131,48 @@ def _fetch_adjusted_closes_raw(ticker: str, days: int) -> list[dict[str, Any]]:
     return rows
 
 
+def _fetch_adjusted_closes_batch_raw(
+    tickers: list[str], days: int
+) -> dict[str, list[dict[str, Any]]]:
+    """Batch variant of ``_fetch_adjusted_closes_raw``: one ``yf.download``
+    request for many tickers instead of one request each.
+
+    Exists for the universe sync (app/tools/universe.py), where ~560 serial
+    ``history()`` calls would take most of an hour and invite 429s; batched,
+    the whole universe is ~a dozen requests. Same ``{date, adj_close}`` row
+    shape per ticker as the single-ticker seam so tests patch both alike.
+    Tickers Yahoo can't serve simply come back with no rows.
+    """
+    import yfinance as yf
+
+    df = yf.download(
+        tickers,
+        period=f"{days}d",
+        auto_adjust=True,
+        group_by="ticker",
+        progress=False,
+        threads=False,
+    )
+    out: dict[str, list[dict[str, Any]]] = {}
+    if df is None or df.empty:
+        return out
+    for ticker in tickers:
+        try:
+            # Single-ticker downloads come back unnested; batch is per-ticker.
+            series = df[ticker]["Close"] if ticker in df.columns.get_level_values(0) else df["Close"]
+        except (KeyError, AttributeError):
+            continue
+        rows: list[dict[str, Any]] = []
+        for idx, close in series.items():
+            close = float(close)
+            if math.isnan(close):
+                continue
+            rows.append({"date": idx.date().isoformat(), "adj_close": close})
+        if rows:
+            out[ticker] = rows
+    return out
+
+
 def _fetch_intraday_raw(ticker: str) -> list[dict[str, Any]]:
     """Return today's 5-minute bars (oldest first) via yfinance.
 

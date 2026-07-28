@@ -275,6 +275,7 @@ async def run_agent(
     history: list[dict[str, Any]] | None = None,
     on_event: EventCallback | None = None,
     dispatch: dict[str, Any] | None = None,
+    max_tokens: int = 1024,
 ) -> AgentResult:
     settings = get_settings()
     client = _get_client(client)
@@ -319,11 +320,13 @@ async def run_agent(
             # pipeline, which passes no callback) stay on messages.create.
             if on_event is not None and hasattr(client.messages, "stream"):
                 response = await _call_model_streaming(
-                    client, settings.model, system_prompt, messages, tools, on_event
+                    client, settings.model, system_prompt, messages, tools, on_event,
+                    max_tokens=max_tokens,
                 )
             else:
                 response = await _call_model(
-                    client, settings.model, system_prompt, messages, tools
+                    client, settings.model, system_prompt, messages, tools,
+                    max_tokens=max_tokens,
                 )
             content_dicts = _content_to_dicts(_attr(response, "content"))
             usage = {
@@ -433,7 +436,7 @@ async def run_agent(
 # --------------------------------------------------------------------------
 
 
-async def _call_model(client, model, system_prompt, messages, tools):
+async def _call_model(client, model, system_prompt, messages, tools, *, max_tokens=1024):
     # Cache the static prefix (tool schemas + system prompt): the loop resends
     # the whole request every iteration, so cache reads (0.1x input price)
     # cover everything up to the breakpoint on later iterations.
@@ -446,14 +449,16 @@ async def _call_model(client, model, system_prompt, messages, tools):
     ]
     return await client.messages.create(
         model=model,
-        max_tokens=1024,
+        max_tokens=max_tokens,
         system=system,
         messages=messages,
         tools=tools,
     )
 
 
-async def _call_model_streaming(client, model, system_prompt, messages, tools, on_event):
+async def _call_model_streaming(
+    client, model, system_prompt, messages, tools, on_event, *, max_tokens=1024
+):
     """Streaming twin of ``_call_model``: forwards text deltas and server-tool
     starts to ``on_event``, then returns the accumulated final ``Message`` —
     same shape as the non-streaming response, so everything downstream
@@ -467,7 +472,7 @@ async def _call_model_streaming(client, model, system_prompt, messages, tools, o
     ]
     kwargs: dict[str, Any] = {
         "model": model,
-        "max_tokens": 1024,
+        "max_tokens": max_tokens,
         "system": system,
         "messages": messages,
     }

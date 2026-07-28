@@ -172,6 +172,26 @@ async def test_job_health_disabled_jobs_and_unknown():
     assert health["news_refresh"]["state"] == "unknown"
     news_off = job_health({}, _settings(NEWS_REFRESH_CRON=""))
     assert news_off["news_refresh"] == {"state": "disabled"}
+    # The picks jobs default off; a cron enables them.
+    assert health["picks_sync"] == {"state": "disabled"}
+    assert health["picks_run"] == {"state": "disabled"}
+    picks_on = job_health(
+        {}, _settings(PICKS_SYNC_CRON="0 20 * * 1-5", PICKS_CRON="0 7 * * 1-5")
+    )
+    assert picks_on["picks_sync"]["state"] == "unknown"
+    assert picks_on["picks_run"]["state"] == "unknown"
+
+
+async def test_job_health_picks_jobs_live_after_success():
+    repo = FakeRepo()
+    await repo.record_job_result("picks_sync", ok=True)
+    await repo.record_job_result("picks_run", ok=True)
+    health = job_health(
+        repo.job_heartbeats,
+        _settings(PICKS_SYNC_CRON="0 20 * * 1-5", PICKS_CRON="0 7 * * 1-5"),
+    )
+    assert health["picks_sync"]["state"] == "live"
+    assert health["picks_run"]["state"] == "live"
 
 
 async def test_job_health_news_refresh_live_after_success():
