@@ -13,7 +13,7 @@ import logging
 import re
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime, time, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from urllib.parse import parse_qsl
 from zoneinfo import ZoneInfo
@@ -34,6 +34,7 @@ from app.agent.digest_pipeline import run_digest_pipeline, run_digests_for_all
 from app.agent.loop import run_agent
 from app.agent.macro.orchestrator import run_macro_scan, run_macro_scans_for_all
 from app.agent.news_refresh import refresh_news_for_user, run_news_refresh_for_all
+from app.agent.picks.pipeline import run_stock_picks
 from app.agent.prompts import (
     CHAT_ANALYZE_RISK_SUFFIX,
     CHAT_MEMORY_SUFFIX,
@@ -79,6 +80,17 @@ from app.plans import (
     trial_active,
     trial_decision_pending,
 )
+from app.profile import (
+    EXPERIENCE_LEVELS,
+    GOALS,
+    HORIZONS,
+    POSTURES,
+    build_profile_context,
+    derive_archetype,
+    profile_from_user,
+    profile_payload,
+    resolve_risk_tolerance,
+)
 from app.scheduler import DeliveryScheduler, DigestScheduler, IntervalScheduler
 from app.streaming import SENTINEL, ProgressBroker, sse_response
 from app.tools import (
@@ -88,6 +100,7 @@ from app.tools import (
     portfolio_risk,
     price_store,
     symbol_search,
+    universe,
 )
 from app.tools.registry import (
     CHAT_TOOLS,
@@ -104,6 +117,7 @@ from app.webapp import (
     delivery_settings_page,
     login_page,
     onboarding_page,
+    picks_page,
     reset_page,
     risk_lab_page,
     settings_page,
@@ -127,6 +141,8 @@ async def lifespan(app: FastAPI):
     app.state.daily_prices_scheduler = None
     app.state.news_scheduler = None
     app.state.deep_dive_scheduler = None
+    app.state.picks_sync_scheduler = None
+    app.state.picks_scheduler = None
     app.state.delivery_scheduler = None
     # Which channels this deployment can send (drives verification + UI).
     app.state.delivery_adapters = build_adapters(settings)
@@ -233,6 +249,34 @@ async def lifespan(app: FastAPI):
             deep_dive_scheduler.start()
             app.state.deep_dive_scheduler = deep_dive_scheduler
 
+        if settings.picks_sync_cron:
+            async def _run_picks_sync() -> None:
+                await universe.run_universe_sync(repo, settings)
+
+            picks_sync_scheduler = DigestScheduler(
+                heartbeat_wrapped("picks_sync", repo, _run_picks_sync),
+                cron=settings.picks_sync_cron,
+                timezone=settings.tz,
+                job_id="picks_sync",
+                misfire_grace_seconds=settings.digest_misfire_grace_seconds,
+            )
+            picks_sync_scheduler.start()
+            app.state.picks_sync_scheduler = picks_sync_scheduler
+
+        if settings.picks_cron:
+            async def _run_picks() -> None:
+                await run_stock_picks(repo)
+
+            picks_scheduler = DigestScheduler(
+                heartbeat_wrapped("picks_run", repo, _run_picks),
+                cron=settings.picks_cron,
+                timezone=settings.tz,
+                job_id="picks_run",
+                misfire_grace_seconds=settings.digest_misfire_grace_seconds,
+            )
+            picks_scheduler.start()
+            app.state.picks_scheduler = picks_scheduler
+
         if settings.delivery_interval_seconds > 0:
             dispatcher = Dispatcher(
                 repo,
@@ -255,6 +299,10 @@ async def lifespan(app: FastAPI):
     finally:
         if app.state.delivery_scheduler is not None:
             app.state.delivery_scheduler.shutdown()
+        if app.state.picks_scheduler is not None:
+            app.state.picks_scheduler.shutdown()
+        if app.state.picks_sync_scheduler is not None:
+            app.state.picks_sync_scheduler.shutdown()
         if app.state.deep_dive_scheduler is not None:
             app.state.deep_dive_scheduler.shutdown()
         if app.state.news_scheduler is not None:
@@ -282,6 +330,17 @@ class PreferencesRequest(BaseModel):
     digest_send_time: str | None = None  # "HH:MM"
     digest_enabled: bool | None = None
     digest_tickers: list[str] | None = None
+
+
+class ProfileRequest(BaseModel):
+    """Investor-profile answers from onboarding (all values enum-validated
+    against app/profile.py — no free text ever reaches prompts)."""
+
+    experience: str | None = None
+    goals: list[str] = []
+    horizon: str | None = None
+    risk_tolerance: int | None = None  # 1-10 (explicit wins over posture)
+    chosen_posture: str | None = None  # 'defensive' | 'current' | 'aggressive'
 
 
 class ChannelRegisterRequest(BaseModel):
@@ -321,6 +380,7 @@ _AUTH_EXEMPT_PATHS = {
     "/app/onboarding",
     "/app/dashboard",
     "/app/risk",
+    "/app/picks",
     "/app/deep-dives",
     "/app/settings",
     "/app/settings/delivery",
@@ -481,6 +541,7 @@ async def _me_payload(repo: Repo, user_id: uuid.UUID) -> dict:
             "digest_tickers_limit": None if is_owner else settings.free_max_digest_holdings,
             "digest_tickers_editable": False,
             "is_owner": is_owner,
+            "profile": profile_payload(None),
             "trial": _trial_payload(None),
             "billing": _billing_payload(settings, None),
             "chat_quota": await _chat_quota_payload(repo, user_id, "free", settings),
@@ -510,6 +571,7 @@ async def _me_payload(repo: Repo, user_id: uuid.UUID) -> dict:
         "digest_tickers_limit": cap,
         "digest_tickers_editable": editable,
         "is_owner": is_owner,
+        "profile": profile_payload(user),
         "trial": _trial_payload(user),
         "billing": _billing_payload(settings, user),
         "chat_quota": await _chat_quota_payload(repo, user_id, plan, settings),
@@ -775,7 +837,10 @@ async def _prepare_chat(
     if memory_enabled(settings):
         base_prompt = base_prompt + CHAT_MEMORY_SUFFIX
         tools = [*tools, RECALL_MEMORY_SCHEMA]
-    system_prompt = compose_chat_system_prompt(base_prompt, context)
+    profile_block = build_profile_context(profile_from_user(user))
+    system_prompt = compose_chat_system_prompt(
+        base_prompt, context, profile_block=profile_block
+    )
     return plan, budget, ctx, tools, system_prompt, history
 
 
@@ -888,6 +953,12 @@ def create_app() -> FastAPI:
         """Visual Risk Lab: portfolio-level quant analytics (Pro-gated by the
         /portfolio/risk-analytics API the page calls)."""
         return _webapp_html(risk_lab_page)
+
+    @app.get("/app/picks", response_class=HTMLResponse)
+    async def app_picks() -> HTMLResponse:
+        """Daily Best Stocks dashboard (Pro-gated by the /stocks/picks API
+        the page calls)."""
+        return _webapp_html(picks_page)
 
     @app.get("/app/deep-dives", response_class=HTMLResponse)
     async def app_deep_dives() -> HTMLResponse:
@@ -1515,6 +1586,66 @@ def create_app() -> FastAPI:
         )
         return await _me_payload(repo, user_id)
 
+    @app.put("/me/profile")
+    async def put_profile(req: ProfileRequest, request: Request) -> dict:
+        """Persist the investor profile from onboarding / re-personalization.
+
+        One write for the whole flow (answers + optional risk-comfort posture)
+        so a skip mid-wizard never leaves a partial profile."""
+        repo = _require_repo(app)
+        user_id = _user_id(request)
+        if req.experience is not None and req.experience not in EXPERIENCE_LEVELS:
+            raise HTTPException(status_code=400, detail="unknown experience level")
+        if req.horizon is not None and req.horizon not in HORIZONS:
+            raise HTTPException(status_code=400, detail="unknown horizon")
+        bad_goals = [g for g in req.goals if g not in GOALS]
+        if bad_goals:
+            raise HTTPException(
+                status_code=400, detail=f"unknown goals: {', '.join(bad_goals)}"
+            )
+        if req.risk_tolerance is not None and not 1 <= req.risk_tolerance <= 10:
+            raise HTTPException(
+                status_code=400, detail="risk_tolerance must be 1-10"
+            )
+        if req.chosen_posture is not None and req.chosen_posture not in POSTURES:
+            raise HTTPException(status_code=400, detail="unknown posture")
+        risk = resolve_risk_tolerance(req.risk_tolerance, req.chosen_posture)
+        archetype = derive_archetype(req.horizon, risk, req.goals)
+        await repo.update_user_profile(
+            user_id,
+            archetype=archetype,
+            risk_tolerance=risk,
+            horizon=req.horizon,
+            experience=req.experience,
+            goals=req.goals,
+            completed_at=datetime.now(timezone.utc),
+        )
+        return await _me_payload(repo, user_id)
+
+    @app.post("/me/profile/dismiss")
+    async def dismiss_profile_prompt(request: Request) -> dict:
+        """Record the one-time 'personalize your experience' prompt dismissal
+        (idempotent, persisted so it never re-appears on another device)."""
+        repo = _require_repo(app)
+        user_id = _user_id(request)
+        await repo.set_profile_prompt_dismissed(user_id)
+        return await _me_payload(repo, user_id)
+
+    @app.get("/me/profile/projections")
+    async def profile_projections(request: Request) -> dict:
+        """Monte Carlo fans of the user's portfolio at three risk postures for
+        the onboarding risk-comfort picker. Deliberately NOT Pro-gated (unlike
+        /portfolio/risk-analytics): existing Free users re-personalizing must
+        not hit a 402, and this is pure numpy on cached prices — no LLM cost.
+        Falls back to illustrative fans when the book isn't analyzable yet."""
+        repo = _require_repo(app)
+        settings = get_settings()
+        user_id = _user_id(request)
+        user = await repo.get_user(user_id)
+        tz = getattr(user, "timezone", None) or settings.tz
+        ctx = ToolContext(settings=settings, repo=repo, user_id=user_id, timezone=tz)
+        return await portfolio_risk.risk_posture_projections(ctx)
+
     @app.delete("/me")
     async def delete_me(request: Request) -> dict:
         """Delete the caller's account: every app table they own, and — when a
@@ -1988,6 +2119,156 @@ def create_app() -> FastAPI:
         registration order, so this must come first or "search" would be
         treated as a ticker."""
         return {"results": await symbol_search.search_symbols(q)}
+
+    @app.get("/stocks/picks")
+    async def stock_picks(request: Request) -> dict:
+        """The Best Stocks dashboard document: latest completed/partial daily
+        run (ranked picks with verified evidence + movers with grounded
+        explanations). Generated once globally per day; Pro-only (402 renders
+        as the upgrade gate). Registered before /stocks/{ticker} so "picks"
+        is never treated as a ticker."""
+        repo = _require_repo(app)
+        user_id = _user_id(request)
+        user = await repo.get_user(user_id)
+        if effective_plan(user) != "pro" and user_id != _OWNER_USER_ID:
+            raise HTTPException(
+                status_code=402,
+                detail="Daily stock picks are a Pro feature.",
+            )
+        row = await repo.get_latest_picks_run()
+        if row is None or not row.payload:
+            return {
+                "available": False,
+                "note": "No analysis has been generated yet. Check back tomorrow morning.",
+            }
+        payload = dict(row.payload)
+        payload["available"] = True
+        payload["status"] = row.status
+        days_old = (date.today() - row.run_date).days
+        # Weekends legitimately serve Friday's run; anything older is stale.
+        if days_old > (1 if date.today().weekday() < 5 else 3):
+            payload["stale"] = True
+            payload["stale_note"] = (
+                f"This analysis is from {row.run_date.isoformat()} — a fresh "
+                "run has not completed since."
+            )
+        return payload
+
+    @app.get("/stocks/picks/track-record")
+    async def stock_picks_track_record(request: Request, days: int = 90) -> dict:
+        """Realized performance of past picks, computed at read time: each
+        entry's frozen entry_price against the latest stored close, with the
+        S&P 500 over the same span as the honesty benchmark. Pro-only."""
+        repo = _require_repo(app)
+        user_id = _user_id(request)
+        user = await repo.get_user(user_id)
+        if effective_plan(user) != "pro" and user_id != _OWNER_USER_ID:
+            raise HTTPException(
+                status_code=402,
+                detail="The picks track record is a Pro feature.",
+            )
+        since = date.today() - timedelta(days=max(7, min(days, 365)))
+        entries = await repo.list_pick_entries(since=since)
+        if not entries:
+            return {"available": False, "entries": [], "summary": None}
+
+        tickers = sorted({e.ticker for e in entries})
+        latest = await repo.latest_daily_prices(tickers)
+        bench_rows = await repo.get_daily_prices("^GSPC", since=since)
+        bench_by_date = [(r.price_date, float(r.adj_close)) for r in bench_rows]
+
+        def bench_at(d: date) -> float | None:
+            for pd, close in bench_by_date:
+                if pd >= d:
+                    return close
+            return None
+
+        bench_latest = float(bench_rows[-1].adj_close) if bench_rows else None
+        out = []
+        returns: list[float] = []
+        beats = 0
+        compared = 0
+        for e in entries:
+            last = latest.get(e.ticker)
+            entry_price = float(e.entry_price) if e.entry_price is not None else None
+            row: dict = {
+                "ticker": e.ticker,
+                "run_date": e.run_date.isoformat(),
+                "rank": e.rank,
+                "confidence": float(e.confidence) if e.confidence is not None else None,
+                "entry_price": entry_price,
+            }
+            if last is not None and entry_price:
+                ret = (float(last.adj_close) / entry_price - 1) * 100
+                row["return_pct"] = round(ret, 2)
+                row["as_of"] = last.price_date.isoformat()
+                returns.append(ret)
+                b0 = bench_at(e.run_date)
+                if b0 and bench_latest:
+                    bench_ret = (bench_latest / b0 - 1) * 100
+                    row["benchmark_return_pct"] = round(bench_ret, 2)
+                    compared += 1
+                    if ret > bench_ret:
+                        beats += 1
+            out.append(row)
+        summary = {
+            "picks": len(out),
+            "measured": len(returns),
+            "avg_return_pct": round(sum(returns) / len(returns), 2) if returns else None,
+            "beat_benchmark": beats,
+            "compared": compared,
+            "hit_rate_pct": round(beats / compared * 100, 1) if compared else None,
+        }
+        return {"available": True, "entries": out, "summary": summary}
+
+    picks_jobs_active: set[str] = set()
+
+    @app.post("/stocks/picks/sync", status_code=202)
+    async def trigger_picks_sync(request: Request) -> dict:
+        """Owner-only manual trigger for the evening universe data sync (the
+        /news/refresh pattern). Runs detached — a full sync takes ~25 min."""
+        repo = _require_repo(app)
+        if _user_id(request) != _OWNER_USER_ID:
+            raise HTTPException(status_code=403, detail="owner only")
+        if "sync" in picks_jobs_active:
+            raise HTTPException(status_code=429, detail="a universe sync is already running")
+        picks_jobs_active.add("sync")
+
+        async def drive() -> None:
+            try:
+                await universe.run_universe_sync(repo, get_settings())
+            except Exception:
+                logging.getLogger(__name__).exception("universe sync failed")
+            finally:
+                picks_jobs_active.discard("sync")
+
+        task = asyncio.create_task(drive())
+        stream_tasks.add(task)
+        task.add_done_callback(stream_tasks.discard)
+        return {"status": "started"}
+
+    @app.post("/stocks/picks/run", status_code=202)
+    async def trigger_picks_run(request: Request) -> dict:
+        """Owner-only manual trigger for the daily picks pipeline."""
+        repo = _require_repo(app)
+        if _user_id(request) != _OWNER_USER_ID:
+            raise HTTPException(status_code=403, detail="owner only")
+        if "run" in picks_jobs_active:
+            raise HTTPException(status_code=429, detail="a picks run is already running")
+        picks_jobs_active.add("run")
+
+        async def drive() -> None:
+            try:
+                await run_stock_picks(repo)
+            except Exception:
+                logging.getLogger(__name__).exception("stock picks run failed")
+            finally:
+                picks_jobs_active.discard("run")
+
+        task = asyncio.create_task(drive())
+        stream_tasks.add(task)
+        task.add_done_callback(stream_tasks.discard)
+        return {"status": "started"}
 
     @app.get("/stocks/{ticker}")
     async def stock_detail(ticker: str, request: Request) -> dict:

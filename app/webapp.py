@@ -128,6 +128,41 @@ input:focus, select:focus { border-color: var(--accent-hover); }
 }
 .step-panel h2 { margin-bottom: 0.4rem; }
 .step-panel p { color: var(--ink-2); font-size: 0.95rem; }
+/* investor-profile questions (onboarding step 1) */
+.q-group { margin-top: 1.1rem; }
+.q-group > label { display: block; font-weight: 650; font-size: 0.92rem;
+  margin-bottom: 0.45rem; }
+.q-hint { color: var(--ink-3); font-weight: 400; font-size: 0.82rem; }
+.q-opts { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.q-opt { padding: 0.5rem 0.8rem; border-radius: var(--r-s);
+  border: 1px solid var(--line); background: var(--surface-2); cursor: pointer;
+  font-size: 0.88rem; font-weight: 600; user-select: none;
+  transition: border-color 0.15s var(--ease), background 0.15s var(--ease); }
+.q-opt.selected { border-color: var(--accent);
+  background: oklch(30% 0.1 295 / 0.35); color: var(--ink); }
+#profile-btn { margin-top: 1.4rem; }
+/* risk-comfort posture cards (onboarding step 4) */
+.posture-cards { display: grid; grid-template-columns: repeat(3, 1fr);
+  gap: 0.75rem; margin: 1rem 0; }
+@media (max-width: 800px) { .posture-cards { grid-template-columns: 1fr; } }
+.posture-card { display: flex; flex-direction: column; gap: 0.3rem;
+  padding: 0.9rem; border-radius: var(--r-s); border: 1px solid var(--line);
+  background: var(--surface-2); cursor: pointer;
+  transition: border-color 0.15s var(--ease), background 0.15s var(--ease); }
+.posture-card.selected { border-color: var(--accent);
+  background: oklch(30% 0.1 295 / 0.25); }
+.posture-card .pc-title { font-weight: 700; font-size: 0.95rem; }
+.posture-card .pc-sub { color: var(--ink-3); font-size: 0.78rem; }
+.posture-card .pc-fan { margin: 0.4rem 0 0.2rem; }
+.posture-card .pc-range { font-size: 0.82rem; color: var(--ink);
+  font-variant-numeric: tabular-nums; }
+.posture-card .pc-stats { font-size: 0.76rem; color: var(--ink-3); }
+.mf-outer { fill: oklch(58% 0.19 295); opacity: 0.14; }
+.mf-inner { fill: oklch(58% 0.19 295); opacity: 0.30; }
+.mf-median { stroke: var(--accent-text); stroke-width: 2; fill: none;
+  stroke-linejoin: round; stroke-linecap: round; }
+.mf-zero { stroke: var(--line-strong); stroke-width: 1; }
+#posture-btn { margin-top: 0.4rem; }
 .status-line { display: flex; align-items: center; gap: 0.6rem; margin: 1rem 0;
   color: var(--ink-3); font-size: 0.95rem; }
 .spinner { width: 16px; height: 16px; border: 2px solid var(--line);
@@ -556,6 +591,7 @@ def _page(
 <div class="search-results" id="nav-search-results" role="listbox"></div>
 </div>
 <div class="nav-links"><a class="keep" href="/app/dashboard">Dashboard</a>
+<a class="keep" href="/app/picks">Top Picks</a>
 <a class="keep" href="/app/risk">Risk Lab</a>
 <a class="keep" href="/app/deep-dives">Deep Dives</a>
 <a class="keep" href="/app/settings">Settings</a>
@@ -1165,33 +1201,81 @@ async function initDeliveryPicker(onVerified) {
 # --------------------------------------------------------------------------
 
 _ONBOARDING_BODY = """
-<h1>Set up Cirvia</h1>
+<h1 id="ob-title">Set up Cirvia</h1>
 <div class="ob-layout">
   <div class="ob-rail" aria-label="Setup progress">
     <div class="ob-step active" id="step-1">
-      <span class="n">1</span><span class="t">Connect your brokerage</span>
-      <span class="d">Link your brokerage through SnapTrade's secure portal.</span>
+      <span class="n">1</span><span class="t">About you</span>
+      <span class="d">How you invest, so Cirvia can speak your language.</span>
     </div>
     <div class="ob-step" id="step-2">
-      <span class="n">2</span><span class="t">Sync your holdings</span>
-      <span class="d">Cirvia pulls your positions, read-only.</span>
+      <span class="n">2</span><span class="t">Connect your brokerage</span>
+      <span class="d">Link your brokerage through SnapTrade's secure portal.</span>
     </div>
     <div class="ob-step" id="step-3">
-      <span class="n">3</span><span class="t">Choose holdings</span>
-      <span class="d">Pick which positions get news on Free.</span>
+      <span class="n">3</span><span class="t">Sync your holdings</span>
+      <span class="d">Cirvia pulls your positions, read-only.</span>
     </div>
     <div class="ob-step" id="step-4">
-      <span class="n">4</span><span class="t">Digest preferences</span>
-      <span class="d">Pick when your morning brief arrives.</span>
+      <span class="n">4</span><span class="t">Risk comfort</span>
+      <span class="d">See your real portfolio at three risk levels and pick one.</span>
     </div>
     <div class="ob-step" id="step-5">
-      <span class="n">5</span><span class="t">Delivery</span>
+      <span class="n">5</span><span class="t">Choose holdings</span>
+      <span class="d">Pick which positions get news on Free.</span>
+    </div>
+    <div class="ob-step" id="step-6">
+      <span class="n">6</span><span class="t">Digest preferences</span>
+      <span class="d">Pick when your morning brief arrives.</span>
+    </div>
+    <div class="ob-step" id="step-7">
+      <span class="n">7</span><span class="t">Delivery</span>
       <span class="d">Get it by text, email, or Discord.</span>
     </div>
   </div>
   <div class="ob-content">
 
-  <div class="step-panel" id="panel-connect">
+  <div class="step-panel" id="panel-profile">
+    <h2>Tell us how you invest</h2>
+    <p>Three quick questions. Your digest, news, and risk analysis will be
+    framed around how you actually invest &mdash; a day trader and a
+    buy-and-hold investor shouldn't read the same brief.</p>
+    <div class="q-group">
+      <label>How long have you been investing?</label>
+      <div class="q-opts" id="q-experience" data-single="1">
+        <div class="q-opt" data-v="new">Just starting</div>
+        <div class="q-opt" data-v="lt_1y">Under a year</div>
+        <div class="q-opt" data-v="1_5y">1&ndash;5 years</div>
+        <div class="q-opt" data-v="5_10y">5&ndash;10 years</div>
+        <div class="q-opt" data-v="10y_plus">10+ years</div>
+      </div>
+    </div>
+    <div class="q-group">
+      <label>What are you investing for? <span class="q-hint">pick all that apply</span></label>
+      <div class="q-opts" id="q-goals">
+        <div class="q-opt" data-v="grow_long_term">Grow wealth long-term</div>
+        <div class="q-opt" data-v="income">Income from my investments</div>
+        <div class="q-opt" data-v="preserve_capital">Protect what I've built</div>
+        <div class="q-opt" data-v="short_term_gains">Short-term trading gains</div>
+        <div class="q-opt" data-v="retirement">Retirement</div>
+        <div class="q-opt" data-v="big_purchase">A big purchase</div>
+      </div>
+    </div>
+    <div class="q-group">
+      <label>When do you typically act on an investment?</label>
+      <div class="q-opts" id="q-horizon" data-single="1">
+        <div class="q-opt" data-v="days">Within days</div>
+        <div class="q-opt" data-v="weeks_months">Weeks to months</div>
+        <div class="q-opt" data-v="years">Years</div>
+        <div class="q-opt" data-v="decade_plus">A decade or more</div>
+      </div>
+    </div>
+    <button class="btn full" id="profile-btn">Continue</button>
+    <p class="muted-note" style="text-align:center;"><a href="#" id="profile-skip">Skip
+    for now</a> &mdash; you can personalize anytime from Settings.</p>
+  </div>
+
+  <div class="step-panel" id="panel-connect" style="display:none;">
     <h2>Connect your brokerage</h2>
     <p>Link your brokerage through SnapTrade's secure portal. Read-only: Cirvia can
     never trade or move money, and your brokerage password is never shared with us.</p>
@@ -1210,6 +1294,21 @@ _ONBOARDING_BODY = """
     <span id="sync-status-text">Pulling your positions…</span></div>
     <div class="error-box" id="sync-error"></div>
     <button class="btn full" id="sync-retry-btn" style="display:none;">Try again</button>
+  </div>
+
+  <div class="step-panel" id="panel-risk-picker" style="display:none;">
+    <h2>Pick your risk comfort</h2>
+    <p id="posture-intro">Here's <strong>your actual portfolio</strong> replayed
+    5,000 times over the next year at three risk levels. The shaded range holds
+    90% of the simulated outcomes. Which ride looks right to you?</p>
+    <div class="status-line" id="posture-status"><span class="spinner"></span>
+    <span id="posture-status-text">Crunching two years of your holdings' history&hellip;</span></div>
+    <div class="posture-cards" id="posture-cards" style="display:none;"></div>
+    <div class="error-box" id="posture-error"></div>
+    <button class="btn full" id="posture-retry-btn" style="display:none;">Try again</button>
+    <button class="btn full" id="posture-btn" style="display:none;" disabled>Continue</button>
+    <p class="muted-note" style="text-align:center;"><a href="#" id="posture-skip">Skip
+    this step</a> &mdash; not a commitment either way; it only tunes how Cirvia frames risk for you.</p>
   </div>
 
   <div class="step-panel" id="panel-watchlist" style="display:none;">
@@ -1252,8 +1351,18 @@ requireSession();
 const tzSel = document.getElementById('tz');
 fillTzSelect(tzSel);
 
-const PANELS = ['panel-connect','panel-sync','panel-watchlist','panel-prefs','panel-delivery'];
-const STEP_IDS = ['step-1','step-2','step-3','step-4','step-5'];
+const PANELS = ['panel-profile','panel-connect','panel-sync','panel-risk-picker',
+  'panel-watchlist','panel-prefs','panel-delivery'];
+const STEP_IDS = ['step-1','step-2','step-3','step-4','step-5','step-6','step-7'];
+
+// Re-personalization mode (?personalize=1, from the dashboard prompt or
+// Settings): only the two profile steps, no setup rail, back to the dashboard
+// at the end. Never gates anything — it's always reachable AND always skippable.
+const PERSONALIZE = new URLSearchParams(window.location.search).get('personalize') === '1';
+if (PERSONALIZE) {
+  document.getElementById('ob-title').textContent = 'Personalize your Cirvia';
+  document.querySelector('.ob-rail').style.display = 'none';
+}
 
 function showPanel(id) {
   let changed = false;
@@ -1265,7 +1374,7 @@ function showPanel(id) {
   }
   if (changed) riseIn(document.getElementById(id));
   const current = PANELS.indexOf(id) + 1;
-  for (let n = 1; n <= 5; n++) {
+  for (let n = 1; n <= PANELS.length; n++) {
     const step = document.getElementById('step-' + n);
     step.classList.toggle('active', n === current);
     step.classList.toggle('done', n < current);
@@ -1404,7 +1513,10 @@ async function runSync(attempt = 0) {
     document.getElementById('sync-status-text').textContent =
       'Synced ' + result.positions_upserted + ' positions across ' +
       result.accounts_synced + ' accounts.';
-    setTimeout(afterSync, 900);
+    // Kick off the Monte Carlo fetch now: the first call may backfill two
+    // years of prices, so starting during this beat hides most of the wait.
+    startProjections();
+    setTimeout(showRiskPicker, 900);
   } catch (e) {
     // Stop the spinner and offer a retry so a transient failure isn't a dead end.
     document.getElementById('sync-status-line').style.display = 'none';
@@ -1444,6 +1556,204 @@ document.getElementById('connect-btn').addEventListener('click', async () => {
 
 document.getElementById('connected-btn').addEventListener('click', pollStatus);
 
+// --- step 1: investor profile questions --------------------------------------
+
+const obProfile = { experience: null, goals: [], horizon: null };
+
+function initChips(id) {
+  const single = document.getElementById(id).dataset.single === '1';
+  document.getElementById(id).querySelectorAll('.q-opt').forEach((el) => {
+    el.addEventListener('click', () => {
+      if (single) {
+        const was = el.classList.contains('selected');
+        document.getElementById(id).querySelectorAll('.q-opt')
+          .forEach((o) => o.classList.remove('selected'));
+        if (!was) el.classList.add('selected');
+      } else {
+        el.classList.toggle('selected');
+      }
+    });
+  });
+}
+['q-experience', 'q-goals', 'q-horizon'].forEach(initChips);
+
+function readProfileChips() {
+  const one = (id) => {
+    const el = document.querySelector('#' + id + ' .q-opt.selected');
+    return el ? el.dataset.v : null;
+  };
+  obProfile.experience = one('q-experience');
+  obProfile.horizon = one('q-horizon');
+  obProfile.goals = [...document.querySelectorAll('#q-goals .q-opt.selected')]
+    .map((el) => el.dataset.v);
+}
+
+async function leaveProfilePanel() {
+  if (!PERSONALIZE) { showPanel('panel-connect'); return; }
+  // Re-personalizing: the portfolio usually already exists, so jump straight
+  // to the risk picker; fall back to the connect flow when it doesn't.
+  try {
+    const s = await (await api('/portfolio/status')).json();
+    if (s.connected || s.has_positions) { startProjections(); await showRiskPicker(); return; }
+  } catch (e) { /* fall through to connect */ }
+  showPanel('panel-connect');
+}
+
+document.getElementById('profile-btn').addEventListener('click', () => {
+  readProfileChips();
+  leaveProfilePanel();
+});
+document.getElementById('profile-skip').addEventListener('click', (e) => {
+  e.preventDefault();
+  leaveProfilePanel();
+});
+
+// --- step 4: risk-comfort picker (live Monte Carlo of the user's book) -------
+
+const POSTURE_ORDER = ['defensive', 'current', 'aggressive'];
+const POSTURE_META = {
+  defensive: { title: 'A smoother ride', sub: 'your holdings, dialed to lower volatility' },
+  current: { title: 'Your current mix', sub: 'your holdings as they are today' },
+  aggressive: { title: 'Higher octane', sub: 'your holdings, dialed to higher volatility' },
+};
+let projectionsPromise = null;
+let chosenPosture = null;
+
+function startProjections() {
+  if (!projectionsPromise) {
+    projectionsPromise = api('/me/profile/projections').then(async (resp) => {
+      if (!resp.ok) throw new Error('Projections are unavailable right now.');
+      return resp.json();
+    });
+    // A failed prewarm must not poison the picker's own retry.
+    projectionsPromise.catch(() => {});
+  }
+  return projectionsPromise;
+}
+
+const obPct = (n) => (n >= 0 ? '+' : '\\u2212') + Math.abs(n).toFixed(0) + '%';
+
+function miniFan(p) {
+  const b = p.bands_pct;
+  const m = b.p50.length, W = 240, H = 96, pad = 4;
+  const lo = Math.min.apply(null, b.p5), hi = Math.max.apply(null, b.p95);
+  const span = Math.max(1e-6, hi - lo);
+  const x = (i) => pad + (i / (m - 1)) * (W - 2 * pad);
+  const y = (v) => pad + (1 - (v - lo) / span) * (H - 2 * pad);
+  const line = (arr) => arr.map((v, i) =>
+    (i ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(v).toFixed(1)).join(' ');
+  const band = (top, bot) => 'M' +
+    top.map((v, i) => x(i).toFixed(1) + ' ' + y(v).toFixed(1)).join(' L') +
+    ' L' + bot.map((v, i) => x(i).toFixed(1) + ' ' + y(v).toFixed(1)).reverse().join(' L') + ' Z';
+  let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" height="' + H +
+    '" preserveAspectRatio="none" role="img" aria-label="Simulated one-year outcome range">';
+  if (lo < 0 && hi > 0) {
+    svg += '<line x1="0" x2="' + W + '" y1="' + y(0) + '" y2="' + y(0) + '" class="mf-zero"></line>';
+  }
+  svg += '<path d="' + band(b.p95, b.p5) + '" class="mf-outer"></path>';
+  svg += '<path d="' + band(b.p75, b.p25) + '" class="mf-inner"></path>';
+  svg += '<path d="' + line(b.p50) + '" class="mf-median"></path>';
+  return svg + '</svg>';
+}
+
+function renderPostures(data) {
+  document.getElementById('posture-status').style.display = 'none';
+  const box = document.getElementById('posture-cards');
+  box.style.display = 'grid';
+  if (data.fallback) {
+    document.getElementById('posture-intro').innerHTML =
+      'These are <strong>typical portfolios</strong> at three risk levels, replayed ' +
+      '5,000 times over the next year &mdash; yours will appear in the Risk Lab once ' +
+      'there\\u2019s enough price history. The shaded range holds 90% of outcomes. ' +
+      'Which ride looks right to you?';
+  }
+  box.innerHTML = '';
+  POSTURE_ORDER.forEach((key) => {
+    const p = data.postures[key];
+    if (!p) return;
+    const meta = POSTURE_META[key];
+    const card = document.createElement('div');
+    card.className = 'posture-card';
+    card.setAttribute('role', 'button');
+    card.setAttribute('tabindex', '0');
+    const cad = p.terminal_cad;
+    const range = cad
+      ? 'a great year ' + fmtCadOb(cad.p95) + ' \\u00b7 a brutal year ' + fmtCadOb(cad.p5)
+      : 'a great year ' + obPct(p.terminal_pct.p95) + ' \\u00b7 a brutal year ' + obPct(p.terminal_pct.p5);
+    card.innerHTML =
+      '<span class="pc-title">' + meta.title + '</span>' +
+      '<span class="pc-sub">' + (data.fallback ? 'a typical portfolio at this level' : meta.sub) + '</span>' +
+      '<div class="pc-fan">' + miniFan(p) + '</div>' +
+      '<span class="pc-range">' + range + '</span>' +
+      '<span class="pc-stats">swings about \\u00b1' + p.annualized_vol_pct.toFixed(0) +
+      '%/yr \\u00b7 ' + Math.round(p.probability_of_loss_pct) + '% of runs ended down</span>';
+    const pick = () => {
+      chosenPosture = key;
+      box.querySelectorAll('.posture-card').forEach((c) => c.classList.remove('selected'));
+      card.classList.add('selected');
+      document.getElementById('posture-btn').disabled = false;
+    };
+    card.addEventListener('click', pick);
+    card.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); pick(); }
+    });
+    box.appendChild(card);
+  });
+  document.getElementById('posture-btn').style.display = 'block';
+}
+
+const fmtCadOb = (n) => '$' + Math.round(n).toLocaleString('en-CA');
+
+async function showRiskPicker() {
+  showPanel('panel-risk-picker');
+  document.getElementById('posture-status').style.display = '';
+  document.getElementById('posture-retry-btn').style.display = 'none';
+  document.getElementById('posture-error').style.display = 'none';
+  try {
+    renderPostures(await startProjections());
+  } catch (e) {
+    document.getElementById('posture-status').style.display = 'none';
+    document.getElementById('posture-retry-btn').style.display = '';
+    showError('posture-error', e.message || 'Could not compute projections.');
+  }
+}
+
+document.getElementById('posture-retry-btn').addEventListener('click', () => {
+  projectionsPromise = null;
+  showRiskPicker();
+});
+
+async function submitProfileAndContinue(posture) {
+  readProfileChips();
+  const answered = obProfile.experience || obProfile.horizon ||
+    obProfile.goals.length || posture;
+  if (answered) {
+    // One write for the whole flow; a failure must never dead-end setup —
+    // the profile is re-doable anytime from Settings.
+    try {
+      await api('/me/profile', {
+        method: 'PUT',
+        body: JSON.stringify({
+          experience: obProfile.experience,
+          goals: obProfile.goals,
+          horizon: obProfile.horizon,
+          chosen_posture: posture,
+        }),
+      });
+    } catch (e) { /* non-fatal */ }
+  }
+  if (PERSONALIZE) { window.location.href = '/app/dashboard'; return; }
+  afterSync();
+}
+
+document.getElementById('posture-btn').addEventListener('click', () => {
+  submitProfileAndContinue(chosenPosture);
+});
+document.getElementById('posture-skip').addEventListener('click', (e) => {
+  e.preventDefault();
+  submitProfileAndContinue(null);
+});
+
 document.getElementById('prefs-btn').addEventListener('click', async () => {
   const btn = document.getElementById('prefs-btn');
   btn.disabled = true;
@@ -1481,6 +1791,12 @@ if (dcStatus === 'connected') {
     .then(() => dpError(dcStatus === 'cancelled'
       ? 'Discord connection was cancelled. Try again, or paste a webhook URL instead.'
       : 'Discord connection failed. Try again, or paste a webhook URL instead.'));
+} else if (PERSONALIZE) {
+  // Stay on the questions panel; prewarm the Monte Carlo while they answer.
+  api('/portfolio/status').then(async (resp) => {
+    const s = await resp.json();
+    if (s.connected || s.has_positions) startProjections();
+  }).catch(() => {});
 } else {
   // Returning mid-onboarding: if already connected, jump ahead to sync.
   api('/portfolio/status').then(async (resp) => {
@@ -1515,6 +1831,15 @@ _DASHBOARD_BODY = """
     <span class="actions">
       <a class="btn" href="/app/settings/delivery">Set up delivery</a>
       <button class="link-btn" id="delivery-banner-dismiss">Dismiss</button>
+    </span>
+  </div>
+  <div class="warn-banner setup" id="personalize-banner" style="display:none;">
+    <span><strong>Make Cirvia yours.</strong> Answer three quick questions and
+    pick your risk comfort so your digest, news, and risk analysis fit how you
+    invest.</span>
+    <span class="actions">
+      <a class="btn" href="/app/onboarding?personalize=1">Personalize now</a>
+      <button class="link-btn" id="personalize-banner-dismiss">Maybe later</button>
     </span>
   </div>
   <div class="warn-banner" id="connection-banner" style="display:none;">
@@ -2461,6 +2786,29 @@ document.getElementById('delivery-banner-dismiss').addEventListener('click', () 
   document.getElementById('delivery-banner').style.display = 'none';
 });
 
+// --- personalize nudge ---------------------------------------------------------
+// One-time "make Cirvia yours" prompt for accounts without an investor
+// profile. Dismissal persists SERVER-SIDE (profile_prompt_dismissed_at), so it
+// shows at most once per account across devices. Purely an overlay: profile
+// state must never influence routing (the 1a2d393 login-trap guard).
+async function checkPersonalize() {
+  const p = meProfile && meProfile.profile;
+  if (!p || p.completed || p.prompt_dismissed) return;
+  // One nudge at a time: connection and delivery problems come first.
+  for (const id of ['connection-banner', 'delivery-banner']) {
+    const el = document.getElementById(id);
+    if (el && el.style.display !== 'none') return;
+  }
+  const banner = document.getElementById('personalize-banner');
+  banner.style.display = 'flex';
+  riseIn(banner);
+}
+
+document.getElementById('personalize-banner-dismiss').addEventListener('click', () => {
+  document.getElementById('personalize-banner').style.display = 'none';
+  api('/me/profile/dismiss', { method: 'POST' }).catch(() => {});
+});
+
 // --- broken-connection banner ------------------------------------------------
 // Shown when the brokerage link existed but is broken now: SnapTrade reports
 // the connection disabled, the last sync errored, or a previously synced
@@ -2539,7 +2887,7 @@ loadMe().then(() => {
   loadWatching();
   loadDigest();
   reloadNewsFeeds();
-  checkConnection().then(checkDeliverySetup);
+  checkConnection().then(checkDeliverySetup).then(checkPersonalize);
 });
 """
 
@@ -3129,6 +3477,14 @@ _SETTINGS_BODY = """
   </div></div>
 </div>
 
+<div class="dash-card">
+  <h3>Investor profile <span class="tag" id="profile-chip"></span>
+    <a class="link-btn" href="/app/onboarding?personalize=1">Update</a></h3>
+  <div id="profile-overview"><div aria-hidden="true">
+    <div class="skl short"></div>
+  </div></div>
+</div>
+
 <div class="dash-card" id="plan-card">
   <h3>Plan <span class="tag" id="plan-chip"></span></h3>
   <ul class="plan-limits" id="plan-limits"></ul>
@@ -3189,8 +3545,40 @@ async function loadAccount() {
          '3 chat questions per week',
          '1 connected account'];
     limits.innerHTML = items.map((t) => '<li>' + esc(t) + '</li>').join('');
+    renderProfileCard(me);
     renderBilling(me);
   } catch (e) { /* nav still works; cards degrade individually */ }
+}
+
+// ---- investor profile --------------------------------------------------------
+
+const OB_HORIZONS = { days: 'acts within days', weeks_months: 'acts over weeks to months',
+  years: 'acts over years', decade_plus: 'thinks in decades' };
+const OB_EXPERIENCE = { new: 'just starting out', lt_1y: 'under a year in',
+  '1_5y': '1\\u20135 years in', '5_10y': '5\\u201310 years in', '10y_plus': '10+ years in' };
+const OB_GOALS = { grow_long_term: 'long-term growth', income: 'income',
+  preserve_capital: 'capital preservation', short_term_gains: 'short-term gains',
+  retirement: 'retirement', big_purchase: 'a big purchase' };
+
+function renderProfileCard(me) {
+  const el = document.getElementById('profile-overview');
+  const p = me.profile || {};
+  document.getElementById('profile-chip').textContent =
+    p.completed ? (p.archetype_label || '') : 'Default';
+  if (!p.completed) {
+    el.innerHTML = '<p class="muted-note" style="margin-top:0.5rem;">Not set up ' +
+      'yet \\u2014 Cirvia is using a balanced long-term default. Personalize so ' +
+      'your digest, news, and risk analysis fit how you invest.</p>';
+    return;
+  }
+  const bits = ['risk comfort ' + p.risk_tolerance + '/10'];
+  if (p.horizon && OB_HORIZONS[p.horizon]) bits.push(OB_HORIZONS[p.horizon]);
+  if (p.experience && OB_EXPERIENCE[p.experience]) bits.push(OB_EXPERIENCE[p.experience]);
+  const goals = (p.goals || []).map((g) => OB_GOALS[g]).filter(Boolean);
+  if (goals.length) bits.push('investing for ' + goals.join(', '));
+  el.innerHTML = '<p class="muted-note" style="margin-top:0.5rem;">' +
+    esc(bits.join(' \\u00b7 ')) + '. Your digest, news, and risk analysis are ' +
+    'framed around this.</p>';
 }
 
 // ---- billing (Stripe checkout + customer portal) ---------------------------
@@ -3626,43 +4014,68 @@ function tile(label, value, sub) {
     '<span class="t-sub">' + sub + '</span></div>';
 }
 
-function renderVerdict(s, mc) {
-  const parts = ['Your <strong>' + fmtCad(s.portfolio_value_cad) + '</strong> portfolio has been swinging about <strong>&plusmn;' +
-    s.annualized_volatility_pct.toFixed(0) + '%</strong> a year.'];
-  if (s.portfolio_beta !== null) {
-    parts.push('When the market drops 1%, it has tended to drop about <strong>' +
-      s.portfolio_beta.toFixed(1) + '%</strong>.');
-  }
-  parts.push('On its worst 1-in-20 days it loses <strong>' + fmtCad(s.var95_1d_cad) + '</strong> or more.');
-  document.getElementById('risk-verdict').innerHTML = parts.join(' ');
+// The investor profile (from /me) only reorders what leads — every number is
+// identical for every user; income-minded users see downside first, traders
+// see swings and market sensitivity first.
+function riskArchetype(prof) {
+  return prof && prof.completed ? prof.archetype : 'long_term_growth';
 }
 
-function renderStats(s) {
+function renderVerdict(s, mc, prof) {
+  const swing = 'Your <strong>' + fmtCad(s.portfolio_value_cad) + '</strong> portfolio has been swinging about <strong>&plusmn;' +
+    s.annualized_volatility_pct.toFixed(0) + '%</strong> a year.';
+  const beta = s.portfolio_beta !== null
+    ? 'When the market drops 1%, it has tended to drop about <strong>' +
+      s.portfolio_beta.toFixed(1) + '%</strong>.'
+    : null;
+  const badDay = 'On its worst 1-in-20 days this portfolio loses <strong>' +
+    fmtCad(s.var95_1d_cad) + '</strong> or more.';
+  const arch = riskArchetype(prof);
+  const parts = arch === 'income_preservation'
+    ? [badDay, swing, beta]
+    : arch === 'day_trader'
+      ? [swing, beta, badDay]
+      : [swing, beta, badDay];
+  document.getElementById('risk-verdict').innerHTML =
+    parts.filter(Boolean).join(' ');
+}
+
+function renderStats(s, prof) {
   const dollarsPerPct = s.portfolio_value_cad / 100;
-  const cards = [
-    tile('Typical yearly swing', '&plusmn;' + s.annualized_volatility_pct.toFixed(0) + '%',
+  const cards = {
+    swing: tile('Typical yearly swing', '&plusmn;' + s.annualized_volatility_pct.toFixed(0) + '%',
       'about ' + fmtCad(s.annualized_volatility_pct * dollarsPerPct) +
       ' up or down in an ordinary year'),
-    tile('A bad day', '&minus;' + fmtCad(s.var95_1d_cad),
+    badday: tile('A bad day', '&minus;' + fmtCad(s.var95_1d_cad),
       'your worst 1-in-20 days lose at least this (' + s.var95_1d_pct.toFixed(1) +
       '%); the average of those days is ' + s.cvar95_1d_pct.toFixed(1) + '%'),
-    tile('Really independent bets', '~' + s.effective_number_of_bets.toFixed(0),
+    bets: tile('Really independent bets', '~' + s.effective_number_of_bets.toFixed(0),
       'you hold ' + s.holdings_analyzed + ' names, but overlap makes them act like ' +
       s.effective_number_of_bets.toFixed(0)),
-    tile('Diversification is working', '&minus;' + s.diversification_benefit_pct.toFixed(0) + ' pts',
+    divers: tile('Diversification is working', '&minus;' + s.diversification_benefit_pct.toFixed(0) + ' pts',
       'mixing holdings cancels volatility: ' + s.weighted_avg_volatility_pct.toFixed(0) +
       '% if they moved alone, ' + s.annualized_volatility_pct.toFixed(0) + '% together'),
-  ];
+    beta: null,
+    sharpe: null,
+  };
   if (s.portfolio_beta !== null) {
-    cards.push(tile('Moves with the market', s.portfolio_beta.toFixed(2) + '×',
-      'a 1% market move has meant about ' + s.portfolio_beta.toFixed(1) + '% for you, both directions'));
+    cards.beta = tile('Moves with the market', s.portfolio_beta.toFixed(2) + '×',
+      'a 1% market move has meant about ' + s.portfolio_beta.toFixed(1) + '% for you, both directions');
   }
   if (s.sharpe_ratio !== null) {
-    cards.push(tile('Return earned per unit of risk', s.sharpe_ratio.toFixed(2),
+    cards.sharpe = tile('Return earned per unit of risk', s.sharpe_ratio.toFixed(2),
       s.sharpe_ratio >= 1 ? 'above 1 means the swings have been paying for themselves so far'
-        : 'below 1 means the returns have been small for the swings endured'));
+        : 'below 1 means the returns have been small for the swings endured');
   }
-  document.getElementById('risk-stats').innerHTML = cards.join('');
+  const ORDER = {
+    day_trader: ['swing', 'beta', 'badday', 'sharpe', 'bets', 'divers'],
+    swing_trader: ['swing', 'badday', 'beta', 'sharpe', 'bets', 'divers'],
+    long_term_growth: ['swing', 'badday', 'bets', 'divers', 'beta', 'sharpe'],
+    income_preservation: ['badday', 'divers', 'swing', 'bets', 'beta', 'sharpe'],
+  };
+  const order = ORDER[riskArchetype(prof)] || ORDER.long_term_growth;
+  document.getElementById('risk-stats').innerHTML =
+    order.map((k) => cards[k]).filter(Boolean).join('');
 }
 
 // --- where the risk sits (paired bars) ------------------------------------------
@@ -3855,8 +4268,15 @@ function renderFan(mc, s) {
 }
 
 async function loadRisk() {
-  let resp;
-  try { resp = await api('/portfolio/risk-analytics'); }
+  let resp, prof = null;
+  try {
+    const [r, meResp] = await Promise.all([
+      api('/portfolio/risk-analytics'),
+      api('/me').catch(() => null),  // profile is advisory: ordering only
+    ]);
+    resp = r;
+    if (meResp && meResp.ok) prof = (await meResp.json()).profile || null;
+  }
   catch (e) { return; }
   document.getElementById('risk-loading').style.display = 'none';
   if (resp.status === 402) { document.getElementById('risk-gate').style.display = 'block'; return; }
@@ -3864,8 +4284,8 @@ async function loadRisk() {
   const data = await resp.json();
   if (!data.available) { const el = document.getElementById('risk-empty'); el.style.display = 'block'; el.textContent = data.note || 'Not enough data to analyze.'; return; }
   document.getElementById('risk-content').style.display = 'block';
-  renderVerdict(data.summary, data.monte_carlo);
-  renderStats(data.summary);
+  renderVerdict(data.summary, data.monte_carlo, prof);
+  renderStats(data.summary, prof);
   renderBars(data.holdings, data.summary);
   renderHeatmap(data.correlation);
   renderFan(data.monte_carlo, data.summary);
@@ -3955,6 +4375,303 @@ def risk_lab_page(supabase_url: str, anon_key: str) -> str:
         anon_key=anon_key,
         extra_js=_RISK_JS,
         wrap_class="app-wrap risk-wrap",
+    )
+
+
+# --------------------------------------------------------------------------
+# /app/picks — daily Best Stocks dashboard (Pro)
+# --------------------------------------------------------------------------
+
+_PICKS_BODY = """
+<section class="picks-head">
+  <h1>Top Picks</h1>
+  <p class="picks-sub">Every market morning, a quantitative screen ranks ~560 US and Canadian
+  large caps, and analyst agents research the strongest candidates. Every number is computed
+  from source data and machine-verified; every claim is adversarially checked.</p>
+</section>
+<div id="picks-loading" class="muted-note">Loading today's analysis&hellip;</div>
+<div id="picks-gate" class="dash-card gate-card" style="display:none;">
+  <h2>A Pro feature</h2>
+  <p>The daily Top Picks dashboard — ranked candidates with verified evidence, what's moving
+  and why, and a public track record — is part of Cirvia&nbsp;Pro.</p>
+  <a class="btn" href="/app/settings?billing=upgrade">Upgrade to Pro</a>
+</div>
+<div id="picks-empty" class="muted-note" style="display:none;"></div>
+<div id="picks-content" style="display:none;">
+  <p class="picks-meta" id="picks-meta"></p>
+  <p class="warn-banner" id="picks-stale" style="display:none;"></p>
+
+  <div class="dash-card picks-card" id="picks-overview-card" style="display:none;">
+    <h2 id="picks-headline"></h2>
+    <div id="picks-overview"></div>
+  </div>
+
+  <div class="dash-card picks-card" id="movers-card" style="display:none;">
+    <h2>What's moving</h2>
+    <p class="picks-card-sub">Statistically unusual daily moves across the universe, with the
+    catalyst when the news actually explains it &mdash; never a guessed reason.</p>
+    <div id="picks-movers"></div>
+  </div>
+
+  <h2 class="picks-section-h" id="picks-list-h">Today's ranked candidates</h2>
+  <div id="picks-list"></div>
+
+  <div class="dash-card picks-card" id="track-card" style="display:none;">
+    <h2>Track record</h2>
+    <p class="picks-card-sub" id="track-sub"></p>
+    <div id="track-body"></div>
+  </div>
+
+  <details class="picks-method">
+    <summary>How this is built</summary>
+    <p>An evening job stores adjusted prices and fundamentals for the S&amp;P&nbsp;500 and
+    TSX&nbsp;60. Pre-market, a factor model scores every eligible name against its sector on
+    value, quality, growth, momentum, analyst upside, and risk &mdash; pure math, no AI.
+    Only the top-ranked names go to analyst agents, which must ground every figure in the
+    computed fact sheet. A verifier then re-checks the numbers deterministically and an
+    adversarial critic re-checks the claims with its own data pulls; picks with challenged
+    claims are demoted and flagged. Confidence is a computed score (rank strength, data
+    coverage, verification results), not the model's opinion.</p>
+  </details>
+  <p class="disclaimer" id="picks-disclaimer"></p>
+</div>
+"""
+
+_PICKS_JS = r"""
+const esc = (s) => { const d = document.createElement('div'); d.textContent = s ?? '';
+  return d.innerHTML.replaceAll('"', '&quot;').replaceAll("'", '&#39;'); };
+const pctFmt = (n) => (n >= 0 ? '+' : '') + Number(n).toFixed(2) + '%';
+
+function confMeter(c) {
+  if (c === null || c === undefined) return '';
+  const pct = Math.round(c * 100);
+  const band = c >= 0.7 ? 'high' : c >= 0.45 ? 'mid' : 'low';
+  return '<span class="conf" title="Computed confidence: rank strength, data coverage, and verification results">' +
+    '<span class="conf-track"><span class="conf-fill conf-' + band + '" style="width:' + pct + '%"></span></span>' +
+    '<span class="conf-num">' + pct + '</span></span>';
+}
+
+function evidenceTable(ev) {
+  if (!ev || !ev.length) return '';
+  const rows = ev.map((e) =>
+    '<tr><td>' + esc(e.metric.replaceAll('_', ' ')) + '</td>' +
+    '<td>' + (e.value ?? '—') + '</td>' +
+    '<td>' + (e.sector_median ?? '—') + '</td></tr>').join('');
+  return '<table class="ev-table"><thead><tr><th>metric</th><th>this stock</th>' +
+    '<th>sector median</th></tr></thead><tbody>' + rows + '</tbody></table>';
+}
+
+function verifyBadge(v, demoted) {
+  if (!v || !v.critic_ran) return '<span class="vbadge v-un">unverified</span>';
+  if (demoted) return '<span class="vbadge v-bad">' + v.challenged + ' claims challenged</span>';
+  if (v.checked === 0) return '<span class="vbadge v-un">not spot-checked</span>';
+  const label = v.verified + '/' + v.checked + ' claims verified' +
+    (v.challenged ? ', ' + v.challenged + ' challenged' : '');
+  return '<span class="vbadge ' + (v.challenged ? 'v-mixed' : 'v-ok') + '">' + label + '</span>';
+}
+
+function riskList(risks) {
+  if (!risks || !risks.length) return '';
+  return '<ul class="pick-risks">' + risks.map((r) =>
+    '<li><span class="sev sev-' + esc(r.severity || 'medium') + '"></span>' + esc(r.text) + '</li>'
+  ).join('') + '</ul>';
+}
+
+function pickCard(p, i) {
+  const quantOnly = p.analysis !== 'ok';
+  let body = '';
+  if (quantOnly) {
+    body = '<p class="pick-thesis muted-note">Quantitative scores only — the analyst stage was ' +
+      'unavailable for this name.</p>';
+  } else {
+    body = '<p class="pick-thesis">' + esc(p.thesis) + '</p>' +
+      (p.why_now ? '<p class="pick-whynow"><strong>Why now:</strong> ' + esc(p.why_now) + '</p>' : '') +
+      evidenceTable(p.valuation_evidence) +
+      riskList(p.risks);
+  }
+  const factors = p.factors || {};
+  const chips = Object.entries(factors).filter(([, v]) => v !== null && v !== undefined)
+    .map(([k, v]) => '<span class="fchip' + (v >= 0 ? ' fpos' : ' fneg') + '">' +
+      esc(k.replaceAll('_', ' ')) + ' ' + (v >= 0 ? '+' : '') + Number(v).toFixed(2) + '</span>').join('');
+  return '<div class="dash-card pick-card' + (p.demoted ? ' pick-demoted' : '') + '">' +
+    '<div class="pick-top">' +
+      '<span class="pick-rank">#' + (i + 1) + '</span>' +
+      '<span class="pick-id"><span class="pick-ticker">' + esc(p.ticker) + '</span>' +
+        '<span class="pick-name">' + esc(p.name || '') + (p.sector ? ' · ' + esc(p.sector) : '') + '</span></span>' +
+      confMeter(p.confidence) +
+    '</div>' +
+    (p.demoted ? '<p class="demote-note">The verifier challenged parts of this analysis — ranked down and shown for transparency.</p>' : '') +
+    body +
+    '<div class="pick-foot">' + chips + verifyBadge(p.verification, p.demoted) + '</div>' +
+  '</div>';
+}
+
+function renderMovers(movers) {
+  if (!movers || !movers.length) return;
+  document.getElementById('movers-card').style.display = 'block';
+  document.getElementById('picks-movers').innerHTML = movers.map((m) =>
+    '<div class="mover-row">' +
+      '<span class="mover-move ' + (m.direction === 'up' ? 'gain' : 'loss') + '">' +
+        pctFmt(m.day_return_pct ?? 0) + '</span>' +
+      '<span class="mover-id"><strong>' + esc(m.ticker) + '</strong>' +
+        (m.name ? ' <span class="mover-name">' + esc(m.name) + '</span>' : '') + '</span>' +
+      '<span class="mover-why' + (m.news_grounded ? '' : ' mover-nocat') + '">' + esc(m.why) + '</span>' +
+    '</div>').join('');
+}
+
+async function loadTrackRecord() {
+  let resp;
+  try { resp = await api('/stocks/picks/track-record'); } catch (e) { return; }
+  if (!resp.ok) return;
+  const data = await resp.json();
+  if (!data.available || !data.summary || !data.summary.measured) return;
+  const s = data.summary;
+  document.getElementById('track-card').style.display = 'block';
+  document.getElementById('track-sub').textContent =
+    'Every pick is logged at its price on pick day and measured against the S&P 500 — ' +
+    'no cherry-picking, the record is what it is.';
+  let html = '<p class="track-line">' + s.measured + ' picks measured · average ' +
+    pctFmt(s.avg_return_pct) + ' since pick' +
+    (s.hit_rate_pct !== null ? ' · ' + s.hit_rate_pct + '% beat the index over the same span' : '') + '</p>';
+  document.getElementById('track-body').innerHTML = html;
+}
+
+async function loadPicks() {
+  let resp;
+  try { resp = await api('/stocks/picks'); }
+  catch (e) { return; }
+  document.getElementById('picks-loading').style.display = 'none';
+  if (resp.status === 402) { document.getElementById('picks-gate').style.display = 'block'; return; }
+  if (!resp.ok) { const el = document.getElementById('picks-empty'); el.style.display = 'block';
+    el.textContent = 'Picks are unavailable right now.'; return; }
+  const data = await resp.json();
+  if (!data.available) { const el = document.getElementById('picks-empty'); el.style.display = 'block';
+    el.textContent = data.note || 'No analysis yet.'; return; }
+  document.getElementById('picks-content').style.display = 'block';
+
+  const uni = data.universe || {};
+  document.getElementById('picks-meta').textContent =
+    'Analysis for ' + data.as_of + ' · prices through ' + (data.data_as_of || data.as_of) +
+    ' · ' + (uni.size || '—') + ' names screened, ' +
+    ((data.coverage || {}).ranked ?? '—') + ' ranked';
+  if (data.stale) { const st = document.getElementById('picks-stale');
+    st.style.display = 'block'; st.textContent = data.stale_note; }
+
+  if (data.overview) {
+    document.getElementById('picks-overview-card').style.display = 'block';
+    document.getElementById('picks-headline').textContent = data.headline || 'Today';
+    document.getElementById('picks-overview').innerHTML =
+      data.overview.split('\n').filter(Boolean).map((p) => '<p>' + esc(p) + '</p>').join('');
+  }
+  renderMovers(data.movers);
+  const picks = data.picks || [];
+  document.getElementById('picks-list').innerHTML = picks.map(pickCard).join('');
+  document.getElementById('picks-disclaimer').textContent = data.disclaimer || '';
+  loadTrackRecord();
+  document.querySelectorAll('.pick-card, .picks-card').forEach((el) => riseIn(el));
+}
+
+requireSession().then((ok) => { if (ok) loadPicks(); });
+"""
+
+_PICKS_CSS = """
+.picks-wrap { max-width: 880px; }
+.picks-head h1 { margin-bottom: 0.3rem; }
+.picks-head .picks-sub { color: var(--ink-2); margin-bottom: 1.1rem; max-width: 66ch; }
+.picks-meta { color: var(--ink-3); font-size: 0.85rem; margin: 0 0 1rem;
+  font-variant-numeric: tabular-nums; }
+.picks-card { margin-bottom: 1rem; }
+.picks-card h2 { font-size: 1.1rem; margin-bottom: 0.3rem; }
+.picks-card-sub { color: var(--ink-2); font-size: 0.9rem; line-height: 1.5;
+  max-width: 68ch; margin: 0 0 0.6rem; }
+#picks-overview p { color: var(--ink); line-height: 1.55; max-width: 68ch;
+  margin: 0.4rem 0 0; }
+.picks-section-h { font-size: 1.1rem; margin: 1.3rem 0 0.7rem; }
+/* movers */
+.mover-row { display: flex; align-items: baseline; gap: 0.7rem; padding: 0.45rem 0;
+  border-top: 1px solid var(--line); }
+.mover-row:first-child { border-top: 0; }
+.mover-move { flex: 0 0 4.2rem; text-align: right; font-weight: 650;
+  font-variant-numeric: tabular-nums; }
+.mover-move.gain { color: var(--gain); } .mover-move.loss { color: var(--loss); }
+.mover-id { flex: 0 0 11rem; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; }
+.mover-name { color: var(--ink-3); font-size: 0.85rem; }
+.mover-why { color: var(--ink-2); font-size: 0.88rem; line-height: 1.45; }
+.mover-nocat { color: var(--ink-3); font-style: italic; }
+/* pick cards */
+.pick-card { margin-bottom: 0.9rem; }
+.pick-demoted { opacity: 0.82; }
+.pick-top { display: flex; align-items: center; gap: 0.75rem; }
+.pick-rank { flex: none; font-size: 0.95rem; font-weight: 650; color: var(--accent-text);
+  font-variant-numeric: tabular-nums; }
+.pick-id { flex: 1 1 auto; min-width: 0; }
+.pick-ticker { font-weight: 650; font-size: 1.05rem; margin-right: 0.5rem; }
+.pick-name { color: var(--ink-3); font-size: 0.86rem; }
+.conf { flex: none; display: inline-flex; align-items: center; gap: 0.45rem; }
+.conf-track { width: 74px; height: 7px; border-radius: 4px; background: var(--surface-3);
+  overflow: hidden; display: inline-block; }
+.conf-fill { display: block; height: 100%; border-radius: 4px; }
+.conf-high { background: oklch(70% 0.14 155); }
+.conf-mid { background: oklch(66% 0.19 295); }
+.conf-low { background: oklch(60% 0.03 300); }
+.conf-num { font-size: 0.8rem; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.demote-note { color: var(--warn); font-size: 0.85rem; margin: 0.5rem 0 0; }
+.pick-thesis { color: var(--ink); line-height: 1.55; margin: 0.65rem 0 0; max-width: 70ch; }
+.pick-whynow { color: var(--ink-2); font-size: 0.92rem; line-height: 1.5;
+  margin: 0.45rem 0 0; max-width: 70ch; }
+.pick-whynow strong { color: var(--ink); }
+.ev-table { margin-top: 0.7rem; border-collapse: collapse; font-size: 0.85rem;
+  font-variant-numeric: tabular-nums; }
+.ev-table th { text-align: left; color: var(--ink-3); font-weight: 600;
+  padding: 0.25rem 1.1rem 0.25rem 0; border-bottom: 1px solid var(--line); }
+.ev-table td { padding: 0.3rem 1.1rem 0.3rem 0; border-bottom: 1px solid var(--line);
+  color: var(--ink-2); }
+.ev-table td:first-child { color: var(--ink); }
+.pick-risks { margin: 0.7rem 0 0; padding: 0; list-style: none; }
+.pick-risks li { display: flex; gap: 0.5rem; align-items: baseline; color: var(--ink-2);
+  font-size: 0.9rem; line-height: 1.5; margin-top: 0.25rem; max-width: 70ch; }
+.sev { flex: none; width: 8px; height: 8px; border-radius: 50%; display: inline-block;
+  transform: translateY(-1px); }
+.sev-low { background: var(--ink-3); }
+.sev-medium { background: var(--warn); }
+.sev-high { background: var(--loss); }
+.pick-foot { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center;
+  margin-top: 0.85rem; }
+.fchip { font-size: 0.74rem; color: var(--ink-3); border: 1px solid var(--line);
+  border-radius: 999px; padding: 0.12rem 0.55rem; font-variant-numeric: tabular-nums; }
+.fchip.fpos { color: var(--ink-2); }
+.vbadge { margin-left: auto; font-size: 0.78rem; border-radius: 999px;
+  padding: 0.16rem 0.6rem; border: 1px solid var(--line-strong); }
+.v-ok { color: var(--gain); }
+.v-mixed { color: var(--warn); }
+.v-bad { color: var(--loss); }
+.v-un { color: var(--ink-3); }
+.track-line { color: var(--ink); font-size: 0.95rem; font-variant-numeric: tabular-nums; }
+.picks-method { margin: 1.2rem 0 0; color: var(--ink-2); font-size: 0.9rem;
+  max-width: 70ch; }
+.picks-method summary { cursor: pointer; color: var(--ink-3); font-weight: 600;
+  font-size: 0.86rem; }
+.picks-method p { margin-top: 0.5rem; line-height: 1.55; }
+.gate-card { text-align: center; }
+.gate-card .btn { margin-top: 0.6rem; }
+.disclaimer { font-size: 0.78rem; color: var(--ink-3); margin-top: 1rem; max-width: 68ch; }
+@media (max-width: 640px) {
+  .mover-id { flex-basis: 6.5rem; }
+  .mover-row { flex-wrap: wrap; }
+  .mover-why { flex-basis: 100%; }
+}
+"""
+
+
+def picks_page(supabase_url: str, anon_key: str) -> str:
+    return _page(
+        "Top Picks — Cirvia",
+        f"<style>{_PICKS_CSS}</style>{_PICKS_BODY}",
+        supabase_url=supabase_url,
+        anon_key=anon_key,
+        extra_js=_PICKS_JS,
+        wrap_class="app-wrap picks-wrap",
     )
 
 

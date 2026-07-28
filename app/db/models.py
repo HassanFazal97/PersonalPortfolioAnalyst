@@ -20,6 +20,7 @@ from sqlalchemy import (
     Integer,
     LargeBinary,
     Numeric,
+    SmallInteger,
     String,
     Text,
     Time,
@@ -74,6 +75,22 @@ class User(Base):
     # Free-tier ordered watchlist for digest news coverage (max 3 tickers).
     digest_tickers: Mapped[list] = mapped_column(
         JSONB, nullable=False, server_default=text("'[]'")
+    )
+    # Investor profile (migration 022). Traits are source of truth; the
+    # archetype is a derived label (app/profile.py). All NULL/[] = not
+    # profiled — code substitutes DEFAULT_PROFILE.
+    investor_archetype: Mapped[str | None] = mapped_column(Text)
+    risk_tolerance: Mapped[int | None] = mapped_column(SmallInteger)
+    investing_horizon: Mapped[str | None] = mapped_column(Text)
+    investing_experience: Mapped[str | None] = mapped_column(Text)
+    investing_goals: Mapped[list] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'")
+    )
+    profile_completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    profile_prompt_dismissed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
     )
     # No-card Pro trial (migration 017). Future = trial active (Pro
     # experience); past + plan 'free' = digests paused pending the user's
@@ -497,6 +514,65 @@ class DailyPrice(Base):
     currency: Mapped[str | None] = mapped_column(Text)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class StockPicksRun(Base):
+    """One daily Best Stocks pipeline run (global — market data, not tenant
+    data; generated once per day under the owner service context and served
+    to every Pro user). ``payload`` is the dashboard document; ``stats``
+    carries coverage/exclusion/verification counts; ``run_id`` anchors the
+    agent_runs audit trail."""
+
+    __tablename__ = "stock_picks_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    run_date: Mapped[date] = mapped_column(Date, nullable=False)
+    # running | completed | partial | error
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="running")
+    universe: Mapped[str] = mapped_column(Text, nullable=False)
+    payload: Mapped[dict | None] = mapped_column(JSONB)
+    stats: Mapped[dict | None] = mapped_column(JSONB)
+    run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("agent_runs.id")
+    )
+    cost_usd: Mapped[Decimal | None] = mapped_column(Numeric)
+    methodology_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("1")
+    )
+    created_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class StockPickEntry(Base):
+    """Track-record row: one pick, frozen at pick time. No outcome columns —
+    realized returns are computed at read time against daily_prices, so the
+    record is point-in-time honest with no evaluation job."""
+
+    __tablename__ = "stock_pick_entries"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    picks_run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("stock_picks_runs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    run_date: Mapped[date] = mapped_column(Date, nullable=False)
+    ticker: Mapped[str] = mapped_column(Text, nullable=False)
+    rank: Mapped[int] = mapped_column(Integer, nullable=False)
+    composite_score: Mapped[Decimal | None] = mapped_column(Numeric)
+    confidence: Mapped[Decimal | None] = mapped_column(Numeric)
+    entry_price: Mapped[Decimal | None] = mapped_column(Numeric)
+    factors: Mapped[dict | None] = mapped_column(JSONB)
+    thesis_summary: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
     )
 
 

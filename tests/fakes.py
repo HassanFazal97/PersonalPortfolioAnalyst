@@ -56,6 +56,10 @@ class FakeRepo:
             plan_since=None, stripe_current_period_end=None,
             stripe_cancel_at_period_end=False,
             trial_ends_at=trial_ends_at,
+            investor_archetype=None, risk_tolerance=None,
+            investing_horizon=None, investing_experience=None,
+            investing_goals=[], profile_completed_at=None,
+            profile_prompt_dismissed_at=None,
         )
 
     async def create_run(self, *, trigger, user_message, model, prompt_version,
@@ -106,6 +110,10 @@ class FakeRepo:
                 plan_since=None, stripe_current_period_end=None,
                 stripe_cancel_at_period_end=False,
                 trial_ends_at=trial_ends_at,
+                investor_archetype=None, risk_tolerance=None,
+                investing_horizon=None, investing_experience=None,
+                investing_goals=[], profile_completed_at=None,
+                profile_prompt_dismissed_at=None,
             )
         return self._users_by_auth[auth_id]
 
@@ -131,6 +139,25 @@ class FakeRepo:
             user.digest_enabled = digest_enabled
         if digest_tickers is not None:
             user.digest_tickers = list(digest_tickers)
+
+    async def update_user_profile(self, user_id, *, archetype, risk_tolerance,
+                                  horizon, experience, goals, completed_at=None):
+        user = self._users_by_id.get(user_id)
+        if user is None:
+            return
+        user.investor_archetype = archetype
+        user.risk_tolerance = risk_tolerance
+        user.investing_horizon = horizon
+        user.investing_experience = experience
+        user.investing_goals = list(goals)
+        if completed_at is not None:
+            user.profile_completed_at = completed_at
+
+    async def set_profile_prompt_dismissed(self, user_id):
+        user = self._users_by_id.get(user_id)
+        if user is None or user.profile_prompt_dismissed_at is not None:
+            return
+        user.profile_prompt_dismissed_at = datetime.now(timezone.utc)
 
     async def get_digest_tickers(self, user_id):
         user = self._users_by_id.get(user_id)
@@ -835,6 +862,108 @@ class FakeRepo:
             n += 1
         self.daily_prices[ticker] = list(store.values())
         return n
+
+    async def daily_price_coverage(self, tickers):
+        out = {}
+        for t in tickers:
+            rows = self.daily_prices.get(t)
+            if not rows:
+                continue
+            dates = sorted(r.price_date for r in rows)
+            out[t] = {"first": dates[0], "last": dates[-1], "rows": len(dates)}
+        return out
+
+    async def get_daily_prices_bulk(self, tickers, *, since=None):
+        out = {}
+        for t in tickers:
+            rows = await self.get_daily_prices(t, since=since)
+            if rows:
+                out[t] = rows
+        return out
+
+    async def latest_daily_prices(self, tickers):
+        out = {}
+        for t in tickers:
+            rows = self.daily_prices.get(t)
+            if rows:
+                out[t] = max(rows, key=lambda r: r.price_date)
+        return out
+
+    # ---- stock picks (mirrors app/db/repo.py) ----------------------------
+
+    async def create_picks_run(
+        self, *, run_date, universe, run_id=None, methodology_version=1
+    ):
+        picks_run_id = uuid.uuid4()
+        if not hasattr(self, "stock_picks_runs"):
+            self.stock_picks_runs = {}
+            self.stock_pick_entries = []
+        self.stock_picks_runs[picks_run_id] = SimpleNamespace(
+            id=picks_run_id,
+            run_date=run_date,
+            universe=universe,
+            run_id=run_id,
+            status="running",
+            payload=None,
+            stats=None,
+            cost_usd=None,
+            methodology_version=methodology_version,
+            created_at=datetime.now(timezone.utc),
+            completed_at=None,
+        )
+        return picks_run_id
+
+    async def update_picks_run(
+        self, picks_run_id, *, status=None, payload=None, stats=None, cost_usd=None
+    ):
+        row = getattr(self, "stock_picks_runs", {}).get(picks_run_id)
+        if row is None:
+            return
+        if status is not None:
+            row.status = status
+            if status in ("completed", "partial", "error"):
+                row.completed_at = datetime.now(timezone.utc)
+        if payload is not None:
+            row.payload = payload
+        if stats is not None:
+            row.stats = stats
+        if cost_usd is not None:
+            row.cost_usd = cost_usd
+
+    async def get_latest_picks_run(self, *, statuses=("completed", "partial")):
+        rows = [
+            r
+            for r in getattr(self, "stock_picks_runs", {}).values()
+            if r.status in statuses
+        ]
+        if not rows:
+            return None
+        return max(rows, key=lambda r: (r.run_date, r.created_at))
+
+    async def list_picks_runs(self, *, limit=10):
+        rows = sorted(
+            getattr(self, "stock_picks_runs", {}).values(),
+            key=lambda r: (r.run_date, r.created_at),
+            reverse=True,
+        )
+        return rows[:limit]
+
+    async def insert_pick_entries(self, rows):
+        if not hasattr(self, "stock_pick_entries"):
+            self.stock_pick_entries = []
+        for r in rows:
+            self.stock_pick_entries.append(
+                SimpleNamespace(id=uuid.uuid4(), created_at=datetime.now(timezone.utc), **r)
+            )
+        return len(rows)
+
+    async def list_pick_entries(self, *, since):
+        rows = [
+            r
+            for r in getattr(self, "stock_pick_entries", [])
+            if r.run_date >= since
+        ]
+        return sorted(rows, key=lambda r: (r.run_date, -r.rank), reverse=True)
 
     # ---- notification channels (mirrors app/db/repo.py) -----------------
 

@@ -205,6 +205,36 @@ class Settings(BaseSettings):
     # Cron for the scheduled weekly fan-out ("" disables; runs stay manual).
     deep_dive_cron: str = Field(default="", alias="DEEP_DIVE_CRON")
 
+    # ---- Best Stocks pipeline (universe screen + picks; Pro-only) -----------
+    # Two jobs, both "" (disabled) by default like other cost-bearing jobs:
+    # picks_sync fills daily_prices/ticker_fundamentals for the whole universe
+    # the evening before (recommend "0 20 * * 1-5", after the held-ticker
+    # jobs); picks_cron runs the pre-market analysis over the stored data
+    # (recommend "0 7 * * 1-5"). One global run per day, amortized across all
+    # Pro users.
+    picks_cron: str = Field(default="", alias="PICKS_CRON")
+    picks_sync_cron: str = Field(default="", alias="PICKS_SYNC_CRON")
+    # Hard USD cap for one picks run (analysts + movers + critic + synthesis).
+    # Typical runs land near $2; analysts stop being admitted at 80% of this.
+    picks_max_cost_usd: float = Field(default=5.00, alias="PICKS_MAX_COST_USD")
+    # Anchor iteration ceiling summed across stages.
+    picks_max_iterations: int = Field(default=120, alias="PICKS_MAX_ITERATIONS")
+    # How many top-ranked names get a full analyst pass, and how many survive
+    # to the dashboard.
+    picks_top_candidates: int = Field(default=15, alias="PICKS_TOP_CANDIDATES")
+    picks_final_count: int = Field(default=10, alias="PICKS_FINAL_COUNT")
+    picks_max_movers: int = Field(default=10, alias="PICKS_MAX_MOVERS")
+    # Calendar-day price window synced/loaded per ticker (~288 trading days —
+    # enough for 12-1 momentum plus the movers z-score warmup).
+    picks_history_days: int = Field(default=420, alias="PICKS_HISTORY_DAYS")
+    # Spacing between Yahoo requests in the universe sync (price chunks and
+    # per-ticker fundamentals alike).
+    picks_sync_spacing_seconds: float = Field(
+        default=0.75, alias="PICKS_SYNC_SPACING_SECONDS"
+    )
+    # >0 truncates the universe for cheap smoke runs (e.g. 25).
+    picks_universe_limit: int = Field(default=0, alias="PICKS_UNIVERSE_LIMIT")
+
     # ---- Semantic memory (pgvector + Voyage embeddings) --------------------
     # The feature switch: unset = no ingestion, no recall_memory chat tool
     # (fail-open, like Finnhub/Twilio). Voyage is Anthropic's recommended

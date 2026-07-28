@@ -40,6 +40,8 @@ from app.db.models import (
     OutboundMessage,
     Position,
     SnaptradeCredentials,
+    StockPickEntry,
+    StockPicksRun,
     StripeEvent,
     TickerFundamentals,
     ToolCall,
@@ -87,9 +89,17 @@ class Repo:
     def __init__(
         self, database_url: str, *, echo: bool = False, ssl: bool = False
     ) -> None:
-        connect_args = {"ssl": "require"} if ssl else {}
+        # Managed poolers (Supabase) silently drop idle connections; a
+        # long-running job (digest, picks) then hits "connection is closed" —
+        # or hangs forever on a socket that died without an RST. pool_pre_ping
+        # catches dead-at-checkout; command_timeout bounds any statement that
+        # dies mid-flight (our largest statements finish in single-digit
+        # seconds, so 60s only ever fires on a wedged connection).
+        connect_args: dict = {"command_timeout": 60}
+        if ssl:
+            connect_args["ssl"] = "require"
         self._engine: AsyncEngine = create_async_engine(
-            database_url, echo=echo, connect_args=connect_args
+            database_url, echo=echo, connect_args=connect_args, pool_pre_ping=True
         )
         self._session: async_sessionmaker[AsyncSession] = async_sessionmaker(
             self._engine, expire_on_commit=False
@@ -139,6 +149,40 @@ class Repo:
                 user.digest_enabled = digest_enabled
             if digest_tickers is not None:
                 user.digest_tickers = digest_tickers
+            await s.commit()
+
+    async def update_user_profile(
+        self,
+        user_id: uuid.UUID,
+        *,
+        archetype: str,
+        risk_tolerance: int,
+        horizon: str | None,
+        experience: str | None,
+        goals: list[str],
+        completed_at: Any = None,
+    ) -> None:
+        """Persist the investor profile captured during onboarding."""
+        async with self._session() as s:
+            user = await s.get(User, user_id)
+            if user is None:
+                return
+            user.investor_archetype = archetype
+            user.risk_tolerance = risk_tolerance
+            user.investing_horizon = horizon
+            user.investing_experience = experience
+            user.investing_goals = goals
+            if completed_at is not None:
+                user.profile_completed_at = completed_at
+            await s.commit()
+
+    async def set_profile_prompt_dismissed(self, user_id: uuid.UUID) -> None:
+        """Record the one-time 'personalize' prompt dismissal (idempotent)."""
+        async with self._session() as s:
+            user = await s.get(User, user_id)
+            if user is None or user.profile_prompt_dismissed_at is not None:
+                return
+            user.profile_prompt_dismissed_at = datetime.now(timezone.utc)
             await s.commit()
 
     async def get_digest_tickers(self, user_id: uuid.UUID) -> list[str]:
@@ -1699,3 +1743,140 @@ class Repo:
             await s.execute(stmt)
             await s.commit()
         return len(values)
+
+    async def daily_price_coverage(
+        self, tickers: list[str]
+    ) -> dict[str, dict[str, Any]]:
+        """Per-ticker stored-history extent: ``{ticker: {first, last, rows}}``.
+        One GROUP BY query — the universe sync uses this to decide full-window
+        vs incremental fetches without 560 per-ticker reads."""
+        async with self._session() as s:
+            result = await s.execute(
+                select(
+                    DailyPrice.ticker,
+                    func.min(DailyPrice.price_date),
+                    func.max(DailyPrice.price_date),
+                    func.count(),
+                )
+                .where(DailyPrice.ticker.in_(tickers))
+                .group_by(DailyPrice.ticker)
+            )
+            return {
+                t: {"first": first, "last": last, "rows": int(count)}
+                for t, first, last, count in result.all()
+            }
+
+    async def get_daily_prices_bulk(
+        self, tickers: list[str], *, since: date | None = None
+    ) -> dict[str, list[DailyPrice]]:
+        """Stored adjusted closes for many tickers in one query, each list
+        oldest first. The picks pipeline's Stage A load path."""
+        async with self._session() as s:
+            q = select(DailyPrice).where(DailyPrice.ticker.in_(tickers))
+            if since is not None:
+                q = q.where(DailyPrice.price_date >= since)
+            q = q.order_by(DailyPrice.ticker, DailyPrice.price_date)
+            result = await s.execute(q)
+            out: dict[str, list[DailyPrice]] = {}
+            for row in result.scalars().all():
+                out.setdefault(row.ticker, []).append(row)
+            return out
+
+    async def latest_daily_prices(
+        self, tickers: list[str]
+    ) -> dict[str, DailyPrice]:
+        """Most recent stored bar per ticker (track-record marking)."""
+        async with self._session() as s:
+            result = await s.execute(
+                select(DailyPrice)
+                .distinct(DailyPrice.ticker)
+                .where(DailyPrice.ticker.in_(tickers))
+                .order_by(DailyPrice.ticker, DailyPrice.price_date.desc())
+            )
+            return {row.ticker: row for row in result.scalars().all()}
+
+    # ---- stock picks (global daily Best Stocks runs, all tenants) ----------
+
+    async def create_picks_run(
+        self, *, run_date: date, universe: str, run_id: uuid.UUID | None = None,
+        methodology_version: int = 1,
+    ) -> uuid.UUID:
+        async with self._session() as s:
+            row = StockPicksRun(
+                run_date=run_date,
+                universe=universe,
+                run_id=run_id,
+                status="running",
+                methodology_version=methodology_version,
+            )
+            s.add(row)
+            await s.commit()
+            return row.id
+
+    async def update_picks_run(
+        self,
+        picks_run_id: uuid.UUID,
+        *,
+        status: str | None = None,
+        payload: dict | None = None,
+        stats: dict | None = None,
+        cost_usd: float | None = None,
+    ) -> None:
+        async with self._session() as s:
+            row = await s.get(StockPicksRun, picks_run_id)
+            if row is None:
+                return
+            if status is not None:
+                row.status = status
+                if status in ("completed", "partial", "error"):
+                    row.completed_at = datetime.now(timezone.utc)
+            if payload is not None:
+                row.payload = payload
+            if stats is not None:
+                row.stats = stats
+            if cost_usd is not None:
+                row.cost_usd = Decimal(str(cost_usd))
+            await s.commit()
+
+    async def get_latest_picks_run(
+        self, *, statuses: tuple[str, ...] = ("completed", "partial")
+    ) -> StockPicksRun | None:
+        """Newest run in an acceptable terminal state (the dashboard read)."""
+        async with self._session() as s:
+            result = await s.execute(
+                select(StockPicksRun)
+                .where(StockPicksRun.status.in_(statuses))
+                .order_by(StockPicksRun.run_date.desc(), StockPicksRun.created_at.desc())
+                .limit(1)
+            )
+            return result.scalars().first()
+
+    async def list_picks_runs(self, *, limit: int = 10) -> list[StockPicksRun]:
+        async with self._session() as s:
+            result = await s.execute(
+                select(StockPicksRun)
+                .order_by(StockPicksRun.run_date.desc(), StockPicksRun.created_at.desc())
+                .limit(limit)
+            )
+            return list(result.scalars().all())
+
+    async def insert_pick_entries(self, rows: list[dict[str, Any]]) -> int:
+        """Track-record rows for one run: ``{picks_run_id, run_date, ticker,
+        rank, composite_score, confidence, entry_price, factors,
+        thesis_summary}`` dicts."""
+        if not rows:
+            return 0
+        async with self._session() as s:
+            s.add_all(StockPickEntry(**r) for r in rows)
+            await s.commit()
+        return len(rows)
+
+    async def list_pick_entries(self, *, since: date) -> list[StockPickEntry]:
+        """Entries on/after ``since``, newest run first then rank."""
+        async with self._session() as s:
+            result = await s.execute(
+                select(StockPickEntry)
+                .where(StockPickEntry.run_date >= since)
+                .order_by(StockPickEntry.run_date.desc(), StockPickEntry.rank)
+            )
+            return list(result.scalars().all())
