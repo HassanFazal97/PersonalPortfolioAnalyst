@@ -81,13 +81,20 @@ async def build_chat_context(ctx: ToolContext, *, tz: str) -> str:
     return json.dumps(context, default=str)
 
 
-def compose_chat_system_prompt(base_prompt: str, context: str) -> str:
-    """The chat system prompt with the user-context blob appended."""
-    if not context:
-        return base_prompt
-    return (
-        f"{base_prompt}\n\n<user_context>\n{context}\n</user_context>\n"
-        "The user_context block is a snapshot taken just before this "
-        "conversation turn — use it for orientation, but still call tools "
-        "for any number you present as current."
-    )
+def compose_chat_system_prompt(
+    base_prompt: str, context: str, profile_block: str = ""
+) -> str:
+    """The chat system prompt with the user-context blob and the investor
+    profile appended. Both are per-user, so they go at the very end — the
+    shared static prefix stays cacheable."""
+    composed = base_prompt
+    if context:
+        composed = (
+            f"{composed}\n\n<user_context>\n{context}\n</user_context>\n"
+            "The user_context block is a snapshot taken just before this "
+            "conversation turn — use it for orientation, but still call tools "
+            "for any number you present as current."
+        )
+    if profile_block:
+        composed = f"{composed}\n{profile_block}"
+    return composed

@@ -253,6 +253,102 @@ async def risk_analytics_payload(ctx: Any) -> dict[str, Any]:
     }
 
 
+# --------------------------------------------------------------------------
+# Onboarding risk-comfort picker: the user's real portfolio projected at three
+# volatility levels (defensive / current / aggressive)
+# --------------------------------------------------------------------------
+
+# Scaling the covariance by k² scales portfolio volatility by exactly k, and
+# simulate_portfolio's Itô term reads diag(cov), so the GBM stays
+# self-consistent. Deliberately NO alternative weights — reallocations during
+# onboarding would read as advice; this shows the same book at three vol levels.
+_POSTURE_K = {"defensive": 0.6, "current": 1.0, "aggressive": 1.5}
+# Canned annualized vols for the illustrative fallback when the portfolio
+# can't be analyzed yet (one holding, thin history).
+_FALLBACK_VOL = {"defensive": 0.08, "current": 0.16, "aggressive": 0.28}
+
+
+def _posture_block(mc, total_mv: float | None, ann_vol: float) -> dict[str, Any]:
+    def _band(p: int) -> list[float]:
+        series = mc.fan[p]
+        sampled = series[:: _FAN_STRIDE] + [series[-1]]
+        return [round((v - 1.0) * 100, 2) for v in sampled]
+
+    terminal = {
+        f"p{p}": round((mc.terminal_percentiles[p] - 1.0) * 100, 2) for p in (5, 50, 95)
+    }
+    block: dict[str, Any] = {
+        "annualized_vol_pct": round(ann_vol * 100, 2),
+        "probability_of_loss_pct": round(mc.prob_loss * 100, 2),
+        "horizon_days": mc.horizon_days,
+        "simulations": mc.n_sims,
+        "bands_pct": {f"p{p}": _band(p) for p in (5, 25, 50, 75, 95)},
+        "terminal_pct": terminal,
+    }
+    if total_mv:
+        block["terminal_cad"] = {
+            f"p{p}": round(mc.terminal_percentiles[p] * total_mv, 2) for p in (5, 50, 95)
+        }
+    return block
+
+
+def _fallback_projections() -> dict[str, Any]:
+    """Illustrative constant-vol fans (same payload shape) so the onboarding
+    step never dead-ends when the real portfolio isn't analyzable yet."""
+    postures = {}
+    for name, ann_vol in _FALLBACK_VOL.items():
+        daily_var = (ann_vol**2) / qsimulate.TRADING_DAYS
+        mc = qsimulate.simulate_portfolio(
+            np.array([[daily_var]]),
+            np.array([1.0]),
+            horizon_days=_MC_HORIZON_DAYS,
+            n_sims=5000,
+        )
+        postures[name] = _posture_block(mc, None, ann_vol)
+    return postures
+
+
+async def risk_posture_projections(ctx: Any) -> dict[str, Any]:
+    """Monte Carlo fans of the user's actual portfolio under three risk
+    postures, for the onboarding "pick your risk comfort" step. Ungated
+    (unlike the Pro Risk Lab): pure numpy on cached prices, no LLM cost."""
+    try:
+        loaded = await _load_portfolio_returns({}, ctx, with_benchmark=False)
+    except RuntimeError:
+        loaded = _Loaded(None, np.empty(0), {}, [], note="No database access.")
+    if loaded.note:
+        return {
+            "available": False,
+            "note": loaded.note,
+            "fallback": True,
+            "postures": _fallback_projections(),
+        }
+
+    rm = loaded.rm
+    est = ledoit_wolf(rm.matrix)
+    d = decompose(est.cov, loaded.weights, rm.tickers)
+    total_mv = sum(loaded.mv_by_ticker[t] for t in rm.tickers)
+
+    postures = {}
+    for name, k in _POSTURE_K.items():
+        mc = qsimulate.simulate_portfolio(
+            est.cov * (k**2),
+            loaded.weights,
+            horizon_days=_MC_HORIZON_DAYS,
+            n_sims=5000,
+        )
+        postures[name] = _posture_block(mc, total_mv, d.portfolio_vol * k)
+
+    return {
+        "available": True,
+        "fallback": False,
+        "portfolio_value_cad": round(total_mv, 2),
+        "holdings_analyzed": len(rm.tickers),
+        "postures": postures,
+        "notes": _analytics_notes(loaded, rm.tickers),
+    }
+
+
 def _analytics_notes(loaded: _Loaded, analyzed: list[str]) -> list[str]:
     notes: list[str] = []
     if loaded.rm is not None and loaded.rm.excluded:

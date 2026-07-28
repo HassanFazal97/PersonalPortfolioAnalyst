@@ -35,6 +35,7 @@ from app.auth.context import set_current_user_id
 from app.config import DEFAULT_USER_ID, get_settings, monthly_cost_cap
 from app.db.repo import Repo
 from app.observability.logging import Observer
+from app.profile import anomaly_severity_multiplier, profile_from_user
 
 _OWNER_USER_ID = uuid.UUID(DEFAULT_USER_ID)
 
@@ -142,6 +143,20 @@ async def synthesize_anomalies_for_user(
         return {"user_id": str(user_id), "status": "no_anomalies", "alerts": []}
 
     flags = [f for t in hit_tickers for f in flags_by_ticker[t]]
+
+    # Per-user severity floor: the global scan already gated at
+    # anomaly_min_severity; long-horizon profiles raise their own bar so only
+    # stronger anomalies interrupt them. Detector calibration stays global.
+    user = await db.get_user(user_id)
+    per_user_floor = settings.anomaly_min_severity * anomaly_severity_multiplier(
+        profile_from_user(user)
+    )
+    if per_user_floor > settings.anomaly_min_severity:
+        flags = [f for f in flags if f.severity >= per_user_floor]
+        if not flags:
+            return {"user_id": str(user_id), "status": "no_anomalies", "alerts": []}
+        hit_tickers = sorted({f.ticker for f in flags})
+
     best = synthesis.best_flag_per_ticker(flags)
     combined = synthesis.noisy_or(f.severity for f in best.values())
 

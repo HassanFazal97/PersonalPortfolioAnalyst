@@ -35,6 +35,14 @@ from app.plans import (
     trial_decision_pending,
     user_plan_and_tz,
 )
+from app.profile import (
+    digest_window_days,
+    mover_threshold_multiplier,
+    news_min_salience,
+    plan_profile_suffix,
+    profile_from_user,
+    synthesize_profile_suffix,
+)
 from app.tools import market, news, portfolio
 from app.tools.registry import CHAT_TOOLS, ToolContext
 
@@ -89,8 +97,13 @@ async def build_market_context(
     tz: str,
     plan: str,
     digest_tickers: list[str],
+    window_days: int = 7,
 ) -> str:
-    """Assemble positions + day/week moves + yesterday's digest + today's date."""
+    """Assemble positions + day/window moves + yesterday's digest + today's date.
+
+    ``window_days`` is the investor-profile lookback (app/profile.py::
+    digest_window_days): a day trader's context compares against the last two
+    days, a long-term investor's against the last month."""
     today = datetime.now(ZoneInfo(tz)).date()
     yesterday = today - timedelta(days=1)
     settings = ctx.settings
@@ -105,14 +118,16 @@ async def build_market_context(
     )
     cap = max_digest_holdings(plan, settings)
 
-    week_moves: dict[str, Any] = {}
+    period_moves: dict[str, Any] = {}
     for pos in positions:
         ticker = pos["ticker"]
         try:
-            hist = await market.get_price_history({"ticker": ticker, "days": 7}, ctx)
-            week_moves[ticker] = hist.get("period_return_pct")
+            hist = await market.get_price_history(
+                {"ticker": ticker, "days": window_days}, ctx
+            )
+            period_moves[ticker] = hist.get("period_return_pct")
         except Exception:  # noqa: BLE001 - best effort
-            week_moves[ticker] = None
+            period_moves[ticker] = None
 
     yesterday_digest = await ctx.repo.get_digest(
         yesterday, user_id=getattr(ctx, "user_id", None)
@@ -122,7 +137,8 @@ async def build_market_context(
         "today": today.isoformat(),
         "positions": positions,
         "totals": pf.get("totals", {}),
-        "week_return_pct_by_ticker": week_moves,
+        "period_days": window_days,
+        "period_return_pct_by_ticker": period_moves,
         "yesterday_digest": yesterday_digest.body if yesterday_digest else None,
     }
     if cap is not None and len(all_positions) > cap:
@@ -143,16 +159,17 @@ def _signed_pct(v: Any) -> str:
     return f"{float(v):+.1f}%"
 
 
-def _holding_stats_line(pos: dict[str, Any], week_ret: Any) -> str:
+def _holding_stats_line(pos: dict[str, Any], week_ret: Any, period_label: str = "wk") -> str:
     """One preformatted stats line the synthesizer copies verbatim, e.g.
-    ``NVDA  $172.40  -2.1% today  -1.2% wk  +$4,120 (+18%)``."""
+    ``NVDA  $172.40  -2.1% today  -1.2% wk  +$4,120 (+18%)``. The period label
+    tracks the profile's lookback window ("wk" for the default 7 days)."""
     price = pos.get("last_price")
     price_s = f"${float(price):,.2f}" if price is not None else "n/a"
     parts = [
         pos["ticker"],
         price_s,
         f"{_signed_pct(pos.get('day_change_pct'))} today",
-        f"{_signed_pct(week_ret)} wk",
+        f"{_signed_pct(week_ret)} {period_label}",
     ]
     pnl = pos.get("unrealized_pnl")
     if pnl is not None:
@@ -245,16 +262,24 @@ def build_holdings_scaffold(
     *,
     news_tickers: set[str],
     settings: Settings,
+    mover_threshold: float | None = None,
+    period_days: int = 7,
 ) -> str | None:
     """Precompute the per-holding breakdown the Pro synthesizer renders.
 
     Every figure is computed here so the model only copies stats and adds one
     grounded sentence per detailed name. Returns None when there are no
-    positions."""
+    positions. ``mover_threshold`` overrides the global threshold with the
+    investor-profile-scaled one (traders detail smaller moves)."""
     if not positions:
         return None
     positions = _aggregate_by_ticker(positions)
-    threshold = settings.digest_mover_threshold_pct
+    threshold = (
+        mover_threshold
+        if mover_threshold is not None
+        else settings.digest_mover_threshold_pct
+    )
+    period_label = "wk" if period_days == 7 else f"{period_days}d"
     detailed: list[tuple[dict[str, Any], Any]] = []
     quiet: list[tuple[dict[str, Any], Any]] = []
     for pos in positions:
@@ -270,7 +295,9 @@ def build_holdings_scaffold(
 
     lines = ["HOLDINGS SCAFFOLD (copy stats verbatim; do not recompute):", "", "DETAILED:"]
     if detailed:
-        lines.extend(_holding_stats_line(pos, wk) for pos, wk in detailed)
+        lines.extend(
+            _holding_stats_line(pos, wk, period_label) for pos, wk in detailed
+        )
     else:
         lines.append("(no holding moved materially and none have news today)")
     lines.append("")
@@ -389,9 +416,18 @@ async def run_digest_pipeline(
     )
 
     try:
+        # Investor profile: tunes the lookback window, the mover threshold,
+        # the planner's priorities, and the synthesizer's framing. The default
+        # (un-profiled) profile reproduces pre-profile behavior.
+        profile = profile_from_user(user)
+
         digest_tickers = await db.get_digest_tickers(uid)
         market_context = await build_market_context(
-            ctx, tz=tz, plan=plan, digest_tickers=digest_tickers
+            ctx,
+            tz=tz,
+            plan=plan,
+            digest_tickers=digest_tickers,
+            window_days=digest_window_days(profile),
         )
 
         investigations = await planner.plan(
@@ -400,13 +436,20 @@ async def run_digest_pipeline(
             observer=observer,
             budget=budget,
             market_context=market_context,
+            system_suffix=plan_profile_suffix(profile),
         )
 
         ctx_data = json.loads(market_context)
         tickers = [p["ticker"] for p in ctx_data.get("positions", [])]
         await news.prefetch_news_for_tickers(tickers)
         await _persist_prefetched_news(
-            db, uid, anchor_run_id, tickers, client=client, budget=budget
+            db,
+            uid,
+            anchor_run_id,
+            tickers,
+            client=client,
+            budget=budget,
+            min_salience=news_min_salience(profile, settings.news_min_salience),
         )
 
         since = datetime(
@@ -423,9 +466,12 @@ async def run_digest_pipeline(
         if max_digest_holdings(plan, settings) is None:
             holdings_scaffold = build_holdings_scaffold(
                 ctx_data.get("positions", []),
-                ctx_data.get("week_return_pct_by_ticker", {}),
+                ctx_data.get("period_return_pct_by_ticker", {}),
                 news_tickers=news_tickers,
                 settings=settings,
+                mover_threshold=settings.digest_mover_threshold_pct
+                * mover_threshold_multiplier(profile),
+                period_days=ctx_data.get("period_days", 7),
             )
 
         # Watched-not-held tickers: a deterministic WATCHLIST section appended
@@ -469,6 +515,7 @@ async def run_digest_pipeline(
             findings_text=_findings_text(results, market_context),
             iteration_start=2,
             holdings_scaffold=holdings_scaffold,
+            system_suffix=synthesize_profile_suffix(profile),
         )
 
         await db.finalize_run(
@@ -521,6 +568,7 @@ async def _persist_prefetched_news(
     *,
     client: Any = None,
     budget: Budget | None = None,
+    min_salience: float | None = None,
 ) -> None:
     """Store the important prefetched articles for the dashboard feed.
 
@@ -530,7 +578,13 @@ async def _persist_prefetched_news(
     from app.agent.news_refresh import persist_important_news
 
     await persist_important_news(
-        db, user_id, tickers, client=client, run_id=run_id, budget=budget
+        db,
+        user_id,
+        tickers,
+        client=client,
+        run_id=run_id,
+        budget=budget,
+        min_salience=min_salience,
     )
 
 

@@ -45,6 +45,7 @@ from app.config import get_settings, monthly_cost_cap
 from app.db.repo import Repo
 from app.observability.logging import Observer
 from app.plans import user_plan_and_tz
+from app.profile import build_profile_context, profile_from_user
 from app.tools.registry import ToolContext
 
 REPORT_SCHEMA_VERSION = 1
@@ -291,8 +292,17 @@ async def run_deep_dive(
         market_context = await build_market_context(
             ctx, tz=tz, plan=plan, digest_tickers=[]
         )
+        # Investor profile: tilts the research questions and the report's
+        # framing to the user's horizon; specialists stay generic (they answer
+        # whatever the plan asks).
+        profile_block = build_profile_context(profile_from_user(user))
         questions = await _plan_questions(
-            client, settings.model, observer, budget, market_context
+            client,
+            settings.model,
+            observer,
+            budget,
+            market_context,
+            profile_block=profile_block,
         )
         await progress.stage("plan", "completed")
 
@@ -357,6 +367,7 @@ async def run_deep_dive(
             observer,
             budget,
             _findings_blob(market_context, findings, checks, failed),
+            profile_block=profile_block,
         )
         report["schema_version"] = REPORT_SCHEMA_VERSION
         report["as_of"] = date.today().isoformat()
@@ -379,13 +390,20 @@ async def run_deep_dive(
 
 
 async def _plan_questions(
-    client: Any, model: str, observer: Observer, budget: Budget, market_context: str
+    client: Any,
+    model: str,
+    observer: Observer,
+    budget: Budget,
+    market_context: str,
+    *,
+    profile_block: str = "",
 ) -> dict[str, list[str]]:
+    system_prompt = DEEP_DIVE_PLAN_PROMPT + profile_block
     messages = [{"role": "user", "content": market_context}]
     content, _ = await call_and_log(
         client,
         model=model,
-        system_prompt=DEEP_DIVE_PLAN_PROMPT,
+        system_prompt=system_prompt,
         messages=messages,
         tools=None,
         observer=observer,
@@ -400,7 +418,7 @@ async def _plan_questions(
     content, _ = await call_and_log(
         client,
         model=model,
-        system_prompt=DEEP_DIVE_PLAN_PROMPT,
+        system_prompt=system_prompt,
         messages=messages,
         tools=None,
         observer=observer,
@@ -516,13 +534,20 @@ async def _run_critic(
 
 
 async def _synthesize(
-    client: Any, model: str, observer: Observer, budget: Budget, blob: str
+    client: Any,
+    model: str,
+    observer: Observer,
+    budget: Budget,
+    blob: str,
+    *,
+    profile_block: str = "",
 ) -> dict[str, Any]:
+    system_prompt = DEEP_DIVE_SYNTHESIS_PROMPT + profile_block
     messages = [{"role": "user", "content": blob}]
     content, stop_reason = await call_and_log(
         client,
         model=model,
-        system_prompt=DEEP_DIVE_SYNTHESIS_PROMPT,
+        system_prompt=system_prompt,
         messages=messages,
         tools=None,
         observer=observer,
@@ -545,7 +570,7 @@ async def _synthesize(
     content, _ = await call_and_log(
         client,
         model=model,
-        system_prompt=DEEP_DIVE_SYNTHESIS_PROMPT,
+        system_prompt=system_prompt,
         messages=messages,
         tools=None,
         observer=observer,

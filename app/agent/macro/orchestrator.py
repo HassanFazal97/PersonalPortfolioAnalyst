@@ -34,6 +34,7 @@ from app.config import DEFAULT_USER_ID, get_settings, monthly_cost_cap
 from app.db.repo import Repo
 from app.observability.logging import Observer
 from app.plans import effective_plan
+from app.profile import profile_from_user
 from app.tools import portfolio
 from app.tools.registry import ToolContext
 
@@ -189,7 +190,24 @@ async def synthesize_for_user(
         alerts: list[dict[str, Any]] = []
         if tickers and events:
             budget.start_iteration()
-            context = json.dumps({"holdings": tickers, "findings": events}, default=str)
+            # The investor profile weights alert-worthiness (a day trader
+            # cares about a rate surprise today; a preservation-minded user
+            # about anything threatening income/capital).
+            user = await db.get_user(user_id)
+            profile = profile_from_user(user)
+            context = json.dumps(
+                {
+                    "holdings": tickers,
+                    "findings": events,
+                    "investor_profile": {
+                        "archetype": profile.archetype,
+                        "risk_tolerance": profile.risk_tolerance,
+                        "horizon": profile.horizon,
+                        "goals": list(profile.goals),
+                    },
+                },
+                default=str,
+            )
             content, _ = await call_and_log(
                 client,
                 model=settings.classifier_model,

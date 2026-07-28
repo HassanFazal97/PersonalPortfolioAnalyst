@@ -60,12 +60,16 @@ async def plan(
     observer: Observer,
     budget: Any,
     market_context: str,
+    system_suffix: str = "",
 ) -> list[dict[str, str]]:
+    """``system_suffix`` carries the investor-profile prioritization override
+    (app/profile.py::plan_profile_suffix); empty for the default profile."""
+    system_prompt = PLAN_SYSTEM_PROMPT + system_suffix
     messages = [{"role": "user", "content": market_context}]
     content, _ = await call_and_log(
         client,
         model=model,
-        system_prompt=PLAN_SYSTEM_PROMPT,
+        system_prompt=system_prompt,
         messages=messages,
         tools=None,
         observer=observer,
@@ -83,7 +87,7 @@ async def plan(
     content, _ = await call_and_log(
         client,
         model=model,
-        system_prompt=PLAN_SYSTEM_PROMPT,
+        system_prompt=system_prompt,
         messages=messages,
         tools=None,
         observer=observer,

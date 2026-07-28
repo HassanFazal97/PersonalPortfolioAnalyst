@@ -25,6 +25,7 @@ from app.db.repo import Repo
 from app.memory import ingest as memory_ingest
 from app.memory.embeddings import memory_enabled
 from app.plans import max_digest_holdings, max_watchlist, user_plan_and_tz
+from app.profile import news_min_salience, profile_from_user
 from app.tools import news
 from app.tools.classify import classify_news
 
@@ -83,13 +84,20 @@ async def persist_important_news(
     client: Any = None,
     run_id: uuid.UUID | None = None,
     budget: Budget | None = None,
+    min_salience: float | None = None,
 ) -> int:
     """Classify the cached articles per ticker and store the important ones.
 
     Reads ``news.get_cached_news_for_ticker`` with its default lookback, which
     must match the ``prefetch_news_for_tickers`` defaults or the cache misses.
+    ``min_salience`` overrides the global salience floor with the investor-
+    profile-scaled one (classification itself stays shared across users —
+    the profile only changes SELECTION, never the cached classify call).
     """
     settings = get_settings()
+    floor = (
+        min_salience if min_salience is not None else settings.news_min_salience
+    )
     items: list[dict[str, Any]] = []
     for ticker in tickers:
         articles = news.get_cached_news_for_ticker(ticker)
@@ -106,7 +114,7 @@ async def persist_important_news(
             articles = await classify_news(articles, ctx)
         kept = select_important(
             articles,
-            min_salience=settings.news_min_salience,
+            min_salience=floor,
             cap=settings.news_max_per_ticker,
         )
         items.extend({**a, "ticker": ticker} for a in kept)
@@ -190,7 +198,14 @@ async def refresh_news_for_user(
             model=settings.classifier_model,
         )
         inserted = await persist_important_news(
-            db, uid, tickers, client=_get_client(client), budget=budget
+            db,
+            uid,
+            tickers,
+            client=_get_client(client),
+            budget=budget,
+            min_salience=news_min_salience(
+                profile_from_user(user), settings.news_min_salience
+            ),
         )
     finally:
         set_current_user_id(None)

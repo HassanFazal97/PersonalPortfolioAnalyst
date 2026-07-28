@@ -39,13 +39,18 @@ async def synthesize_and_send(
     findings_text: str,
     iteration_start: int,
     holdings_scaffold: str | None = None,
+    system_suffix: str = "",
 ) -> str:
+    """``system_suffix`` carries the investor-profile framing block; it only
+    shifts tone/emphasis — the format contract (sections, length caps) is
+    restated as unchanged inside the suffix itself."""
     settings = ctx.settings
     system_prompt = SYNTHESIZE_SYSTEM_PROMPT
     user_content = findings_text
     if holdings_scaffold:
         system_prompt += SYNTHESIZE_HOLDINGS_SUFFIX
         user_content = f"{findings_text}\n\n{holdings_scaffold}"
+    system_prompt += system_suffix
     messages = [{"role": "user", "content": user_content}]
     iteration = iteration_start
 
