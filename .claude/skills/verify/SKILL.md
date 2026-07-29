@@ -9,9 +9,14 @@ description: Launch and drive the Cirvia FastAPI app locally to verify changes e
 
 ```bash
 DIGEST_CRON="59 23 31 12 *" NEWS_REFRESH_CRON="" ANOMALY_SCAN_CRON="" \
-FUNDAMENTALS_REFRESH_CRON="" MACRO_SCAN_INTERVAL_MINUTES=0 DELIVERY_INTERVAL_SECONDS=0 \
-.venv/bin/uvicorn app.main:app --port 8399 --log-level warning
+FUNDAMENTALS_REFRESH_CRON="" DAILY_PRICES_CRON="" PICKS_SYNC_CRON="" PICKS_CRON="" \
+MACRO_SCAN_INTERVAL_MINUTES=0 DELIVERY_INTERVAL_SECONDS=0 \
+.venv/bin/python -m uvicorn app.main:app --port 8399 --log-level warning
 ```
+
+Always `.venv/bin/python -m uvicorn`, never `.venv/bin/uvicorn` — the venv
+carries both 3.12 and 3.13 trees and the uvicorn entry script's shebang points
+at 3.12, where nothing is installed (same reason as `python -m pytest`).
 
 Gotchas, in order of how much they hurt:
 

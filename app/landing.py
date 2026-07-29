@@ -15,21 +15,48 @@ from app.config import get_settings
 CONTACT_EMAIL = "fazalhassan@live.ca"
 LAST_UPDATED = "July 5, 2026"
 
-# Brand mark: rounded violet tile with a bold geometric "C" (flat terminals,
-# echoing Schibsted Grotesk). Inlined as a data URI so the tab icon needs no
-# static file; the PNG fallbacks in app/static/ cover Apple touch + OG cards.
+# Brand mark: a stylized dahlia — one petal path rotated into three layered
+# rings in the orchid-to-plum range, with the flower's yellow-green core kept
+# as the signature detail. Emitted as plain paths (no <use>/ids) so the same
+# markup can repeat safely within a page and inside CSS data URIs.
+_PETAL = "M0 -104C18 -88 21 -52 0 -18C-21 -52 -18 -88 0 -104Z"
+
+
+def _dahlia_ring(fill: str, transform: str = "") -> str:
+    tf = f" transform='{transform}'" if transform else ""
+    petals = "".join(
+        f"<path d='{_PETAL}' transform='rotate({a})'/>" for a in range(0, 360, 30)
+    )
+    return f"<g fill='{fill}'{tf}>{petals}</g>"
+
+
+_DAHLIA_BODY = (
+    _dahlia_ring("#DCA4EE")
+    + _dahlia_ring("#C776E6", "rotate(15) scale(0.74)")
+    + _dahlia_ring("#AC4BD5", "scale(0.5)")
+    + "<circle r='20' fill='#6B2593'/><circle r='7' fill='#E3EA6B'/>"
+)
+
+# Standalone mark (needs xmlns: used as a CSS data URI and for PNG renders).
+LOGO_MARK_SVG = (
+    "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 240 240'>"
+    f"<g transform='translate(120 120)'>{_DAHLIA_BODY}</g></svg>"
+)
+
+# Tab icon: the dahlia on a rounded deep-aubergine tile (reads better at 16px
+# than petals on transparency). PNG fallbacks in app/static/ cover Apple
+# touch + OG cards.
 _FAVICON_SVG = (
-    "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'>"
-    "<rect width='64' height='64' rx='14' fill='#683eb6'/>"
-    "<path d='M44.3 42.3A16 16 0 1 1 44.3 21.7' fill='none' stroke='#fff' stroke-width='10'/>"
-    "</svg>"
+    "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 240 240'>"
+    "<rect width='240' height='240' rx='56' fill='#2E123F'/>"
+    f"<g transform='translate(120 120) scale(0.8)'>{_DAHLIA_BODY}</g></svg>"
 )
 
 # Shared by the marketing layout and the app pages (app/webapp.py).
 ICON_LINKS = (
     f'<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,{quote(_FAVICON_SVG)}">\n'
     '<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">\n'
-    '<meta name="theme-color" content="#08060c">\n'
+    '<meta name="theme-color" content="#f7f4fa">\n'
 )
 
 
@@ -39,38 +66,41 @@ def _public_base_url() -> str:
 
 _CSS = """
 :root {
-  --bg: oklch(13% 0.014 300);
-  --surface-1: oklch(17% 0.016 300);
-  --surface-2: oklch(20% 0.018 300);
-  --surface-3: oklch(24% 0.02 300);
-  --line: oklch(27% 0.018 300);
-  --line-strong: oklch(35% 0.022 300);
-  --ink: oklch(94% 0.008 300);
-  --ink-2: oklch(79% 0.02 300);
-  --ink-3: oklch(66% 0.024 300);
-  --accent: oklch(48% 0.18 295);
-  --accent-hover: oklch(55% 0.18 295);
-  --accent-text: oklch(76% 0.12 295);
-  --accent-deep: oklch(30% 0.1 295);
-  --gain: oklch(76% 0.13 155);
-  --loss: oklch(72% 0.14 25);
-  --warn: oklch(80% 0.11 85);
+  color-scheme: light;
+  --bg: oklch(97.5% 0.01 305);          /* warm lavender-tinted off-white canvas */
+  --surface-1: oklch(99.2% 0.004 305);  /* cards: near-white, lifts off the tinted canvas */
+  --surface-2: oklch(95.2% 0.012 305);  /* inputs, chips, hover fills (inset: darker than cards) */
+  --surface-3: oklch(92.5% 0.018 305);  /* tooltips, tracks, user chat bubbles */
+  --line: oklch(90% 0.018 305);
+  --line-strong: oklch(82% 0.026 305);
+  --ink: oklch(25% 0.035 300);
+  --ink-2: oklch(37% 0.03 300);
+  --ink-3: oklch(48% 0.03 300);         /* muted; ~5:1 on bg — going lighter fails AA */
+  --accent: oklch(52% 0.16 295);        /* lavender fill; white text on it stays AA */
+  --accent-hover: oklch(45% 0.16 295);  /* hovers darken on a light canvas */
+  --accent-text: oklch(46% 0.15 295);
+  --accent-deep: oklch(93% 0.045 295);  /* pale lavender fill, paired with --accent-text */
+  --accent-wash: oklch(95% 0.035 300);  /* selected-chip / bot-bubble tint */
+  --gain: oklch(50% 0.11 155);
+  --loss: oklch(50% 0.15 25);
+  --warn: oklch(54% 0.12 75);
+  --shadow: oklch(35% 0.05 300);        /* shadow ink, always used at low alpha */
   --r-s: 8px; --r-m: 12px; --r-l: 18px;
   --maxw: 1060px;
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
-  --font: "Schibsted Grotesk", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font: "Libre Baskerville", Georgia, "Times New Roman", serif;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
 html, body { overflow-x: clip; }
 body {
   font-family: var(--font);
-  /* atmospheric violet aurora at the top, fading into the near-black canvas */
+  /* soft pastel aurora at the top, fading into the off-white canvas */
   background:
-    radial-gradient(1200px 600px at 50% -120px, oklch(44% 0.15 295 / 0.55), transparent 70%),
-    radial-gradient(800px 480px at 16% -60px, oklch(38% 0.12 265 / 0.35), transparent 70%),
-    radial-gradient(900px 500px at 84% -80px, oklch(36% 0.13 315 / 0.3), transparent 70%),
-    radial-gradient(1800px 950px at 50% -220px, oklch(27% 0.08 300 / 0.75), transparent 80%),
+    radial-gradient(1200px 600px at 50% -120px, oklch(90% 0.055 295 / 0.8), transparent 70%),
+    radial-gradient(800px 480px at 16% -60px, oklch(92% 0.045 265 / 0.55), transparent 70%),
+    radial-gradient(900px 500px at 84% -80px, oklch(92% 0.05 335 / 0.5), transparent 70%),
+    radial-gradient(1800px 950px at 50% -220px, oklch(95% 0.025 300 / 0.8), transparent 80%),
     var(--bg);
   background-repeat: no-repeat;
   color: var(--ink-2);
@@ -90,7 +120,7 @@ nav {
   transition: background 0.3s var(--ease), border-color 0.3s var(--ease);
 }
 nav.scrolled {
-  background: oklch(13% 0.014 300 / 0.82); backdrop-filter: blur(12px);
+  background: oklch(97.5% 0.01 305 / 0.85); backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border-bottom-color: var(--line);
 }
@@ -103,6 +133,9 @@ nav.scrolled {
 .nav-links { display: flex; align-items: center; gap: 1.4rem; font-size: 0.92rem; font-weight: 500; }
 .nav-links a { color: var(--ink-3); }
 .nav-links a:hover, .nav-links a.active { color: var(--ink); text-decoration: none; }
+/* the CTA is a .btn inside .nav-links; keep its text white over the accent
+   fill (the .nav-links a rules above out-specify .btn's own color) */
+.nav-links a.btn, .nav-links a.btn:hover { color: #fff; }
 /* phone menu toggle: two bars that rotate into an X; hidden above 660px */
 .nav-toggle { display: none; background: none; border: 0; cursor: pointer;
   padding: 0.7rem; margin: -0.35rem -0.45rem -0.35rem 0; }
@@ -119,12 +152,12 @@ nav.menu-open .nav-toggle span:last-child { transform: translateY(-3.5px) rotate
   /* the bar is transparent until scrolled; an open menu needs an opaque
      backdrop (blur alone can't be relied on) so the hero never bleeds through */
   nav.menu-open {
-    background: oklch(13% 0.014 300); border-bottom-color: var(--line); }
+    background: var(--bg); border-bottom-color: var(--line); }
   nav.menu-open .nav-menu { display: flex; flex-direction: column;
     position: absolute; top: 100%; left: 0; right: 0;
     padding: 0.25rem 1.5rem 0.9rem;
-    background: oklch(13% 0.014 300); border-bottom: 1px solid var(--line);
-    box-shadow: 0 18px 32px -18px oklch(0% 0 0 / 0.6); }
+    background: var(--bg); border-bottom: 1px solid var(--line);
+    box-shadow: 0 18px 32px -18px oklch(35% 0.05 300 / 0.25); }
   .nav-menu a { padding: 0.85rem 0; font-weight: 600; color: var(--ink-2);
     border-bottom: 1px solid var(--line); }
   .nav-menu a:last-child { border-bottom: none; }
@@ -169,6 +202,8 @@ h1 {
   min-height: clamp(420px, 46vw, 560px); overflow: visible;
 }
 .hero-stars {
+  /* star specks read as dust on the light canvas — retired with the pastel theme */
+  display: none;
   position: absolute; inset: 0; pointer-events: none; opacity: 0.45;
   background-image:
     radial-gradient(1px 1px at 12% 22%, oklch(88% 0.02 300 / 0.5), transparent),
@@ -182,9 +217,9 @@ h1 {
   position: absolute; left: 50%; bottom: -10%; width: min(880px, 96vw);
   height: min(480px, 52vh); transform: translateX(-50%); pointer-events: none;
   background:
-    radial-gradient(ellipse 55% 48% at 50% 58%, oklch(52% 0.2 295 / 0.8), transparent 72%),
-    radial-gradient(ellipse 70% 55% at 42% 62%, oklch(38% 0.14 275 / 0.5), transparent 68%),
-    radial-gradient(ellipse 45% 40% at 58% 48%, oklch(45% 0.16 310 / 0.4), transparent 70%);
+    radial-gradient(ellipse 55% 48% at 50% 58%, oklch(82% 0.1 295 / 0.75), transparent 72%),
+    radial-gradient(ellipse 70% 55% at 42% 62%, oklch(88% 0.07 265 / 0.55), transparent 68%),
+    radial-gradient(ellipse 45% 40% at 58% 48%, oklch(86% 0.08 320 / 0.5), transparent 70%);
   filter: blur(30px);
   animation: orb-breathe 9s ease-in-out infinite alternate;
 }
@@ -201,9 +236,9 @@ h1 {
 .float-card {
   position: absolute; z-index: 2;
   background: var(--surface-1);
-  border: 1px solid oklch(42% 0.05 295 / 0.5); border-radius: var(--r-m);
+  border: 1px solid oklch(78% 0.05 295 / 0.7); border-radius: var(--r-m);
   padding: 0.95rem 1.1rem; font-size: 0.88rem; text-align: left;
-  box-shadow: 0 30px 70px oklch(0% 0 0 / 0.5), 0 4px 16px oklch(0% 0 0 / 0.3);
+  box-shadow: 0 30px 70px oklch(35% 0.05 300 / 0.16), 0 4px 16px oklch(35% 0.05 300 / 0.08);
   animation: floaty 7s ease-in-out infinite alternate;
 }
 .fc-digest { left: 50%; top: 17%; width: min(330px, 80vw); z-index: 3;
@@ -242,7 +277,7 @@ h1 {
   #aurora { bottom: auto; top: -6%; height: clamp(300px, 60vw, 420px); }
   .float-card { position: relative; width: min(100%, 420px); margin: 0.85rem auto 0;
     left: auto !important; right: auto !important; top: auto !important; bottom: auto !important;
-    transform: none !important; animation: none; box-shadow: 0 12px 32px oklch(0% 0 0 / 0.3); }
+    transform: none !important; animation: none; box-shadow: 0 12px 32px oklch(35% 0.05 300 / 0.12); }
   .fc-chat { display: none; }
   .hero-stars { display: none; }
 }
@@ -253,7 +288,7 @@ h1 {
 .bubble { padding: 0.65rem 0.95rem; border-radius: var(--r-m); margin-top: 0.7rem;
   font-size: 0.92rem; line-height: 1.55; max-width: 92%; width: fit-content; }
 .bubble.user { background: var(--surface-3); color: var(--ink); margin-left: auto; }
-.bubble.bot { background: oklch(30% 0.1 295 / 0.4); color: var(--ink-2); }
+.bubble.bot { background: var(--accent-wash); color: var(--ink-2); }
 .bubble.typing { position: absolute; display: inline-flex; gap: 5px; align-items: center;
   padding: 0.85rem 0.95rem; margin: 0; }
 .bubble.typing i { width: 6px; height: 6px; border-radius: 50%; background: var(--ink-3);
@@ -314,9 +349,9 @@ h3 { font-size: 1.05rem; font-weight: 650; margin-bottom: 0.3rem; }
   padding: clamp(4rem, 9vw, 6.5rem) 1.5rem clamp(4.5rem, 10vw, 7rem);
   text-align: center; border-top: 1px solid var(--line);
   background:
-    radial-gradient(1000px 460px at 50% 118%, oklch(46% 0.17 295 / 0.55), transparent 72%),
-    radial-gradient(620px 300px at 32% 125%, oklch(38% 0.13 270 / 0.4), transparent 70%),
-    radial-gradient(620px 300px at 68% 125%, oklch(40% 0.14 315 / 0.35), transparent 70%);
+    radial-gradient(1000px 460px at 50% 118%, oklch(87% 0.075 295 / 0.75), transparent 72%),
+    radial-gradient(620px 300px at 32% 125%, oklch(90% 0.055 265 / 0.55), transparent 70%),
+    radial-gradient(620px 300px at 68% 125%, oklch(90% 0.06 330 / 0.5), transparent 70%);
 }
 .cta-final h2 { font-size: clamp(1.9rem, 4.2vw, 2.7rem); letter-spacing: -0.025em; }
 .cta-final p { color: var(--ink-3); margin: 0.65rem 0 1.8rem; }
@@ -327,11 +362,11 @@ h3 { font-size: 1.05rem; font-weight: 650; margin-bottom: 0.3rem; }
   padding: 1.9rem 1.8rem; display: flex; flex-direction: column;
 }
 .plan.featured {
-  border-color: oklch(48% 0.18 295 / 0.65);
+  border-color: oklch(52% 0.16 295 / 0.5);
   background:
-    radial-gradient(420px 190px at 50% -60px, oklch(48% 0.18 295 / 0.14), transparent 75%),
+    radial-gradient(420px 190px at 50% -60px, oklch(52% 0.16 295 / 0.08), transparent 75%),
     var(--surface-1);
-  box-shadow: 0 20px 50px oklch(0% 0 0 / 0.35);
+  box-shadow: 0 20px 50px oklch(35% 0.06 300 / 0.14);
 }
 .plan-tag { font-size: 0.8rem; font-weight: 700; color: var(--ink-3); }
 .plan.featured .plan-tag { color: var(--accent-text); }
@@ -391,18 +426,29 @@ footer { border-top: 1px solid var(--line); margin-top: 2rem; }
 }
 """
 
+# Dahlia mark ahead of every wordmark: one rule covers the nav, footer, auth
+# pages, and the unsubscribe page (they all share .logo) with no per-site
+# markup. Appended here because the data URI interpolates LOGO_MARK_SVG.
+_CSS += (
+    ".logo::before { content: ''; display: inline-block;"
+    " width: 1.15em; height: 1.15em; margin-right: 0.4em; vertical-align: -0.18em;"
+    f' background: url("data:image/svg+xml,{quote(LOGO_MARK_SVG)}")'
+    " no-repeat center / contain; }\n"
+)
+
 _FONT_LINKS = (
     '<link rel="preconnect" href="https://fonts.googleapis.com">\n'
     '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>\n'
-    '<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:'
-    'ital,wght@0,400..900;1,400..900&display=swap" rel="stylesheet">\n'
+    '<link href="https://fonts.googleapis.com/css2?family=Libre+Baskerville:'
+    'ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">\n'
 )
 
 MOTION_CDN = "https://cdn.jsdelivr.net/npm/motion@12/dist/motion.js"
 
 # Hero aurora: a single-quad WebGL fragment shader (domain-warped fbm noise in
-# the brand violets). Pure progressive enhancement over the CSS .hero-orb base
-# layer: no WebGL, no JS, or reduced motion all fall back to the gradient orb.
+# pastel lavenders — ribbons sit darker than the light canvas, like watercolor).
+# Pure progressive enhancement over the CSS .hero-orb base layer: no WebGL, no
+# JS, or reduced motion all fall back to the gradient orb.
 _SCENE_JS = """
 (function () {
   var c = document.getElementById('aurora');
@@ -438,16 +484,16 @@ _SCENE_JS = """
     '  float glow=exp(-d*d/(w*w*18.));',
     '  float sh=.5+.5*sin(x*(2.6-fi*.3)+fi*1.9-t*1.2+ph*4.);',
     '  float k=core*(.55+.45*sh)*(.25+.75*hill);',
-    '  vec3 rc=mix(vec3(.28,.17,.55),vec3(.66,.52,1.),k);',
+    '  vec3 rc=mix(vec3(.72,.62,.94),vec3(.55,.4,.92),k);',
     '  col+=rc*(k*.95+glow*.22*hill);',
     '  a+=k*.85+glow*.2*hill;',
     ' }',
     ' float base=exp(-dx*dx*1.4)*exp(-(uv.y-.16)*(uv.y-.16)*30.);',
-    ' col+=vec3(.34,.2,.62)*base*.5;',
+    ' col+=vec3(.62,.5,.9)*base*.5;',
     ' a+=base*.4;',
     ' float ex=smoothstep(0.,.16,uv.x)*smoothstep(1.,.84,uv.x);',
     ' float ey=smoothstep(0.,.06,uv.y)*smoothstep(1.,.7,uv.y);',
-    ' a=clamp(a,0.,1.)*ex*ey*.92;',
+    ' a=clamp(a,0.,1.)*ex*ey*.55;',
     ' col=min(col,vec3(1.));',
     ' gl_FragColor=vec4(col*a,a);',
     '}'].join('\\n');

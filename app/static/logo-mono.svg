@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" role="img" aria-label="Cirvia dahlia mark (mono)">
+  <defs>
+    <path id="petal-m" d="M0 -104 C24 -82 28 -46 0 -22 C-28 -46 -24 -82 0 -104 Z"/>
+  </defs>
+  <g transform="translate(120 120)" fill="currentColor">
+    <use href="#petal-m"/>
+    <use href="#petal-m" transform="rotate(45)"/>
+    <use href="#petal-m" transform="rotate(90)"/>
+    <use href="#petal-m" transform="rotate(135)"/>
+    <use href="#petal-m" transform="rotate(180)"/>
+    <use href="#petal-m" transform="rotate(225)"/>
+    <use href="#petal-m" transform="rotate(270)"/>
+    <use href="#petal-m" transform="rotate(315)"/>
+    <circle r="13"/>
+  </g>
+</svg>

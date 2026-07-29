@@ -23,7 +23,7 @@ _APP_CSS = """
 /* app register: fixed rem type scale, quieter headings, denser rhythm */
 /* app nav is always opaque (the marketing nav is transparent until scroll) */
 nav {
-  background: oklch(13% 0.014 300 / 0.9); backdrop-filter: blur(12px);
+  background: oklch(97.5% 0.01 305 / 0.88); backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px); border-bottom: 1px solid var(--line);
 }
 .app-wrap { max-width: 880px; margin: 0 auto; padding: 2.25rem 1.5rem 4rem; }
@@ -41,8 +41,8 @@ nav {
   gap: 2.5rem; margin: 1rem 1rem 1rem 0; padding: 2.25rem 2.25rem 2rem;
   border: 1px solid var(--line); border-radius: var(--r-l); overflow: hidden;
   background:
-    radial-gradient(120% 85% at 50% -25%, oklch(45% 0.16 295 / 0.6), transparent 72%),
-    radial-gradient(70% 55% at 8% 30%, oklch(36% 0.12 265 / 0.35), transparent 70%),
+    radial-gradient(120% 85% at 50% -25%, oklch(88% 0.07 295 / 0.8), transparent 72%),
+    radial-gradient(70% 55% at 8% 30%, oklch(91% 0.05 265 / 0.6), transparent 70%),
     var(--surface-1); }
 .auth-brand h2 { font-size: 1.7rem; font-weight: 750; letter-spacing: -0.02em;
   line-height: 1.25; color: var(--ink); max-width: 22ch; text-wrap: balance; }
@@ -52,12 +52,12 @@ nav {
   max-width: 320px; }
 .auth-step { display: flex; align-items: center; gap: 0.7rem; padding: 0.72rem 0.95rem;
   border-radius: var(--r-m); font-size: 0.9rem; font-weight: 600;
-  background: oklch(15% 0.015 300 / 0.55); color: var(--ink-3); }
+  background: oklch(100% 0 0 / 0.55); color: var(--ink-3); }
 .auth-step .n { width: 22px; height: 22px; border-radius: 50%; flex: none;
   display: grid; place-items: center; font-size: 0.72rem; font-weight: 700;
-  background: oklch(28% 0.02 300); color: var(--ink-2); }
-.auth-step.active { background: var(--ink); color: oklch(15% 0.015 300); }
-.auth-step.active .n { background: oklch(24% 0.02 300); color: #fff; }
+  background: oklch(90% 0.03 300); color: var(--ink-2); }
+.auth-step.active { background: var(--ink); color: oklch(97% 0.01 300); }
+.auth-step.active .n { background: oklch(38% 0.03 300); color: #fff; }
 .brand-note { color: var(--ink-3); font-size: 0.85rem; max-width: 36ch; }
 .auth-form-col { display: flex; align-items: center; justify-content: center;
   padding: 3rem 1.5rem; }
@@ -87,10 +87,10 @@ input:focus, select:focus { border-color: var(--accent-hover); }
 .btn.full { width: 100%; text-align: center; margin-top: 1.25rem; font-size: 0.95rem; }
 .btn[disabled] { opacity: 0.55; cursor: default; transform: none; }
 .switch-mode { text-align: center; margin-top: 1rem; font-size: 0.9rem; color: var(--ink-3); }
-.error-box { background: oklch(72% 0.14 25 / 0.1); border: 1px solid oklch(72% 0.14 25 / 0.4);
+.error-box { background: oklch(50% 0.15 25 / 0.07); border: 1px solid oklch(50% 0.15 25 / 0.35);
   color: var(--loss); border-radius: var(--r-s); padding: 0.7rem 0.9rem; font-size: 0.9rem;
   margin-top: 1rem; display: none; }
-.notice-box { background: oklch(48% 0.18 295 / 0.12); border: 1px solid var(--accent);
+.notice-box { background: oklch(52% 0.16 295 / 0.08); border: 1px solid var(--accent);
   color: var(--ink); border-radius: var(--r-s); padding: 0.7rem 0.9rem; font-size: 0.9rem;
   margin-top: 1rem; display: none; }
 /* onboarding: step rail left, active panel right */
@@ -128,19 +128,79 @@ input:focus, select:focus { border-color: var(--accent-hover); }
 }
 .step-panel h2 { margin-bottom: 0.4rem; }
 .step-panel p { color: var(--ink-2); font-size: 0.95rem; }
-/* investor-profile questions (onboarding step 1) */
-.q-group { margin-top: 1.1rem; }
-.q-group > label { display: block; font-weight: 650; font-size: 0.92rem;
-  margin-bottom: 0.45rem; }
-.q-hint { color: var(--ink-3); font-weight: 400; font-size: 0.82rem; }
-.q-opts { display: flex; flex-wrap: wrap; gap: 0.5rem; }
-.q-opt { padding: 0.5rem 0.8rem; border-radius: var(--r-s);
+/* investor-profile questions: one question per screen (onboarding step 1) */
+.q-head { display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 0.7rem; }
+.q-back { background: none; border: 0; padding: 0.3rem 0.45rem;
+  margin: -0.3rem -0.45rem; color: var(--ink-3); font: inherit;
+  font-size: 0.88rem; cursor: pointer; border-radius: 6px;
+  transition: color 0.15s var(--ease); }
+.q-back:hover { color: var(--ink); }
+.q-count { color: var(--ink-3); font-size: 0.82rem;
+  font-variant-numeric: tabular-nums; }
+.q-track { height: 2px; border-radius: 999px; background: var(--line);
+  overflow: hidden; margin-bottom: 2rem; }
+.q-track-fill { height: 100%; border-radius: 999px;
+  background: var(--accent-text); }
+/* q-screens are <section>s; zero out the marketing-section padding they'd
+   otherwise inherit from the shared landing CSS. */
+.q-screen { padding: 0; }
+.q-title { text-wrap: balance; margin-bottom: 0.4rem; }
+.q-sub { color: var(--ink-3); font-size: 0.92rem; margin-bottom: 1.5rem;
+  max-width: 48ch; }
+.q-stage { min-height: 300px; }
+.q-opts { display: flex; flex-direction: column; gap: 0.55rem;
+  max-width: 560px; }
+.q-opt { display: flex; align-items: center; gap: 0.85rem;
+  padding: 0.78rem 0.95rem; border-radius: var(--r-s);
   border: 1px solid var(--line); background: var(--surface-2); cursor: pointer;
-  font-size: 0.88rem; font-weight: 600; user-select: none;
+  font-size: 0.95rem; font-weight: 600; user-select: none;
   transition: border-color 0.15s var(--ease), background 0.15s var(--ease); }
+.q-opt:hover { background: var(--surface-3); }
+.q-opt:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.q-opt .k { width: 22px; height: 22px; border-radius: 6px; flex: none;
+  display: grid; place-items: center; font-size: 0.72rem; font-weight: 700;
+  color: var(--ink-3); border: 1px solid var(--line-strong);
+  font-variant-numeric: tabular-nums; }
+.q-opt .ck { margin-left: auto; color: var(--accent-text); opacity: 0;
+  transform: scale(0.6);
+  transition: opacity 0.15s var(--ease), transform 0.15s var(--ease); }
 .q-opt.selected { border-color: var(--accent);
-  background: oklch(30% 0.1 295 / 0.35); color: var(--ink); }
-#profile-btn { margin-top: 1.4rem; }
+  background: var(--accent-wash); color: var(--ink); }
+.q-opt.selected .k { color: var(--accent-text); border-color: var(--accent); }
+.q-opt.selected .ck { opacity: 1; transform: scale(1); }
+.q-foot { display: flex; align-items: center; gap: 1.25rem; margin-top: 1.6rem; }
+.q-skip { color: var(--ink-3); font-size: 0.88rem; }
+.q-skip:hover { color: var(--ink); }
+/* re-personalization (?personalize=1): no rail, no card chrome — the active
+   question owns the viewport, vertically centered under a quiet topline. */
+.ob-wrap.personalize { max-width: 780px; display: flex; flex-direction: column;
+  min-height: calc(100dvh - 210px); }
+.personalize #ob-title { font-size: 0.92rem; font-weight: 650;
+  color: var(--ink-3); margin-bottom: 0; }
+.personalize .ob-layout { display: flex; flex-direction: column; flex: 1;
+  align-items: stretch; }
+.personalize .ob-content { flex: 1; display: flex; flex-direction: column;
+  justify-content: center; }
+.personalize .step-panel { background: transparent; border: 0;
+  padding: 2.5rem 0; }
+.personalize .q-track { margin-bottom: 2.6rem; }
+.personalize .q-title { font-size: 1.9rem; font-weight: 700;
+  letter-spacing: -0.02em; }
+.personalize .q-sub { font-size: 1rem; }
+.personalize .q-stage { min-height: 0; }
+.personalize .q-opts { max-width: none; }
+.personalize .q-opt { padding: 0.95rem 1.1rem; font-size: 1rem; }
+.personalize #panel-risk-picker h2 { font-size: 1.7rem;
+  letter-spacing: -0.02em; }
+.personalize .btn.full { width: auto; padding-left: 2.2rem;
+  padding-right: 2.2rem; }
+@media (max-width: 640px) {
+  .personalize .q-title { font-size: 1.5rem; }
+  .personalize .step-panel { padding: 1.25rem 0; }
+  .personalize .q-stage { min-height: 0; }
+  .ob-wrap.personalize { min-height: 0; }
+}
 /* risk-comfort posture cards (onboarding step 4) */
 .posture-cards { display: grid; grid-template-columns: repeat(3, 1fr);
   gap: 0.75rem; margin: 1rem 0; }
@@ -150,15 +210,18 @@ input:focus, select:focus { border-color: var(--accent-hover); }
   background: var(--surface-2); cursor: pointer;
   transition: border-color 0.15s var(--ease), background 0.15s var(--ease); }
 .posture-card.selected { border-color: var(--accent);
-  background: oklch(30% 0.1 295 / 0.25); }
+  background: var(--accent-wash); }
 .posture-card .pc-title { font-weight: 700; font-size: 0.95rem; }
-.posture-card .pc-sub { color: var(--ink-3); font-size: 0.78rem; }
+/* min-height keeps the three fans on one baseline when subtitles wrap to
+   different line counts */
+.posture-card .pc-sub { color: var(--ink-3); font-size: 0.78rem;
+  min-height: 2.6em; }
 .posture-card .pc-fan { margin: 0.4rem 0 0.2rem; }
 .posture-card .pc-range { font-size: 0.82rem; color: var(--ink);
   font-variant-numeric: tabular-nums; }
 .posture-card .pc-stats { font-size: 0.76rem; color: var(--ink-3); }
-.mf-outer { fill: oklch(58% 0.19 295); opacity: 0.14; }
-.mf-inner { fill: oklch(58% 0.19 295); opacity: 0.30; }
+.mf-outer { fill: oklch(52% 0.17 295); opacity: 0.14; }
+.mf-inner { fill: oklch(52% 0.17 295); opacity: 0.30; }
 .mf-median { stroke: var(--accent-text); stroke-width: 2; fill: none;
   stroke-linejoin: round; stroke-linecap: round; }
 .mf-zero { stroke: var(--line-strong); stroke-width: 1; }
@@ -215,7 +278,7 @@ tr:last-child td { border-bottom: none; }
 .chat-msg { padding: 0.6rem 0.9rem; border-radius: var(--r-m); margin: 0.5rem 0;
   font-size: 0.93rem; line-height: 1.55; white-space: pre-wrap; color: var(--ink-2); }
 .chat-msg.user { background: var(--surface-2); margin-left: 2rem; }
-.chat-msg.bot { background: oklch(30% 0.1 295 / 0.35); margin-right: 2rem; }
+.chat-msg.bot { background: var(--accent-wash); margin-right: 2rem; }
 .chat-step { display: flex; align-items: center; gap: 0.45rem; color: var(--ink-3);
   font-size: 0.82rem; margin: 0.15rem 0; }
 .chat-step .st { width: 1em; text-align: center; }
@@ -278,7 +341,7 @@ tr:last-child td { border-bottom: none; }
   font-size: 0.9rem; font-weight: 600; color: var(--ink-2); text-align: center;
   transition: border-color 0.15s var(--ease), background 0.15s var(--ease); }
 .channel-opt.selected { border-color: var(--accent); color: var(--ink);
-  background: oklch(30% 0.1 295 / 0.35); }
+  background: var(--accent-wash); }
 .consent-row { display: flex; gap: 0.6rem; align-items: flex-start; margin-top: 1rem;
   font-size: 0.82rem; color: var(--ink-3); font-weight: 500; cursor: pointer; }
 .consent-row input { margin-top: 0.2rem; }
@@ -287,13 +350,13 @@ tr:last-child td { border-bottom: none; }
 /* broken-connection banner (error-box vocabulary, --warn tinted) */
 .warn-banner { display: flex; align-items: center; justify-content: space-between;
   flex-wrap: wrap; gap: 0.75rem 1rem; padding: 0.85rem 1.1rem;
-  border: 1px solid oklch(80% 0.11 85 / 0.4); background: oklch(80% 0.11 85 / 0.1);
+  border: 1px solid oklch(54% 0.12 75 / 0.4); background: oklch(54% 0.12 75 / 0.08);
   border-radius: var(--r-m); font-size: 0.9rem; color: var(--ink-2); }
 .warn-banner strong { color: var(--warn); font-weight: 650; }
 .warn-banner .actions { display: flex; align-items: center; gap: 0.9rem; }
 /* setup nudge variant: accent-tinted, for onboarding prompts, not errors */
-.warn-banner.setup { border-color: oklch(48% 0.18 295 / 0.45);
-  background: oklch(48% 0.18 295 / 0.12); }
+.warn-banner.setup { border-color: oklch(52% 0.16 295 / 0.45);
+  background: oklch(52% 0.16 295 / 0.08); }
 .warn-banner.setup strong { color: var(--accent-text); }
 /* holdings + news dashboard */
 .holdings-row { cursor: pointer; transition: background 0.15s var(--ease); }
@@ -316,7 +379,7 @@ tr:last-child td { border-bottom: none; }
 .holdings-row:hover td:first-child { background: var(--surface-2); }
 /* scroll affordances only when the table actually overflows */
 #holdings.is-scrollable th:first-child, #holdings.is-scrollable td:first-child {
-  box-shadow: 6px 0 10px -6px oklch(0% 0 0 / 0.55); }
+  box-shadow: 6px 0 10px -6px oklch(35% 0.05 300 / 0.18); }
 #holdings.is-scrollable::after {
   content: ""; position: absolute; top: 0; right: 0; bottom: 0; width: 32px;
   pointer-events: none; background: linear-gradient(to left, var(--surface-1), transparent);
@@ -349,7 +412,7 @@ tr:last-child td { border-bottom: none; }
   font-size: 0.9rem; font-weight: 600; text-align: center;
   transition: border-color 0.15s var(--ease), background 0.15s var(--ease); }
 .watchlist-opt.selected { border-color: var(--accent);
-  background: oklch(30% 0.1 295 / 0.35); color: var(--ink); }
+  background: var(--accent-wash); color: var(--ink); }
 .refresh-row { display: flex; align-items: center; gap: 0.75rem; }
 .updated-at { color: var(--ink-3); font-size: 0.82rem; }
 /* stock detail page */
@@ -405,7 +468,7 @@ tr:last-child td { border-bottom: none; }
 .plan-limits { margin: 0.75rem 0 0; padding-left: 1.15rem; color: var(--ink-2);
   font-size: 0.92rem; }
 .plan-limits li { margin: 0.3rem 0; }
-.danger-card { border-color: oklch(72% 0.14 25 / 0.45); }
+.danger-card { border-color: oklch(50% 0.15 25 / 0.4); }
 .danger-card h3 { color: var(--loss); }
 /* nav stock search: inline input between logo and links, absolute dropdown */
 .nav-search { position: relative; flex: 1; max-width: 300px; margin: 0 1.25rem; }
@@ -418,7 +481,7 @@ tr:last-child td { border-bottom: none; }
 .search-results { position: absolute; top: calc(100% + 6px); left: 0; right: 0;
   background: var(--surface-1); border: 1px solid var(--line-strong);
   border-radius: var(--r-m); overflow: hidden; display: none; z-index: 60;
-  box-shadow: 0 12px 32px oklch(8% 0.01 300 / 0.55); }
+  box-shadow: 0 12px 32px oklch(35% 0.05 300 / 0.16); }
 .search-results.open { display: block; }
 .search-results a { display: flex; align-items: baseline; gap: 0.55rem;
   padding: 0.6rem 0.8rem; text-decoration: none; font-size: 0.88rem;
@@ -1235,44 +1298,62 @@ _ONBOARDING_BODY = """
   </div>
   <div class="ob-content">
 
-  <div class="step-panel" id="panel-profile">
-    <h2>Tell us how you invest</h2>
-    <p>Three quick questions. Your digest, news, and risk analysis will be
-    framed around how you actually invest &mdash; a day trader and a
-    buy-and-hold investor shouldn't read the same brief.</p>
-    <div class="q-group">
-      <label>How long have you been investing?</label>
-      <div class="q-opts" id="q-experience" data-single="1">
-        <div class="q-opt" data-v="new">Just starting</div>
-        <div class="q-opt" data-v="lt_1y">Under a year</div>
-        <div class="q-opt" data-v="1_5y">1&ndash;5 years</div>
-        <div class="q-opt" data-v="5_10y">5&ndash;10 years</div>
-        <div class="q-opt" data-v="10y_plus">10+ years</div>
-      </div>
+  <div class="step-panel q-flow" id="panel-profile">
+    <div class="q-head">
+      <button class="q-back" id="q-back" type="button"
+        style="visibility:hidden;">&larr; Back</button>
+      <span class="q-count" id="q-count">1 of 3</span>
     </div>
-    <div class="q-group">
-      <label>What are you investing for? <span class="q-hint">pick all that apply</span></label>
-      <div class="q-opts" id="q-goals">
-        <div class="q-opt" data-v="grow_long_term">Grow wealth long-term</div>
-        <div class="q-opt" data-v="income">Income from my investments</div>
-        <div class="q-opt" data-v="preserve_capital">Protect what I've built</div>
-        <div class="q-opt" data-v="short_term_gains">Short-term trading gains</div>
-        <div class="q-opt" data-v="retirement">Retirement</div>
-        <div class="q-opt" data-v="big_purchase">A big purchase</div>
-      </div>
+    <div class="q-track" aria-hidden="true">
+      <div class="q-track-fill" id="q-track-fill" style="width:33.34%;"></div>
     </div>
-    <div class="q-group">
-      <label>When do you typically act on an investment?</label>
-      <div class="q-opts" id="q-horizon" data-single="1">
-        <div class="q-opt" data-v="days">Within days</div>
-        <div class="q-opt" data-v="weeks_months">Weeks to months</div>
-        <div class="q-opt" data-v="years">Years</div>
-        <div class="q-opt" data-v="decade_plus">A decade or more</div>
-      </div>
+
+    <div class="q-stage" id="q-stage">
+      <section class="q-screen" id="qs-experience">
+        <h2 class="q-title">How long have you been investing?</h2>
+        <p class="q-sub">Three quick questions so your digest, news, and risk
+        analysis fit how you actually invest.</p>
+        <div class="q-opts" id="q-experience" data-single="1" role="radiogroup"
+          aria-label="How long have you been investing?">
+          <div class="q-opt" data-v="new" role="radio" aria-checked="false" tabindex="0"><span class="k">1</span>Just starting<span class="ck">&#10003;</span></div>
+          <div class="q-opt" data-v="lt_1y" role="radio" aria-checked="false" tabindex="0"><span class="k">2</span>Under a year<span class="ck">&#10003;</span></div>
+          <div class="q-opt" data-v="1_5y" role="radio" aria-checked="false" tabindex="0"><span class="k">3</span>1&ndash;5 years<span class="ck">&#10003;</span></div>
+          <div class="q-opt" data-v="5_10y" role="radio" aria-checked="false" tabindex="0"><span class="k">4</span>5&ndash;10 years<span class="ck">&#10003;</span></div>
+          <div class="q-opt" data-v="10y_plus" role="radio" aria-checked="false" tabindex="0"><span class="k">5</span>10+ years<span class="ck">&#10003;</span></div>
+        </div>
+      </section>
+
+      <section class="q-screen" id="qs-goals" style="display:none;">
+        <h2 class="q-title">What are you investing for?</h2>
+        <p class="q-sub">Pick all that apply.</p>
+        <div class="q-opts" id="q-goals" role="group"
+          aria-label="What are you investing for?">
+          <div class="q-opt" data-v="grow_long_term" role="checkbox" aria-checked="false" tabindex="0"><span class="k">1</span>Grow wealth long-term<span class="ck">&#10003;</span></div>
+          <div class="q-opt" data-v="income" role="checkbox" aria-checked="false" tabindex="0"><span class="k">2</span>Income from my investments<span class="ck">&#10003;</span></div>
+          <div class="q-opt" data-v="preserve_capital" role="checkbox" aria-checked="false" tabindex="0"><span class="k">3</span>Protect what I've built<span class="ck">&#10003;</span></div>
+          <div class="q-opt" data-v="short_term_gains" role="checkbox" aria-checked="false" tabindex="0"><span class="k">4</span>Short-term trading gains<span class="ck">&#10003;</span></div>
+          <div class="q-opt" data-v="retirement" role="checkbox" aria-checked="false" tabindex="0"><span class="k">5</span>Retirement<span class="ck">&#10003;</span></div>
+          <div class="q-opt" data-v="big_purchase" role="checkbox" aria-checked="false" tabindex="0"><span class="k">6</span>A big purchase<span class="ck">&#10003;</span></div>
+        </div>
+      </section>
+
+      <section class="q-screen" id="qs-horizon" style="display:none;">
+        <h2 class="q-title">When do you typically act on an investment?</h2>
+        <p class="q-sub">Your digest and news get framed around this window.</p>
+        <div class="q-opts" id="q-horizon" data-single="1" role="radiogroup"
+          aria-label="When do you typically act on an investment?">
+          <div class="q-opt" data-v="days" role="radio" aria-checked="false" tabindex="0"><span class="k">1</span>Within days<span class="ck">&#10003;</span></div>
+          <div class="q-opt" data-v="weeks_months" role="radio" aria-checked="false" tabindex="0"><span class="k">2</span>Weeks to months<span class="ck">&#10003;</span></div>
+          <div class="q-opt" data-v="years" role="radio" aria-checked="false" tabindex="0"><span class="k">3</span>Years<span class="ck">&#10003;</span></div>
+          <div class="q-opt" data-v="decade_plus" role="radio" aria-checked="false" tabindex="0"><span class="k">4</span>A decade or more<span class="ck">&#10003;</span></div>
+        </div>
+      </section>
     </div>
-    <button class="btn full" id="profile-btn">Continue</button>
-    <p class="muted-note" style="text-align:center;"><a href="#" id="profile-skip">Skip
-    for now</a> &mdash; you can personalize anytime from Settings.</p>
+
+    <div class="q-foot">
+      <button class="btn" id="profile-btn">Continue</button>
+      <a href="#" id="profile-skip" class="q-skip">Skip for now</a>
+    </div>
   </div>
 
   <div class="step-panel" id="panel-connect" style="display:none;">
@@ -1308,7 +1389,7 @@ _ONBOARDING_BODY = """
     <button class="btn full" id="posture-retry-btn" style="display:none;">Try again</button>
     <button class="btn full" id="posture-btn" style="display:none;" disabled>Continue</button>
     <p class="muted-note" style="text-align:center;"><a href="#" id="posture-skip">Skip
-    this step</a> &mdash; not a commitment either way; it only tunes how Cirvia frames risk for you.</p>
+    this step</a> (not a commitment; it only tunes how Cirvia frames risk for you)</p>
   </div>
 
   <div class="step-panel" id="panel-watchlist" style="display:none;">
@@ -1362,6 +1443,9 @@ const PERSONALIZE = new URLSearchParams(window.location.search).get('personalize
 if (PERSONALIZE) {
   document.getElementById('ob-title').textContent = 'Personalize your Cirvia';
   document.querySelector('.ob-rail').style.display = 'none';
+  // Full-page focus mode: the title becomes a quiet topline and the active
+  // question owns the viewport (see .personalize rules in _APP_CSS).
+  document.querySelector('main').classList.add('personalize');
 }
 
 function showPanel(id) {
@@ -1376,10 +1460,15 @@ function showPanel(id) {
   const current = PANELS.indexOf(id) + 1;
   for (let n = 1; n <= PANELS.length; n++) {
     const step = document.getElementById('step-' + n);
+    const wasDone = step.classList.contains('done');
     step.classList.toggle('active', n === current);
     step.classList.toggle('done', n < current);
     const marker = step.querySelector('.n');
     marker.textContent = n < current ? '\\u2713' : String(n);
+    // A step that just completed gets a small tick pulse on its marker.
+    if (!wasDone && n < current && !REDUCED && window.Motion) {
+      Motion.animate(marker, { scale: [1, 1.18, 1] }, { duration: 0.3, ease: EASE });
+    }
   }
 }
 
@@ -1463,6 +1552,7 @@ function buildWatchlistPicker(tickers, limit) {
     grid.appendChild(el);
   }
   wlHint();
+  staggerIn([...grid.children]);
 }
 
 document.getElementById('watchlist-btn').addEventListener('click', async () => {
@@ -1556,26 +1646,130 @@ document.getElementById('connect-btn').addEventListener('click', async () => {
 
 document.getElementById('connected-btn').addEventListener('click', pollStatus);
 
-// --- step 1: investor profile questions --------------------------------------
+// --- step 1: investor profile, one question per screen ------------------------
+// Typeform-style: a single question owns the stage; single-select questions
+// advance on their own, multi-select waits for Continue. Transitions are
+// direction-aware (forward exits up, back exits down) via Motion, and every
+// path degrades to an instant swap for reduced-motion or a failed CDN load.
 
 const obProfile = { experience: null, goals: [], horizon: null };
+const Q_SCREENS = ['qs-experience', 'qs-goals', 'qs-horizon'];
+let qIndex = 0;
+let qBusy = false;
+
+function qChrome() {
+  document.getElementById('q-count').textContent =
+    (qIndex + 1) + ' of ' + Q_SCREENS.length;
+  document.getElementById('q-back').style.visibility =
+    qIndex === 0 ? 'hidden' : 'visible';
+  const fill = document.getElementById('q-track-fill');
+  const w = (((qIndex + 1) / Q_SCREENS.length) * 100).toFixed(2) + '%';
+  if (REDUCED || !window.Motion) fill.style.width = w;
+  else Motion.animate(fill, { width: w }, { duration: 0.35, ease: EASE });
+}
+
+async function qGo(next, dir) {
+  if (qBusy || next === qIndex || next < 0 || next >= Q_SCREENS.length) return;
+  qBusy = true;
+  const from = document.getElementById(Q_SCREENS[qIndex]);
+  const to = document.getElementById(Q_SCREENS[next]);
+  qIndex = next;
+  qChrome();
+  if (REDUCED || !window.Motion) {
+    from.style.display = 'none';
+    to.style.display = 'block';
+    qBusy = false;
+    return;
+  }
+  try {
+    await Motion.animate(from,
+      { opacity: [1, 0], translate: ['0px 0px', '0px ' + (-14 * dir) + 'px'] },
+      { duration: 0.16, ease: EASE });
+  } catch (e) { /* interrupted; swap anyway */ }
+  from.style.display = 'none';
+  from.style.opacity = '';
+  from.style.translate = '';
+  to.style.display = 'block';
+  Motion.animate(to,
+    { opacity: [0, 1], translate: ['0px ' + (18 * dir) + 'px', '0px 0px'] },
+    { duration: 0.26, ease: EASE });
+  Motion.animate(to.querySelectorAll('.q-opt'),
+    { opacity: [0, 1], translate: ['0px 10px', '0px 0px'] },
+    { duration: 0.3, delay: Motion.stagger(0.035, { startDelay: 0.06 }), ease: EASE });
+  qBusy = false;
+}
+
+function qNext() {
+  if (qIndex < Q_SCREENS.length - 1) {
+    qGo(qIndex + 1, 1);
+  } else {
+    readProfileChips();
+    leaveProfilePanel();
+  }
+}
+
+function qPulse(el) {
+  if (REDUCED || !window.Motion) return;
+  Motion.animate(el, { scale: [1, 0.97, 1] }, { duration: 0.2, ease: EASE });
+}
 
 function initChips(id) {
-  const single = document.getElementById(id).dataset.single === '1';
-  document.getElementById(id).querySelectorAll('.q-opt').forEach((el) => {
-    el.addEventListener('click', () => {
+  const group = document.getElementById(id);
+  const single = group.dataset.single === '1';
+  group.querySelectorAll('.q-opt').forEach((el) => {
+    const pick = () => {
       if (single) {
         const was = el.classList.contains('selected');
-        document.getElementById(id).querySelectorAll('.q-opt')
-          .forEach((o) => o.classList.remove('selected'));
-        if (!was) el.classList.add('selected');
+        group.querySelectorAll('.q-opt').forEach((o) => {
+          o.classList.remove('selected');
+          o.setAttribute('aria-checked', 'false');
+        });
+        if (!was) {
+          el.classList.add('selected');
+          el.setAttribute('aria-checked', 'true');
+          qPulse(el);
+          // Let the selection state land before the screen moves on.
+          setTimeout(qNext, 300);
+        }
       } else {
-        el.classList.toggle('selected');
+        const on = el.classList.toggle('selected');
+        el.setAttribute('aria-checked', String(on));
+        if (on) qPulse(el);
       }
+    };
+    el.addEventListener('click', pick);
+    el.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); pick(); }
     });
   });
 }
 ['q-experience', 'q-goals', 'q-horizon'].forEach(initChips);
+
+// Number keys pick an option, Enter advances — active only while the profile
+// step is on screen and focus isn't in a form control.
+document.addEventListener('keydown', (ev) => {
+  if (document.getElementById('panel-profile').style.display === 'none') return;
+  if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+  const tag = (ev.target.tagName || '').toLowerCase();
+  if (tag === 'input' || tag === 'select' || tag === 'textarea') return;
+  const isOpt = ev.target.classList && ev.target.classList.contains('q-opt');
+  if (ev.key === 'Enter' && !isOpt) { ev.preventDefault(); qNext(); return; }
+  const n = parseInt(ev.key, 10);
+  if (!Number.isNaN(n) && n >= 1 && n <= 9) {
+    const opts = document.querySelectorAll(
+      '#' + Q_SCREENS[qIndex].replace('qs-', 'q-') + ' .q-opt');
+    if (opts[n - 1]) opts[n - 1].click();
+  }
+});
+
+// First question's options rise in on load (skipped when a resume/OAuth-return
+// branch below immediately routes to a later panel — the animation ends on a
+// hidden element, which is harmless).
+if (!REDUCED && window.Motion) {
+  Motion.animate(document.querySelectorAll('#qs-experience .q-opt'),
+    { opacity: [0, 1], translate: ['0px 10px', '0px 0px'] },
+    { duration: 0.32, delay: Motion.stagger(0.04, { startDelay: 0.08 }), ease: EASE });
+}
 
 function readProfileChips() {
   const one = (id) => {
@@ -1599,12 +1793,11 @@ async function leaveProfilePanel() {
   showPanel('panel-connect');
 }
 
-document.getElementById('profile-btn').addEventListener('click', () => {
-  readProfileChips();
-  leaveProfilePanel();
-});
+document.getElementById('profile-btn').addEventListener('click', qNext);
+document.getElementById('q-back').addEventListener('click', () => qGo(qIndex - 1, -1));
 document.getElementById('profile-skip').addEventListener('click', (e) => {
   e.preventDefault();
+  readProfileChips();
   leaveProfilePanel();
 });
 
@@ -1652,7 +1845,8 @@ function miniFan(p) {
   }
   svg += '<path d="' + band(b.p95, b.p5) + '" class="mf-outer"></path>';
   svg += '<path d="' + band(b.p75, b.p25) + '" class="mf-inner"></path>';
-  svg += '<path d="' + line(b.p50) + '" class="mf-median"></path>';
+  // pathLength=1 normalizes the dash math so the median can draw in on load.
+  svg += '<path d="' + line(b.p50) + '" class="mf-median" pathLength="1"></path>';
   return svg + '</svg>';
 }
 
@@ -1691,6 +1885,7 @@ function renderPostures(data) {
       chosenPosture = key;
       box.querySelectorAll('.posture-card').forEach((c) => c.classList.remove('selected'));
       card.classList.add('selected');
+      qPulse(card);
       document.getElementById('posture-btn').disabled = false;
     };
     card.addEventListener('click', pick);
@@ -1700,6 +1895,22 @@ function renderPostures(data) {
     box.appendChild(card);
   });
   document.getElementById('posture-btn').style.display = 'block';
+  // The three futures deal themselves out, each median line drawing forward
+  // through its simulated year.
+  if (!REDUCED && window.Motion) {
+    const cards = [...box.querySelectorAll('.posture-card')];
+    Motion.animate(cards,
+      { opacity: [0, 1], translate: ['0px 16px', '0px 0px'] },
+      { duration: 0.32, delay: Motion.stagger(0.08), ease: EASE });
+    cards.forEach((c, i) => {
+      const median = c.querySelector('.mf-median');
+      if (!median) return;
+      median.style.strokeDasharray = '1';
+      Motion.animate(median, { strokeDashoffset: [1, 0] },
+        { duration: 0.8, delay: 0.2 + i * 0.08, ease: EASE });
+    });
+    riseIn(document.getElementById('posture-btn'), 0.3);
+  }
 }
 
 const fmtCadOb = (n) => '$' + Math.round(n).toLocaleString('en-CA');
@@ -1742,7 +1953,17 @@ async function submitProfileAndContinue(posture) {
       });
     } catch (e) { /* non-fatal */ }
   }
-  if (PERSONALIZE) { window.location.href = '/app/dashboard'; return; }
+  if (PERSONALIZE) {
+    // Quick fade toward the dashboard instead of a hard cut.
+    const stage = document.querySelector('.ob-content');
+    if (!REDUCED && window.Motion && stage) {
+      try {
+        await Motion.animate(stage, { opacity: [1, 0] }, { duration: 0.15, ease: EASE });
+      } catch (e) { /* never block the redirect */ }
+    }
+    window.location.href = '/app/dashboard';
+    return;
+  }
   afterSync();
 }
 
@@ -4130,11 +4351,11 @@ function renderBars(holdings, s) {
 // --- correlation heatmap --------------------------------------------------------
 
 function corrColor(c) {
-  // Diverging on the card surface: green (moves opposite) <- near-surface -> violet
-  // (moves as one). Lightness and chroma track |c|; hue only carries the sign.
+  // Diverging on the card surface: green (moves opposite) <- near-white -> violet
+  // (moves as one). Cells darken and saturate with |c|; hue only carries the sign.
   const a = Math.abs(c);
-  const l = 22 + 46 * a;
-  const ch = 0.02 + (c >= 0 ? 0.17 : 0.11) * a;
+  const l = 95 - 43 * a;
+  const ch = 0.005 + (c >= 0 ? 0.165 : 0.115) * a;
   const h = c >= 0 ? 295 : 155;
   return 'oklch(' + l.toFixed(1) + '% ' + ch.toFixed(3) + ' ' + h + ')';
 }
@@ -4298,8 +4519,8 @@ requireSession().then((ok) => { if (ok) loadRisk(); });
 
 _RISK_CSS = """
 /* Chart data colors. Risk/identity is the brand violet; the capital-weight
-   reference bar is a deliberate neutral (validated: CVD dE 15.5, contrast >3:1
-   on the card surface; its low chroma is covered by per-row value labels). */
+   reference bar is a deliberate neutral (low chroma at 65% L keeps >3:1 against
+   the white card per WCAG 1.4.11; per-row value labels carry the exact values). */
 .risk-wrap { max-width: 880px; }
 .risk-head h1 { margin-bottom: 0.3rem; }
 .risk-head .risk-sub { color: var(--ink-2); margin-bottom: 1.4rem; max-width: 60ch; }
@@ -4331,10 +4552,10 @@ _RISK_CSS = """
 .svg-tick { fill: var(--ink-3); font-size: 11px; font-variant-numeric: tabular-nums; }
 .heat-col { text-anchor: start; }
 .heat-row { text-anchor: end; }
-.bar-weight { fill: oklch(60% 0.03 300); }
-.bar-risk { fill: oklch(58% 0.19 295); }
+.bar-weight { fill: oklch(65% 0.02 300); }
+.bar-risk { fill: oklch(55% 0.17 295); }
 .bar-hit { fill: transparent; }
-.bar-row:hover .bar-risk { fill: oklch(64% 0.19 295); }
+.bar-row:hover .bar-risk { fill: oklch(47% 0.17 295); }
 .legend { display: flex; gap: 1.1rem; font-size: 0.8rem; color: var(--ink-3);
   margin-top: 0.5rem; }
 .legend .sw { display: inline-block; width: 11px; height: 11px; border-radius: 3px;
@@ -4342,10 +4563,10 @@ _RISK_CSS = """
 .corr-scale { display: flex; align-items: center; gap: 0.6rem; margin-top: 0.55rem;
   font-size: 0.78rem; color: var(--ink-3); }
 .corr-grad { flex: 0 1 220px; height: 8px; border-radius: 4px;
-  background: linear-gradient(90deg, oklch(72% 0.13 155), oklch(22% 0.012 300) 50%, oklch(66% 0.19 295)); }
+  background: linear-gradient(90deg, oklch(55% 0.12 155), oklch(96% 0.005 300) 50%, oklch(52% 0.17 295)); }
 .grid-line { stroke: var(--line); stroke-width: 1; }
-.fan-outer { fill: oklch(58% 0.19 295); opacity: 0.14; }
-.fan-inner { fill: oklch(58% 0.19 295); opacity: 0.30; }
+.fan-outer { fill: oklch(52% 0.17 295); opacity: 0.14; }
+.fan-inner { fill: oklch(52% 0.17 295); opacity: 0.30; }
 .fan-median { stroke: var(--accent-text); stroke-width: 2; fill: none;
   stroke-linejoin: round; stroke-linecap: round; }
 .fan-zero { stroke: var(--line-strong); stroke-width: 1; }
@@ -4357,7 +4578,7 @@ _RISK_CSS = """
   background: var(--surface-3); border: 1px solid var(--line-strong);
   border-radius: var(--r-s); padding: 0.4rem 0.6rem; font-size: 0.8rem;
   color: var(--ink); max-width: 260px; line-height: 1.45;
-  box-shadow: 0 8px 24px oklch(8% 0.01 300 / 0.5); }
+  box-shadow: 0 8px 24px oklch(35% 0.05 300 / 0.18); }
 .risk-tip .tip-sub { color: var(--ink-3); }
 .gate-card { text-align: center; }
 .gate-card .btn { margin-top: 0.6rem; }
@@ -4612,9 +4833,9 @@ _PICKS_CSS = """
 .conf-track { width: 74px; height: 7px; border-radius: 4px; background: var(--surface-3);
   overflow: hidden; display: inline-block; }
 .conf-fill { display: block; height: 100%; border-radius: 4px; }
-.conf-high { background: oklch(70% 0.14 155); }
-.conf-mid { background: oklch(66% 0.19 295); }
-.conf-low { background: oklch(60% 0.03 300); }
+.conf-high { background: oklch(55% 0.12 155); }
+.conf-mid { background: oklch(55% 0.17 295); }
+.conf-low { background: oklch(70% 0.02 300); }
 .conf-num { font-size: 0.8rem; color: var(--ink-3); font-variant-numeric: tabular-nums; }
 .demote-note { color: var(--warn); font-size: 0.85rem; margin: 0.5rem 0 0; }
 .pick-thesis { color: var(--ink); line-height: 1.55; margin: 0.65rem 0 0; max-width: 70ch; }
