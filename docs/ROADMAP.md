@@ -56,8 +56,8 @@ The analytical core is already unusually rigorous for a retail product — Ledoi
 
 **Activation (pulled forward — traffic is worthless if visitors bounce at the connect step):**
 
-4. **Instant first analysis** (M) — on completing onboarding, immediately render a "your first briefing" (mini-digest + risk snapshot via `digest_pipeline.py` preview mode). Today the aha moment arrives with tomorrow's digest — ~18 hours too late. Biggest activation fix available.
-5. **Manual portfolio entry fallback** (M) — "no brokerage link? type your holdings" (ticker + shares/weight) at the SnapTrade step. Linking a brokerage to an unknown site is the #1 drop-off; convert those users now, upsell the sync later.
+4. ~~Instant first analysis~~ **Done Jul 30** — `POST /digest/first` kicks a background digest run as onboarding finishes; the dashboard lands in welcome mode (`?welcome=1`) and the digest card polls until the briefing arrives. No-op once any digest exists; failures degrade to the normal next-morning send.
+5. ~~Manual portfolio entry fallback~~ **Done Jul 30** — `POST /portfolio/manual` (quote-validated, Manual account replaced wholesale, brokerage accounts untouched, arms the trial) + the onboarding escape hatch flowing into the same risk picker. Later: a settings surface to edit manual holdings post-onboarding.
 
 **Proof surface (upgrades to what shipped Jul 30, not new pages):**
 
