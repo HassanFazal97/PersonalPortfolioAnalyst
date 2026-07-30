@@ -175,24 +175,82 @@ async def _sync_fundamentals(
     return refreshed, skipped, failed
 
 
+async def _departed_pick_tickers(repo: Any, universe: set[str]) -> list[str]:
+    """Tickers referenced by track-record entries (last 365d) that are no
+    longer in the universe — index removals and delistings. Their prices must
+    keep syncing so blown-up picks show their real loss instead of a gap."""
+    try:
+        referenced = await repo.list_pick_entry_tickers(
+            since=date.today() - timedelta(days=365)
+        )
+    except Exception:  # noqa: BLE001 - provenance extras are best-effort
+        logger.warning("pick-entry ticker read failed", exc_info=True)
+        return []
+    return [t for t in referenced if t not in universe]
+
+
+async def _snapshot_fundamentals(repo: Any, tickers: list[str]) -> int:
+    """Append today's point-in-time copy of each ticker's fundamentals
+    (migration 026). Error rows are skipped — a snapshot must record what the
+    screener can actually use, not a fetch failure."""
+    try:
+        rows = await repo.get_ticker_fundamentals(tickers)
+        payloads = {
+            t: row.data
+            for t, row in rows.items()
+            if row is not None and not row.fetch_error and row.data
+        }
+        return await repo.insert_fundamentals_snapshots(date.today(), payloads)
+    except Exception:  # noqa: BLE001 - snapshots must never break the sync
+        logger.warning("fundamentals snapshot failed", exc_info=True)
+        return 0
+
+
+async def _sync_membership(repo: Any) -> dict[str, Any]:
+    """Diff the deployed constituent lists into membership history
+    (migration 027)."""
+    as_of = date.fromisoformat(AS_OF)
+    out: dict[str, Any] = {}
+    for name, constituents in (("sp500", SP500), ("tsx60", TSX60)):
+        try:
+            out[name] = await repo.sync_universe_membership(
+                name, normalize_tickers(list(constituents)), as_of=as_of
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning("membership sync failed for %s", name, exc_info=True)
+            out[name] = {"error": True}
+    return out
+
+
 async def run_universe_sync(repo: Any, settings: Any) -> dict[str, Any]:
-    """``picks_sync`` job body: prices then fundamentals for the universe."""
+    """``picks_sync`` job body: prices then fundamentals for the universe,
+    plus the data-provenance writes (PIT snapshots, membership history,
+    departed-pick price coverage)."""
     tickers = get_universe(settings.picks_universe_limit)
     spacing = settings.picks_sync_spacing_seconds
+    departed = await _departed_pick_tickers(repo, set(tickers))
 
     prices_synced, prices_failed = await _sync_prices(
-        repo, tickers, history_days=settings.picks_history_days, spacing_s=spacing
+        repo,
+        [*tickers, *departed],
+        history_days=settings.picks_history_days,
+        spacing_s=spacing,
     )
     refreshed, skipped, fund_failed = await _sync_fundamentals(
         repo, settings, tickers, spacing_s=spacing
     )
+    snapshots = await _snapshot_fundamentals(repo, tickers)
+    membership = await _sync_membership(repo)
     result = {
         "tickers": len(tickers),
+        "departed_tracked": len(departed),
         "prices_synced": prices_synced,
         "prices_failed": prices_failed,
         "fundamentals_refreshed": refreshed,
         "fundamentals_fresh_skipped": skipped,
         "fundamentals_failed": fund_failed,
+        "snapshots_added": snapshots,
+        "membership": membership,
         "at": datetime.now(timezone.utc).isoformat(),
     }
     logger.info("universe sync: %s", result)

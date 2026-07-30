@@ -44,6 +44,10 @@ class FakeRepo:
         self._watchlist: dict[tuple[Any, str], SimpleNamespace] = {}
         # (user_id, event) -> meta; mirrors funnel_events' once-per-account PK.
         self.funnel_events: dict[tuple[Any, str], dict] = {}
+        # (ticker, snapshot_date) -> payload; append-only PIT store (026).
+        self.fundamentals_snapshots: dict[tuple[str, date], dict] = {}
+        # Membership intervals (027); rows mutate removed_at, never delete.
+        self.universe_membership: list[SimpleNamespace] = []
 
     def seed_user(self, user_id, *, plan="free", digest_enabled=True, email=None,
                   digest_tickers=None, stripe_customer_id=None,
@@ -1006,6 +1010,55 @@ class FakeRepo:
             if r.run_date >= since
         ]
         return sorted(rows, key=lambda r: (r.run_date, -r.rank), reverse=True)
+
+    async def list_pick_entry_tickers(self, *, since):
+        return sorted(
+            {
+                r.ticker
+                for r in getattr(self, "stock_pick_entries", [])
+                if r.run_date >= since
+            }
+        )
+
+    # ---- PIT fundamentals snapshots + universe membership (026/027) -------
+
+    async def insert_fundamentals_snapshots(self, snapshot_date, payloads):
+        added = 0
+        for ticker, payload in payloads.items():
+            key = (ticker, snapshot_date)
+            if key not in self.fundamentals_snapshots:
+                self.fundamentals_snapshots[key] = payload
+                added += 1
+        return added
+
+    async def get_fundamentals_snapshots(self, tickers, *, as_of):
+        out = {}
+        for (ticker, snap_date), payload in self.fundamentals_snapshots.items():
+            if ticker in tickers and snap_date <= as_of:
+                best = out.get(ticker)
+                if best is None or snap_date > best[0]:
+                    out[ticker] = (snap_date, payload)
+        return {t: payload for t, (_d, payload) in out.items()}
+
+    async def sync_universe_membership(self, universe, tickers, *, as_of):
+        wanted = set(tickers)
+        open_rows = {
+            r.ticker: r
+            for r in self.universe_membership
+            if r.universe == universe and r.removed_at is None
+        }
+        added = removed = 0
+        for ticker in sorted(wanted - open_rows.keys()):
+            self.universe_membership.append(
+                SimpleNamespace(
+                    ticker=ticker, universe=universe, added_at=as_of, removed_at=None
+                )
+            )
+            added += 1
+        for ticker in sorted(open_rows.keys() - wanted):
+            open_rows[ticker].removed_at = as_of
+            removed += 1
+        return {"added": added, "removed": removed, "open": len(wanted)}
 
     # ---- notification channels (mirrors app/db/repo.py) -----------------
 

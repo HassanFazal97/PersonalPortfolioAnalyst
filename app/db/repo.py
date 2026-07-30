@@ -7,6 +7,7 @@ functions. The agent loop, tools, and API routes depend only on this surface.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import re
 import uuid
@@ -33,6 +34,7 @@ from app.db.models import (
     DailyPrice,
     DeepDiveReport,
     Digest,
+    FundamentalsSnapshot,
     FunnelEvent,
     JobHeartbeat,
     MemoryChunk,
@@ -48,6 +50,7 @@ from app.db.models import (
     TickerFundamentals,
     ToolCall,
     Transaction,
+    UniverseMembership,
     User,
     VerificationCode,
     WatchlistItem,
@@ -1896,6 +1899,105 @@ class Repo:
                 .order_by(DailyPrice.ticker, DailyPrice.price_date.desc())
             )
             return {row.ticker: row for row in result.scalars().all()}
+
+    # ---- point-in-time fundamentals snapshots (migration 026) --------------
+
+    async def insert_fundamentals_snapshots(
+        self, snapshot_date: date, payloads: dict[str, dict]
+    ) -> int:
+        """Append one dated snapshot per ticker (idempotent per day: re-runs
+        the same evening hit the PK and are ignored — the FIRST write of a day
+        wins, preserving what the screener actually saw). Returns rows added."""
+        values = []
+        for ticker, payload in payloads.items():
+            canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+            values.append(
+                {
+                    "ticker": ticker,
+                    "snapshot_date": snapshot_date,
+                    "payload": payload,
+                    "payload_hash": hashlib.sha256(canonical.encode()).hexdigest(),
+                }
+            )
+        if not values:
+            return 0
+        async with self._session() as s:
+            result = await s.execute(
+                pg_insert(FundamentalsSnapshot)
+                .values(values)
+                .on_conflict_do_nothing(
+                    index_elements=[
+                        FundamentalsSnapshot.ticker,
+                        FundamentalsSnapshot.snapshot_date,
+                    ]
+                )
+            )
+            await s.commit()
+            return int(result.rowcount or 0)
+
+    async def get_fundamentals_snapshots(
+        self, tickers: list[str], *, as_of: date
+    ) -> dict[str, dict]:
+        """Per ticker, the latest snapshot payload dated ≤ ``as_of`` — the
+        "as it would have run on date D" read for the screener."""
+        async with self._session() as s:
+            result = await s.execute(
+                select(FundamentalsSnapshot)
+                .distinct(FundamentalsSnapshot.ticker)
+                .where(
+                    FundamentalsSnapshot.ticker.in_(tickers),
+                    FundamentalsSnapshot.snapshot_date <= as_of,
+                )
+                .order_by(
+                    FundamentalsSnapshot.ticker,
+                    FundamentalsSnapshot.snapshot_date.desc(),
+                )
+            )
+            return {row.ticker: row.payload for row in result.scalars().all()}
+
+    # ---- universe membership history (migration 027) -----------------------
+
+    async def sync_universe_membership(
+        self, universe: str, tickers: list[str], *, as_of: date
+    ) -> dict[str, int]:
+        """Diff the deployed constituent list against open membership
+        intervals: append additions, close removals. Never deletes — closed
+        intervals are the survivorship-bias antidote."""
+        wanted = set(tickers)
+        async with self._session() as s:
+            result = await s.execute(
+                select(UniverseMembership).where(
+                    UniverseMembership.universe == universe,
+                    UniverseMembership.removed_at.is_(None),
+                )
+            )
+            open_rows = {row.ticker: row for row in result.scalars().all()}
+            added = 0
+            removed = 0
+            for ticker in sorted(wanted - open_rows.keys()):
+                s.add(
+                    UniverseMembership(
+                        ticker=ticker, universe=universe, added_at=as_of
+                    )
+                )
+                added += 1
+            for ticker in sorted(open_rows.keys() - wanted):
+                open_rows[ticker].removed_at = as_of
+                removed += 1
+            await s.commit()
+        return {"added": added, "removed": removed, "open": len(wanted)}
+
+    async def list_pick_entry_tickers(self, *, since: date) -> list[str]:
+        """Distinct tickers referenced by pick entries since ``since`` — the
+        set whose prices must keep syncing even after an index removal or
+        delisting, so the track record shows real losses instead of gaps."""
+        async with self._session() as s:
+            result = await s.execute(
+                select(StockPickEntry.ticker)
+                .where(StockPickEntry.run_date >= since)
+                .distinct()
+            )
+            return sorted(result.scalars().all())
 
     # ---- stock picks (global daily Best Stocks runs, all tenants) ----------
 

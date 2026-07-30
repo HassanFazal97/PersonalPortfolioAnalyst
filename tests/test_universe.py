@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid as uuid_mod
 from datetime import date, timedelta
 
 import pytest
@@ -107,6 +108,104 @@ async def test_run_universe_sync_prices_and_ttl_fundamentals(
     # First-ever sync has no stored coverage -> full window for every ticker.
     assert all(days == 420 for _, days in batch_calls)
     assert len(await repo.get_daily_prices("AAA")) == 5
+
+
+async def test_sync_writes_pit_snapshots_and_membership(
+    monkeypatch, small_universe
+):
+    repo = FakeRepo()
+
+    def fake_batch(tickers, days):
+        return {
+            t: [{"date": date.today().isoformat(), "adj_close": 10.0}]
+            for t in tickers
+        }
+
+    async def fake_fetch_and_store(ticker, repo_, settings_):
+        await repo_.upsert_ticker_fundamentals(
+            ticker=ticker, quote_type="EQUITY", data={"ticker": ticker, "pe": 12.0}
+        )
+        return {"ticker": ticker}
+
+    from app.tools import fundamentals, market
+
+    monkeypatch.setattr(market, "_fetch_adjusted_closes_batch_raw", fake_batch)
+    monkeypatch.setattr(fundamentals, "_fetch_and_store", fake_fetch_and_store)
+    # An errored row must never be snapshotted as if it were data.
+    await repo.upsert_ticker_fundamentals(
+        ticker="CCC", quote_type="EQUITY", data={}, fetch_error="boom"
+    )
+
+    result = await universe.run_universe_sync(repo, _Settings())
+    assert result["snapshots_added"] == 2  # AAA, BBB — not the errored CCC
+    got = await repo.get_fundamentals_snapshots(["AAA"], as_of=date.today())
+    assert got["AAA"]["pe"] == 12.0
+    # Same-evening re-run appends nothing new (first write of the day wins).
+    rerun = await universe.run_universe_sync(repo, _Settings())
+    assert rerun["snapshots_added"] == 0
+
+    # Membership history seeded from the deployed constituent lists.
+    assert result["membership"]["sp500"]["added"] > 400
+    assert result["membership"]["tsx60"]["removed"] == 0
+    assert rerun["membership"]["sp500"]["added"] == 0
+
+
+async def test_membership_diff_closes_removed_intervals():
+    repo = FakeRepo()
+    day1 = date(2026, 7, 1)
+    day2 = date(2026, 10, 1)
+    await repo.sync_universe_membership("sp500", ["AAA", "BBB"], as_of=day1)
+    out = await repo.sync_universe_membership("sp500", ["AAA", "CCC"], as_of=day2)
+    assert out == {"added": 1, "removed": 1, "open": 2}
+    rows = {(r.ticker, r.removed_at) for r in repo.universe_membership}
+    # BBB's interval is CLOSED, not deleted — the survivorship-bias antidote.
+    assert ("BBB", day2) in rows and ("AAA", None) in rows and ("CCC", None) in rows
+
+
+async def test_departed_pick_tickers_keep_price_coverage(
+    monkeypatch, small_universe
+):
+    repo = FakeRepo()
+    # A pick on DEAD (no longer in the universe) within the last year.
+    await repo.insert_pick_entries(
+        [
+            {
+                "picks_run_id": uuid_mod.uuid4(),
+                "run_date": date.today() - timedelta(days=30),
+                "ticker": "DEAD",
+                "rank": 1,
+                "composite_score": 0.5,
+                "confidence": 0.5,
+                "entry_price": 10.0,
+                "factors": {},
+                "thesis_summary": "t",
+            }
+        ]
+    )
+
+    synced: list[str] = []
+
+    def fake_batch(tickers, days):
+        synced.extend(tickers)
+        return {
+            t: [{"date": date.today().isoformat(), "adj_close": 10.0}]
+            for t in tickers
+        }
+
+    async def fake_fetch_and_store(ticker, repo_, settings_):
+        await repo_.upsert_ticker_fundamentals(
+            ticker=ticker, quote_type="EQUITY", data={"ticker": ticker}
+        )
+        return {}
+
+    from app.tools import fundamentals, market
+
+    monkeypatch.setattr(market, "_fetch_adjusted_closes_batch_raw", fake_batch)
+    monkeypatch.setattr(fundamentals, "_fetch_and_store", fake_fetch_and_store)
+
+    result = await universe.run_universe_sync(repo, _Settings())
+    assert result["departed_tracked"] == 1
+    assert "DEAD" in synced  # prices keep syncing for the open pick
 
 
 async def test_sync_one_bad_ticker_never_aborts(monkeypatch, small_universe):

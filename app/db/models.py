@@ -580,6 +580,36 @@ class StockPickEntry(Base):
     )
 
 
+class FundamentalsSnapshot(Base):
+    """Append-only dated copy of a ticker's fundamentals payload (migration
+    026) — point-in-time by construction. Never updated, never deleted; the
+    screener "as it would have run on date D" resolves to the latest snapshot
+    ≤ D."""
+
+    __tablename__ = "fundamentals_snapshots"
+
+    ticker: Mapped[str] = mapped_column(Text, primary_key=True)
+    snapshot_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    payload_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class UniverseMembership(Base):
+    """Dated membership interval for a screening universe (migration 027).
+    removed_at NULL = current member; closed intervals are history and are
+    never deleted."""
+
+    __tablename__ = "universe_membership"
+
+    ticker: Mapped[str] = mapped_column(Text, primary_key=True)
+    universe: Mapped[str] = mapped_column(Text, primary_key=True)
+    added_at: Mapped[date] = mapped_column(Date, primary_key=True)
+    removed_at: Mapped[date | None] = mapped_column(Date)
+
+
 class FunnelEvent(Base):
     """Once-per-account funnel milestone (migration 025): signup → connected
     → trial → decision. The composite PK makes recording idempotent; anything
