@@ -244,6 +244,7 @@ def _normalize_fundamentals(ticker: str, raw: dict[str, Any]) -> dict[str, Any]:
         "quote_type": quote_type,
         "profile": {
             "name": info.get("longName") or info.get("shortName"),
+            "website": info.get("website"),
             "sector": info.get("sector"),
             "industry": info.get("industry"),
             "currency": info.get("currency"),

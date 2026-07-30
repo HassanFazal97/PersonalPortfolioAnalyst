@@ -102,6 +102,7 @@ def test_beta_zero_variance_benchmark():
 STOCK_INFO = {
     "quoteType": "EQUITY",
     "longName": "NVIDIA Corporation",
+    "website": "https://www.nvidia.com",
     "sector": "Technology",
     "industry": "Semiconductors",
     "currency": "USD",
@@ -144,6 +145,7 @@ def test_normalize_stock():
     data = _normalize_fundamentals("NVDA", raw)
     assert data["quote_type"] == "EQUITY"
     assert data["profile"]["name"] == "NVIDIA Corporation"
+    assert data["profile"]["website"] == "https://www.nvidia.com"
     assert data["valuation"]["forward_pe"] == 30.0
     # PEG computed from parts: 30 / 75 = 0.4
     assert data["valuation"]["peg"] == 0.4

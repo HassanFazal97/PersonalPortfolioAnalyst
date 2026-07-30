@@ -305,9 +305,24 @@ input:focus, select:focus { border-color: var(--accent-hover); }
 .pie-box.has-hover .pie-slice:not(.hl),
 .pie-box.has-hover .pie-leg-row:not(.hl) { opacity: 0.35; }
 .pie-legend { margin-top: 0.75rem; font-size: 0.82rem; }
-.pie-leg-row { display: flex; align-items: center; gap: 0.5rem; padding: 0.18rem 0;
+.pie-leg-row { display: flex; align-items: center; gap: 0.55rem; padding: 0.16rem 0;
   color: var(--ink-2); font-variant-numeric: tabular-nums; cursor: default; }
-.pie-leg-row .sw { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+/* Legend avatar: slice-color disc doubling as the lettermark fallback; the
+   fetched logo lands on an inset white disc, leaving a 2px slice-color ring
+   so the color mapping to the donut survives the logo. */
+.pie-leg-row .lg { width: 20px; height: 20px; border-radius: 50%; flex: none;
+  position: relative; display: flex; align-items: center; justify-content: center; }
+.pie-leg-row .lg .ch { font-size: 0.6rem; font-weight: 700; color: #fff;
+  line-height: 1; user-select: none; }
+.pie-leg-row .lg img { position: absolute; inset: 2px;
+  /* imgs are replaced elements: inset alone won't size them */
+  width: calc(100% - 4px); height: calc(100% - 4px); border-radius: 50%;
+  background: var(--surface-1); object-fit: contain; padding: 1px;
+  animation: logo-in 0.15s var(--ease); }
+@keyframes logo-in { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .pie-leg-row .lg img { animation: none; }
+}
 .pie-leg-row .t { font-weight: 600; color: var(--ink); flex: 1; min-width: 0;
   overflow: hidden; text-overflow: ellipsis; }
 .dash-card h3 { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; }
@@ -2709,6 +2724,32 @@ const PIE_COLORS = [
 ];
 const PIE_OTHER = 'oklch(65% 0.02 300)';
 
+// ticker -> Promise<objectURL|null>, memoized: the pie re-renders on every
+// portfolio refresh and this keeps that from refetching every logo each time.
+const LOGO_URLS = new Map();
+
+function fetchLogoUrl(ticker) {
+  if (!LOGO_URLS.has(ticker)) {
+    LOGO_URLS.set(ticker, (async () => {
+      const resp = await api('/portfolio/logo/' + encodeURIComponent(ticker));
+      if (!resp.ok) return null;  // 404: lettermark stays
+      return URL.createObjectURL(await resp.blob());
+    })().catch(() => { LOGO_URLS.delete(ticker); return null; }));
+  }
+  return LOGO_URLS.get(ticker);
+}
+
+async function loadLegendLogo(el, ticker) {
+  const url = await fetchLogoUrl(ticker);
+  if (!url || !el.isConnected || el.querySelector('img')) return;
+  const img = new Image();
+  img.alt = '';
+  // Append only once loaded: no broken-image flash, and the CSS entrance
+  // animation runs on insertion.
+  img.onload = () => { if (el.isConnected) el.appendChild(img); };
+  img.src = url;
+}
+
 function renderHoldingsPie(groups, totals) {
   const box = document.getElementById('holdings-pie');
   const priced = groups.map((g) => ({ t: g.ticker, v: mvCadOf(g, totals) }))
@@ -2746,8 +2787,10 @@ function renderHoldingsPie(groups, totals) {
         ' Z"><title>' + label + '</title></path>';
     }
     legend += '<div class="pie-leg-row" data-idx="' + i + '">' +
-      '<i class="sw" style="background:' + color + '"></i>' +
-      '<span class="t">' + esc(s.t) + '</span><span>' + pctTxt + '</span></div>';
+      '<span class="lg" style="background:' + color + '"' +
+      (s.other ? '' : ' data-ticker="' + esc(s.t) + '"') + '>' +
+      (s.other ? '' : '<span class="ch">' + esc(s.t[0]) + '</span>') +
+      '</span><span class="t">' + esc(s.t) + '</span><span>' + pctTxt + '</span></div>';
     acc += frac;
   });
   box.innerHTML = '<svg viewBox="0 0 200 200" role="img" aria-label="Portfolio allocation">' +
@@ -2759,6 +2802,12 @@ function renderHoldingsPie(groups, totals) {
       ? '<p class="muted-note">' + excluded + ' unpriced position' +
         (excluded === 1 ? '' : 's') + ' not shown.</p>' : '');
   box.style.display = 'block';
+  // Company logos load out-of-band: an <img src> can't carry the bearer
+  // header, so each avatar fetches through api() and lands as a blob URL
+  // over its lettermark. 404 (no logo known) just leaves the lettermark.
+  box.querySelectorAll('.lg[data-ticker]').forEach((el2) => {
+    loadLegendLogo(el2, el2.dataset.ticker);
+  });
   // Hovering a slice or its legend row highlights both and dims the rest.
   box.querySelectorAll('[data-idx]').forEach((el2) => {
     el2.addEventListener('pointerenter', () => {
