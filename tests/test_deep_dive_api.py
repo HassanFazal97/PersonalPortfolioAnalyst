@@ -57,10 +57,30 @@ def _fake_pipeline(monkeypatch, *, status="completed"):
     return calls
 
 
-def test_deep_dive_free_user_is_403(monkeypatch):
+def test_deep_dive_free_user_gets_one_per_month(monkeypatch):
+    # Free tastes the analyst depth: 1 per rolling 30 days, then a 429 that
+    # names the monthly cadence (the upgrade nudge).
     repo = FakeRepo()
     uid = uuid.uuid4()
     repo.seed_user(uid, plan="free")
+    _seed_position(repo, uid)
+    client = _client(monkeypatch, repo)
+    _as_user(monkeypatch, uid)
+    _fake_pipeline(monkeypatch)
+
+    assert client.post("/deep-dive", headers=_AUTH).status_code == 202
+    resp = client.post("/deep-dive", headers=_AUTH)
+    assert resp.status_code == 429
+    assert "per month on Free" in resp.json()["detail"]
+
+
+def test_deep_dive_free_gate_can_be_closed(monkeypatch):
+    # DEEP_DIVE_FREE_MONTHLY_LIMIT=0 restores the Pro-only posture.
+    monkeypatch.setenv("DEEP_DIVE_FREE_MONTHLY_LIMIT", "0")
+    repo = FakeRepo()
+    uid = uuid.uuid4()
+    repo.seed_user(uid, plan="free")
+    _seed_position(repo, uid)
     client = _client(monkeypatch, repo)
     _as_user(monkeypatch, uid)
 

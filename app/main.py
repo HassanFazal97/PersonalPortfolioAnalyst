@@ -71,6 +71,7 @@ from app.jobs import heartbeat_wrapped, job_health
 from app.landing import (
     CONTACT_HTML,
     LANDING_HTML,
+    METHODOLOGY_HTML,
     PRICING_HTML,
     PRIVACY_HTML,
     SAMPLE_DIGEST_HTML,
@@ -474,10 +475,12 @@ _AUTH_EXEMPT_PATHS = {
     "/privacy",
     "/terms",
     "/pricing",
-    # Public proof surfaces: the picks track record (page + JSON it reads) and
-    # a sample digest. Global, non-user data — the marketing site's evidence.
+    # Public proof surfaces: the picks track record (page + JSON it reads),
+    # a sample digest, and the methodology page. Global, non-user data — the
+    # marketing site's evidence.
     "/track-record",
     "/sample-digest",
+    "/methodology",
     "/stocks/picks/track-record",
     # The web app pages are static HTML shells; the browser authenticates the
     # API calls it makes from them with a Supabase JWT.
@@ -1216,6 +1219,10 @@ def create_app() -> FastAPI:
     async def sample_digest_page() -> HTMLResponse:
         return HTMLResponse(SAMPLE_DIGEST_HTML)
 
+    @app.get("/methodology", response_class=HTMLResponse)
+    async def methodology_page() -> HTMLResponse:
+        return HTMLResponse(METHODOLOGY_HTML)
+
     # ---- Signed-in web app (Supabase JS auth in the browser) -----------
 
     def _webapp_html(render) -> HTMLResponse:
@@ -1523,14 +1530,6 @@ def create_app() -> FastAPI:
         user_id = _user_id(request)
         user = await repo.get_user(user_id)
         plan = effective_plan(user)
-        if plan != "pro" and user_id != _OWNER_USER_ID:
-            raise HTTPException(
-                status_code=403,
-                detail=(
-                    "Deep dives are a Pro feature — a team of research agents "
-                    "analyzing your whole portfolio. Upgrade to run one."
-                ),
-            )
         if user_id in active_deep_dives:
             raise HTTPException(
                 status_code=429,
@@ -1545,18 +1544,36 @@ def create_app() -> FastAPI:
                         "It resets at the start of next month."
                     ),
                 )
-            window = timedelta(days=7)
+            # Pro: N per rolling week. Free: 1 per rolling month — enough to
+            # taste the analyst depth that justifies Pro, not enough to live
+            # on (the roadmap's free-tier repackaging).
+            if plan == "pro":
+                window = timedelta(days=7)
+                limit = settings.deep_dive_weekly_limit
+                period = "per week"
+            else:
+                window = timedelta(days=30)
+                limit = settings.deep_dive_free_monthly_limit
+                period = "per month on Free"
+            if limit <= 0:
+                raise HTTPException(
+                    status_code=403,
+                    detail=(
+                        "Deep dives are a Pro feature — a team of research "
+                        "agents analyzing your whole portfolio. Upgrade to run one."
+                    ),
+                )
             used, oldest = await repo.deep_dive_usage_since(
                 user_id, datetime.now(timezone.utc) - window
             )
-            if used >= settings.deep_dive_weekly_limit:
+            if used >= limit:
                 unlocks = (oldest or datetime.now(timezone.utc)) + window
                 local = unlocks.astimezone(_user_tz(user))
                 raise HTTPException(
                     status_code=429,
                     detail=(
-                        f"Deep dive limit reached ({settings.deep_dive_weekly_limit} "
-                        f"per week). Your next one unlocks {local:%a %b %-d}."
+                        f"Deep dive limit reached ({limit} {period}). "
+                        f"Your next one unlocks {local:%a %b %-d}."
                     ),
                 )
         if not await repo.list_positions(user_id=user_id):

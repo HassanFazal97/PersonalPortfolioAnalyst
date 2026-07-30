@@ -213,6 +213,10 @@ class Settings(BaseSettings):
     deep_dive_max_iterations: int = Field(default=40, alias="DEEP_DIVE_MAX_ITERATIONS")
     # Rolling 7-day quota per Pro user. Owner/service token is exempt.
     deep_dive_weekly_limit: int = Field(default=2, alias="DEEP_DIVE_WEEKLY_LIMIT")
+    # Free tier tastes the analyst depth: 1 per rolling 30 days (0 = Pro-only).
+    deep_dive_free_monthly_limit: int = Field(
+        default=1, alias="DEEP_DIVE_FREE_MONTHLY_LIMIT"
+    )
     # Cron for the scheduled weekly fan-out ("" disables; runs stay manual).
     deep_dive_cron: str = Field(default="", alias="DEEP_DIVE_CRON")
 

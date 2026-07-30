@@ -36,7 +36,9 @@ def client(monkeypatch):
     get_settings.cache_clear()
 
 
-@pytest.mark.parametrize("path", ["/", "/pricing", "/contact", "/privacy", "/terms"])
+@pytest.mark.parametrize(
+    "path", ["/", "/pricing", "/contact", "/privacy", "/terms", "/methodology"]
+)
 def test_marketing_pages_have_og_tags(client, path):
     html = client.get(path).text
     assert '<meta property="og:title"' in html

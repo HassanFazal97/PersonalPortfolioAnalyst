@@ -871,6 +871,7 @@ _FOOTER = (
     '<a href="/">Home</a><a href="/#how">How it works</a>'
     '<a href="/track-record">Track record</a>'
     '<a href="/sample-digest">Sample digest</a>'
+    '<a href="/methodology">Methodology</a>'
     '<a href="/pricing">Pricing</a><a href="/#faq">FAQ</a></div>'
     '<div class="foot-col"><h4>Legal</h4>'
     '<a href="/privacy">Privacy</a><a href="/terms">Terms</a></div>'
@@ -1210,6 +1211,104 @@ _CONTACT_BODY = f"""
 # Privacy Policy
 # --------------------------------------------------------------------------
 
+_METHODOLOGY_BODY = """
+<div class="prose">
+  <h1>Methodology</h1>
+  <p class="updated">How the numbers are made, how they're checked, and where they fall short.</p>
+
+  <p>Cirvia's design rule is simple: <strong>every number you see is computed in
+  code from market data; the AI only narrates.</strong> This page explains what
+  that means for the daily Top Picks, the public track record, and the
+  portfolio analytics &mdash; including the limitations we haven't fixed yet.</p>
+
+  <h2>How the daily picks are made</h2>
+  <p><strong>1. Universe.</strong> Roughly 560 names: the S&amp;P 500 plus the TSX 60.
+  Membership is recorded as dated history &mdash; when a company leaves the index or
+  delists, its record stays and its prices keep updating while any published pick
+  references it, so failures remain visible.</p>
+  <p><strong>2. Quantitative screen.</strong> A pure-math factor screen ranks the
+  universe before any AI is involved: value, quality, growth, momentum (12-months
+  skipping the last month), analyst upside (shrunk toward zero when coverage is
+  thin), and low risk. Metrics are scored relative to each stock's sector using
+  robust statistics (median and MAD, not mean and standard deviation, because
+  financial ratios have fat tails). Names with stale prices or missing data are
+  excluded with a recorded reason &mdash; nothing is imputed.</p>
+  <p><strong>3. AI analysts, on a leash.</strong> Each top candidate gets an AI
+  analyst that may only cite numbers from a fact sheet computed in step 2. Its
+  output is then machine-checked: any cited figure that doesn't match the fact
+  sheet is repaired to the canonical value or dropped.</p>
+  <p><strong>4. Adversarial verification.</strong> A separate AI critic re-checks
+  the most load-bearing claims using its own live data tools and marks each one
+  verified or challenged. A pick with two or more challenged claims is demoted
+  below every clean pick. Confidence scores are computed in code from screen
+  rank, data coverage, and verification results &mdash; the AI is never asked how
+  confident it feels.</p>
+
+  <h2>How the track record is measured</h2>
+  <ul>
+    <li><strong>Entry prices freeze at publication.</strong> Each pick records the
+    last market close before its pre-market publication, and that number is never
+    revised.</li>
+    <li><strong>Returns are total returns.</strong> Performance is computed from
+    dividend- and split-adjusted closes drawn from one consistent price series,
+    from the pick's publication bar to the latest close, fresh on every page load.</li>
+    <li><strong>The benchmark includes dividends.</strong> Picks are compared
+    against SPY's adjusted close (an S&amp;P 500 total-return proxy) over each
+    pick's identical span &mdash; a price-only index would flatter us by the
+    index's dividend yield.</li>
+    <li><strong>Cohorts, not cherry-picks.</strong> Because a good pick can stay on
+    the board for weeks, per-pick averages over-count persistent names. The honest
+    headline numbers group picks into daily cohorts measured only at fully-elapsed
+    horizons, plus a simulated portfolio that buys each day's top five
+    equal-weighted and rebalances when the board changes.</li>
+    <li><strong>Misses stay on the board.</strong> Nothing is deleted &mdash;
+    including picks on companies that later fell, were removed from their index,
+    or delisted.</li>
+    <li><strong>Small samples stay quiet.</strong> Headline stats appear only once
+    at least 30 picks have fully-measured outcomes; below that, averages are noise.</li>
+    <li><strong>Inputs are archived nightly.</strong> Every evening we store a
+    dated, hashed snapshot of each stock's fundamentals. From the first snapshot
+    onward, any pick can be re-derived from data timestamped before the pick was
+    published.</li>
+  </ul>
+
+  <h2>Portfolio analytics</h2>
+  <p>The Risk Lab and chat answers use the same discipline: returns are built from
+  adjusted closes aligned across markets (Canadian and US holidays differ, so only
+  common trading days are compared); portfolio risk uses a shrunk covariance
+  estimate (Ledoit-Wolf) rather than raw sample correlations; downside estimates
+  report Value-at-Risk several ways (including a fat-tail adjustment) and say
+  which is which; Monte Carlo projections use zero drift by default &mdash; the
+  fan shows risk, not a forecast. All of it is unit-tested against closed-form
+  results.</p>
+
+  <h2>Limitations, honestly</h2>
+  <ul>
+    <li><strong>Data source.</strong> Prices and fundamentals come from free/retail
+    market-data services, not an institutional vendor. Fields are occasionally
+    revised upstream; the nightly snapshots bound this going forward but cannot
+    repair history before they began.</li>
+    <li><strong>Benchmark mismatch.</strong> SPY is a US total-return proxy while
+    the pick universe includes TSX names; a blended benchmark is planned.</li>
+    <li><strong>Factor weights are judgment.</strong> The screen's factor weights
+    come from the academic literature and our judgment; they have not yet been
+    validated out-of-sample on our own data. A walk-forward validation harness is
+    planned, and its results will be published here.</li>
+    <li><strong>The simulated portfolio ignores costs.</strong> Spreads and
+    commissions are not netted from the top-5 simulation; it is a research
+    measure, not a trading result.</li>
+    <li><strong>Short history.</strong> The track record is young. Judge it by its
+    rules and its transparency until it has the sample size to be judged by its
+    numbers.</li>
+  </ul>
+
+  <p>Cirvia is informational only &mdash; research with receipts, not
+  recommendations, and never personalized advice to buy or sell a security.
+  Past performance does not guarantee future results.</p>
+</div>
+"""
+
+
 _PRIVACY_BODY = f"""
 <div class="prose">
   <h1>Privacy Policy</h1>
@@ -1504,6 +1603,7 @@ _PRICING_BODY = f"""
         <li>1 connected account</li>
         <li>Weekly digest on up to 3 holdings</li>
         <li>3 chat questions per week</li>
+        <li>1 Deep Dive research report per month</li>
         <li>Watchlist for up to 3 tickers</li>
       </ul>
       <a class="btn ghost" href="/app#signup">Start free</a>
@@ -1592,7 +1692,8 @@ _TRACK_RECORD_METHOD = """
     publication date to now. Beating a bull market is the bar, not just going up.</p></div></div>
   </div>
   <p class="sect-lead" style="margin-top:1.6rem;">Picks are research with receipts, not
-  recommendations. Past performance does not guarantee future results.</p>
+  recommendations. Past performance does not guarantee future results.
+  <a href="/methodology">Read the full methodology</a>, limitations included.</p>
 </section>
 
 <div class="cta-final" data-reveal>
@@ -1834,6 +1935,14 @@ CONTACT_HTML = _layout(
     _CONTACT_BODY,
     active="contact",
     path="/contact",
+)
+
+METHODOLOGY_HTML = _layout(
+    "Methodology — Cirvia",
+    "How Cirvia's daily picks are made and verified, how the public track record "
+    "is measured, and the limitations we haven't fixed yet.",
+    _METHODOLOGY_BODY,
+    path="/methodology",
 )
 
 PRIVACY_HTML = _layout(

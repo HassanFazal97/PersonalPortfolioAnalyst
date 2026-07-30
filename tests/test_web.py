@@ -28,6 +28,8 @@ def test_pages_have_expected_content(monkeypatch):
         assert "hello@cirvia.ca" in client.get("/contact").text
         assert "Privacy Policy" in client.get("/privacy").text
         assert "Terms of Service" in client.get("/terms").text
+        methodology = client.get("/methodology").text
+        assert "Methodology" in methodology and "Limitations" in methodology
         pricing = client.get("/pricing").text
         assert "Free" in pricing and "Pro" in pricing and "$160" in pricing
         # cross-links between pages
