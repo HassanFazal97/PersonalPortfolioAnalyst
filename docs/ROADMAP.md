@@ -50,9 +50,9 @@ The analytical core is already unusually rigorous for a retail product — Ledoi
 
 **Data provenance (urgent because it compounds):**
 
-1. **Point-in-time fundamentals by construction** (S/M) — append-only `fundamentals_snapshots` table written nightly by `run_universe_sync` (`app/tools/universe.py`); never updated or deleted. Kills look-ahead/revision bias going forward: "every pick can be re-derived from data timestamped before the pick." ~1GB/yr in Supabase; dedupe by payload hash if needed.
-2. **Universe membership history + delisting handling** (S) — `universe_membership(ticker, index, added_at, removed_at)` replacing the static list; `refresh_universe.py` becomes a weekly diff-and-append. Keep syncing prices for names referenced by open picks so blown-up picks show their real loss instead of vanishing. Kills survivorship bias going forward.
-3. **Cohort-based, risk-adjusted track record** (M) — new `app/quant/trackrecord.py` (pure numpy, tested like its siblings). The current per-entry hit rate double-counts persistent picks. Rebuild as dated cohorts: equal-weighted cohort return vs benchmark at 1w/1m/3m/6m, plus a "top-5 held-until-dropped" simulated portfolio with daily NAV, Sharpe, alpha, max drawdown, tracking error (reusing `performance.py`/`tailrisk.py`). Three honesty bugs were found in the current ad-hoc endpoint; a tested module is the structural fix. Preserve the ≥30-measured-picks gate on headline stats.
+1. ~~Point-in-time fundamentals by construction~~ **Done Jul 30** — `fundamentals_snapshots` (migration 026), appended nightly by `run_universe_sync` with payload hashes; error rows never snapshotted; `get_fundamentals_snapshots(as_of=D)` is the "as it would have run" read. **Clock starts on the first prod deploy.**
+2. ~~Universe membership history + delisting handling~~ **Done Jul 30** — `universe_membership` (migration 027) diffed nightly from the deployed constituent lists (intervals close, never delete); prices keep syncing for tickers referenced by pick entries in the last 365d after they leave the universe.
+3. ~~Cohort-based track record~~ **Done Jul 30** — `app/quant/trackrecord.py` (pure numpy, closed-form-tested): dated cohorts at fully-elapsed 7/30/91/182d horizons vs SPY total return over identical spans, plus the simulated top-5 portfolio (equal-weight per rebalance, buy-and-hold between runs) with Sharpe/max-drawdown/tracking-error reused from `performance.py`/`tailrisk.py`. Wired into the public payload (`cohorts`/`simulated`) and the /track-record page. Still open from the original item: per-run integrity line + git-hash tamper evidence (see #6), factor attribution (needs Phase 2 factor model).
 
 **Activation (pulled forward — traffic is worthless if visitors bounce at the connect step):**
 
@@ -62,9 +62,9 @@ The analytical core is already unusually rigorous for a retail product — Ledoi
 **Proof surface (upgrades to what shipped Jul 30, not new pages):**
 
 6. **Upgrade `/track-record` to the cohort version** (M) — cohort NAV chart vs benchmark, every pick ever made with dated frozen entry price, per-run integrity line (data as-of, methodology version, verification summary — already persisted). Publish full pick details (theses) with a **1-day delay**; today's board stays Pro. Tamper-evidence: at run time, **commit the picks payload's hash to a public git repo** (GitHub's commit timestamp makes it externally verifiable — unlike a hash on our own site); publish the full payload the next day and anyone can check it against yesterday's hash. Committing the payload itself at run time would leak the Pro board a day early; committing it a day later would leave a 24-hour editable window.
-7. **Public methodology page** (S/M) — `/methodology`: universe → factor screen → LLM thesis → adversarial verifier → demotion; plain-language explainers of the quant engine; explicit limitations section (including the interim-benchmark caveat). SEO cornerstone and the link to drop in Reddit comments.
+7. ~~Public methodology page~~ **Done Jul 30** — `/methodology` (auth-exempt, footer + track-record links): full pick pipeline, track-record measurement rules, quant-engine explainers, and an explicit limitations section including the interim-benchmark caveat and the not-yet-validated factor weights.
 8. **One real public sample Deep Dive** (S) — a dated, real-ticker report linked from the hero, regenerated monthly. Sophisticated visitors smell mocked demo content instantly.
-9. **Free-tier repackaging** (S) — track record stays public (done); add 1 Deep Dive/month to Free so users taste the analyst depth. No mid-tier.
+9. ~~Free-tier repackaging~~ **Done Jul 30** — `DEEP_DIVE_FREE_MONTHLY_LIMIT` (default 1 per rolling 30 days; 0 restores Pro-only) plus pricing-page copy. Track record already public. No mid-tier.
 
 ## Phase 2 — Months 2–3: widen the funnel; quant depth behind a user gate
 
