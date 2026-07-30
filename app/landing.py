@@ -1647,6 +1647,23 @@ def track_record_html(payload: dict) -> str:
       <span class="l">average return per pick</span></div>
   </div>"""
 
+    sim_stats = (payload.get("simulated") or {}).get("stats") or None
+    simulated = ""
+    if sim_stats:
+        simulated = f"""
+  <div class="stat-strip" data-reveal style="margin-top:1rem;">
+    <div class="stat"><span class="k">{_signed_pct(sim_stats.get("total_return_pct"))}</span>
+      <span class="l">top-5 portfolio, bought each run</span></div>
+    <div class="stat"><span class="k">{_signed_pct(sim_stats.get("benchmark_return_pct"))}</span>
+      <span class="l">S&amp;P 500 over the same days</span></div>
+    <div class="stat"><span class="k">{_signed_pct(sim_stats.get("max_drawdown_pct"))}</span>
+      <span class="l">worst drawdown along the way</span></div>
+  </div>
+  <p style="color:var(--ink-3);font-size:0.85rem;margin-top:0.6rem;">The simulated
+  portfolio buys each day&rsquo;s top-5 picks equal-weighted at the prior close and
+  rebalances when the board changes. Before transaction costs &mdash; a research
+  measure, not a trading result.</p>"""
+
     rows = ""
     for e in entries:
         entry_price = (
@@ -1672,6 +1689,7 @@ def track_record_html(payload: dict) -> str:
     body = f"""{_TRACK_RECORD_INTRO}
 <section style="padding-top:2.5rem;">
   {stats}
+  {simulated}
   <div class="table-scroll" data-reveal>
     <table class="tr-table">
       <thead><tr>

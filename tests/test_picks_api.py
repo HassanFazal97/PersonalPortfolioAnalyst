@@ -169,6 +169,12 @@ def test_track_record_computed_at_read_time(monkeypatch):
     assert s["measured"] == 1
     assert s["beat_benchmark"] == 1
     assert s["hit_rate_pct"] == 100.0
+    # The honest headline view: dated cohorts + the simulated top-N portfolio.
+    cohorts = body["cohorts"]["cohorts"]
+    assert len(cohorts) == 1 and cohorts[0]["members"] == 1
+    sim = body["simulated"]
+    assert sim["stats"]["total_return_pct"] == 10.0
+    assert sim["nav"][0]["nav"] == 1.0 and sim["nav"][-1]["nav"] == 1.1
 
 
 def test_track_record_survives_series_readjustment(monkeypatch):

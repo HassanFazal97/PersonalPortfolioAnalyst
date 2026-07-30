@@ -98,6 +98,7 @@ from app.profile import (
     profile_payload,
     resolve_risk_tolerance,
 )
+from app.quant import trackrecord
 from app.scheduler import DeliveryScheduler, DigestScheduler, IntervalScheduler
 from app.streaming import SENTINEL, ProgressBroker, sse_response
 from app.tools import (
@@ -728,7 +729,26 @@ async def _track_record_payload(repo: Repo, days: int = 90) -> dict:
         "compared": compared,
         "hit_rate_pct": round(beats / compared * 100, 1) if compared else None,
     }
-    payload = {"available": True, "entries": out, "summary": summary}
+    # Cohort view: the per-entry list double-counts persistent picks (a name
+    # picked 30 days running appears 30 times), so the honest headline stats
+    # are dated cohorts at fully-elapsed horizons plus a "top-5 bought each
+    # run" simulated portfolio — pure math in app/quant/trackrecord.py.
+    cohort_inputs = [
+        {"run_date": e.run_date, "ticker": e.ticker, "rank": e.rank}
+        for e in entries
+        if e.rank is not None
+    ]
+    payload = {
+        "available": True,
+        "entries": out,
+        "summary": summary,
+        "cohorts": trackrecord.cohort_returns(
+            cohort_inputs, by_ticker, bench_by_date
+        ),
+        "simulated": trackrecord.simulate_top_picks(
+            cohort_inputs, by_ticker, bench_by_date
+        ),
+    }
     _track_record_cache[days] = (perf_counter(), payload)
     return payload
 
