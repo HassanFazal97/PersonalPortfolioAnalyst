@@ -87,9 +87,12 @@ def test_picks_free_user_gets_402(monkeypatch):
     _as_user(monkeypatch, uid)
     asyncio.run(_seed_run(repo))
     assert client.get("/stocks/picks", headers=_AUTH).status_code == 402
+    # The track record is the public proof surface — open to free users and
+    # even unauthenticated visitors (the marketing site links to it).
     assert (
-        client.get("/stocks/picks/track-record", headers=_AUTH).status_code == 402
+        client.get("/stocks/picks/track-record", headers=_AUTH).status_code == 200
     )
+    assert client.get("/stocks/picks/track-record").status_code == 200
 
 
 def test_picks_pro_user_ok(monkeypatch):
@@ -135,19 +138,24 @@ def test_track_record_computed_at_read_time(monkeypatch):
                 }
             ]
         )
-        # Pick since then: +10%. Benchmark over the same span: +2%.
+        # entry_price is frozen from the last close BEFORE the pre-market
+        # run, so the measured span starts at the prior day's bar. Returns
+        # come from the stored series itself (same-series adjusted ratio),
+        # not the frozen dollar figure. Pick since then: +10%; SPY (the
+        # total-return benchmark) over the identical span: +2%.
+        prior = run_date - timedelta(days=1)
         await repo.upsert_daily_prices(
             "CHEAP",
             [
-                {"date": run_date.isoformat(), "adj_close": 100.0},
+                {"date": prior.isoformat(), "adj_close": 100.0},
                 {"date": date.today().isoformat(), "adj_close": 110.0},
             ],
         )
         await repo.upsert_daily_prices(
-            "^GSPC",
+            "SPY",
             [
-                {"date": run_date.isoformat(), "adj_close": 5000.0},
-                {"date": date.today().isoformat(), "adj_close": 5100.0},
+                {"date": prior.isoformat(), "adj_close": 500.0},
+                {"date": date.today().isoformat(), "adj_close": 510.0},
             ],
         )
 
@@ -161,6 +169,56 @@ def test_track_record_computed_at_read_time(monkeypatch):
     assert s["measured"] == 1
     assert s["beat_benchmark"] == 1
     assert s["hit_rate_pct"] == 100.0
+
+
+def test_track_record_survives_series_readjustment(monkeypatch):
+    """A 2:1 split after publication halves every stored historical close on
+    the next full refetch. entry_price stays frozen in pre-split dollars for
+    display, but the return must come from the re-adjusted series itself —
+    scoring the new series against the frozen dollar figure would report a
+    fake −45% on a pick that actually gained 10%."""
+    repo = FakeRepo()
+    client = _client(monkeypatch, repo)
+
+    async def seed():
+        run_date = date.today() - timedelta(days=30)
+        picks_run_id = await _seed_run(repo, run_date=run_date)
+        await repo.insert_pick_entries(
+            [
+                {
+                    "picks_run_id": picks_run_id,
+                    "run_date": run_date,
+                    "ticker": "SPLIT",
+                    "rank": 1,
+                    "composite_score": 0.5,
+                    "confidence": 0.7,
+                    "entry_price": 100.0,  # frozen pre-split
+                    "factors": {},
+                    "thesis_summary": "t",
+                }
+            ]
+        )
+        prior = run_date - timedelta(days=1)
+        # Post-split refetch: history re-adjusted to half the frozen price.
+        await repo.upsert_daily_prices(
+            "SPLIT",
+            [
+                {"date": prior.isoformat(), "adj_close": 50.0},
+                {"date": date.today().isoformat(), "adj_close": 55.0},
+            ],
+        )
+        await repo.upsert_daily_prices(
+            "SPY",
+            [
+                {"date": prior.isoformat(), "adj_close": 500.0},
+                {"date": date.today().isoformat(), "adj_close": 500.0},
+            ],
+        )
+
+    asyncio.run(seed())
+    entry = client.get("/stocks/picks/track-record", headers=_AUTH).json()["entries"][0]
+    assert entry["entry_price"] == 100.0
+    assert entry["return_pct"] == 10.0
 
 
 def test_track_record_empty(monkeypatch):

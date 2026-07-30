@@ -40,6 +40,10 @@ _SYNC_SPACING_SECONDS = 0.75
 # Extra symbols the quant engine needs beyond the user's holdings.
 _BENCHMARK_TICKER = "^GSPC"
 _FX_TICKER = "USDCAD=X"
+# Total-return S&P 500 proxy for the public picks track record: measured picks
+# use dividend-adjusted closes, so their benchmark must include dividends too
+# (^GSPC is price-only and would flatter picks by the index dividend yield).
+_TRACK_BENCHMARK_TICKER = "SPY"
 
 
 def _rows_from_stored(stored: list[Any]) -> list[dict[str, Any]]:
@@ -96,8 +100,8 @@ async def run_daily_prices_sync(repo: Any, settings: Any) -> dict[str, Any]:
         set(await repo.list_distinct_tickers())
         | set(await repo.list_distinct_watchlist_tickers())
     )
-    # The engine also needs these two, which are never "held".
-    for extra in (_BENCHMARK_TICKER, _FX_TICKER):
+    # The engine and the track record also need these, never "held".
+    for extra in (_BENCHMARK_TICKER, _FX_TICKER, _TRACK_BENCHMARK_TICKER):
         if extra not in tickers:
             tickers = [*tickers, extra]
 

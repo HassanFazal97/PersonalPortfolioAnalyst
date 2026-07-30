@@ -96,10 +96,10 @@ async def test_sync_covers_holdings_plus_benchmark_and_fx(monkeypatch):
         ]
     )
     out = await price_store.run_daily_prices_sync(repo, get_settings())
-    # Two holdings + ^GSPC + USDCAD=X.
-    assert out["tickers"] == 4
-    assert out["synced"] == 4
-    for t in ("NVDA", "RY.TO", "^GSPC", "USDCAD=X"):
+    # Two holdings + ^GSPC + USDCAD=X + SPY (track-record benchmark).
+    assert out["tickers"] == 5
+    assert out["synced"] == 5
+    for t in ("NVDA", "RY.TO", "^GSPC", "USDCAD=X", "SPY"):
         assert t in repo.daily_prices
 
 
@@ -120,6 +120,6 @@ async def test_sync_includes_watched_tickers(monkeypatch):
     await repo.add_watchlist_ticker(uuid.UUID(DEFAULT_USER_ID), "NVDA")
 
     out = await price_store.run_daily_prices_sync(repo, get_settings())
-    # NVDA + SHOP.TO (deduped) + ^GSPC + USDCAD=X.
-    assert out["tickers"] == 4
+    # NVDA + SHOP.TO (deduped) + ^GSPC + USDCAD=X + SPY.
+    assert out["tickers"] == 5
     assert "SHOP.TO" in repo.daily_prices

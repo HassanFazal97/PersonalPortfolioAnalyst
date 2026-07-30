@@ -25,7 +25,7 @@ def test_public_pages_no_token(monkeypatch):
 def test_pages_have_expected_content(monkeypatch):
     with _client(monkeypatch) as client:
         assert "Not financial advice" in client.get("/").text
-        assert "fazalhassan@live.ca" in client.get("/contact").text
+        assert "hello@cirvia.ca" in client.get("/contact").text
         assert "Privacy Policy" in client.get("/privacy").text
         assert "Terms of Service" in client.get("/terms").text
         pricing = client.get("/pricing").text

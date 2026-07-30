@@ -12,7 +12,11 @@ from urllib.parse import quote, urlparse
 
 from app.config import get_settings
 
-CONTACT_EMAIL = "fazalhassan@live.ca"
+# The public support address. hello@cirvia.ca must have receiving set up
+# (e.g. Cloudflare Email Routing forwarding to the owner's inbox) before a
+# deploy of this constant goes live — a dead contact address on legal pages
+# is worse than a personal one.
+CONTACT_EMAIL = "hello@cirvia.ca"
 LAST_UPDATED = "July 5, 2026"
 
 # Brand mark: a stylized dahlia — one petal path rotated into three layered
@@ -245,6 +249,8 @@ h1 {
   transform: translate(-50%, 0); animation: floaty-center 8s ease-in-out infinite alternate; }
 .fc-alert { right: 3%; top: 2%; width: 244px; animation-delay: -2.5s; }
 .fc-chat { left: 3%; bottom: 26%; width: 254px; animation-delay: -4.5s; }
+.fc-verify { right: 6%; bottom: 18%; width: 240px; animation-delay: -6s; }
+.fc-verify .mock-alert-k { color: var(--gain); }
 @keyframes floaty { from { transform: translateY(-6px); } to { transform: translateY(8px); } }
 @keyframes floaty-center {
   from { transform: translate(-50%, -6px); } to { transform: translate(-50%, 8px); }
@@ -279,6 +285,7 @@ h1 {
     left: auto !important; right: auto !important; top: auto !important; bottom: auto !important;
     transform: none !important; animation: none; box-shadow: 0 12px 32px oklch(35% 0.05 300 / 0.12); }
   .fc-chat { display: none; }
+  .fc-verify { display: none; }
   .hero-stars { display: none; }
 }
 /* showcase (chat demo) */
@@ -377,6 +384,42 @@ h3 { font-size: 1.05rem; font-weight: 650; margin-bottom: 0.3rem; }
 .plan li { position: relative; padding: 0.35rem 0 0.35rem 1.6rem; color: var(--ink-2); font-size: 0.95rem; }
 .plan li::before { content: "✓"; position: absolute; left: 0; color: var(--accent-text); font-weight: 700; }
 .plan .btn { margin-top: auto; text-align: center; }
+/* proof: stat tiles filled from the live track record + verification story */
+.stat-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 1rem; margin-top: 2.2rem; }
+.stat-strip[hidden] { display: none; } /* author display beats the hidden attr otherwise */
+.stat { background: var(--surface-1); border: 1px solid var(--line);
+  border-radius: var(--r-m); padding: 1.1rem 1.3rem; }
+.stat .k { display: block; font-size: 1.8rem; font-weight: 800; color: var(--ink);
+  letter-spacing: -0.015em; font-variant-numeric: tabular-nums; }
+.stat .l { color: var(--ink-3); font-size: 0.85rem; }
+.pro-pill { display: inline-block; font-size: 0.68rem; font-weight: 700;
+  color: var(--accent-text); background: var(--accent-deep); border-radius: 999px;
+  padding: 0.12rem 0.55rem; margin-left: 0.5rem; vertical-align: 0.14em;
+  letter-spacing: 0.03em; }
+/* track record table */
+.table-scroll { overflow-x: auto; margin-top: 2.2rem; background: var(--surface-1);
+  border: 1px solid var(--line); border-radius: var(--r-l); }
+.tr-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; min-width: 620px; }
+.tr-table th { text-align: left; font-size: 0.76rem; font-weight: 700;
+  letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-3);
+  padding: 0.9rem 1.1rem; border-bottom: 1px solid var(--line-strong); }
+.tr-table td { padding: 0.7rem 1.1rem; border-bottom: 1px solid var(--line);
+  color: var(--ink-2); }
+.tr-table tr:last-child td { border-bottom: none; }
+.tr-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.tr-table .tick { font-weight: 700; color: var(--ink); }
+/* sample digest: the plain-text digest, presented as it reads on your phone */
+.dg { padding-top: 0.9rem; font-size: 0.94rem; line-height: 1.6; color: var(--ink-2); }
+.dg .dg-label { font-size: 0.76rem; font-weight: 700; letter-spacing: 0.06em;
+  color: var(--ink-3); margin: 1.1rem 0 0.2rem; }
+.dg .dg-line strong { color: var(--ink); }
+.dg ul { list-style: none; }
+.dg li { position: relative; padding-left: 1rem; margin: 0.2rem 0; }
+.dg li::before { content: "–"; position: absolute; left: 0; color: var(--ink-3); }
+.dg .dg-holding { margin-top: 0.55rem; }
+.dg .dg-holding .h { font-variant-numeric: tabular-nums; color: var(--ink); font-weight: 600; }
+.dg .dg-holding p { padding-left: 1.1rem; color: var(--ink-2); font-size: 0.9rem; }
 /* legal / prose */
 .prose { max-width: 68ch; padding-top: 3rem; }
 .prose h1 { font-size: clamp(1.9rem, 4.5vw, 2.4rem); font-weight: 800; letter-spacing: -0.025em; margin-bottom: 0.4rem; }
@@ -731,6 +774,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
 _NAV_LINKS = (
     ("how", "/#how", "How it works"),
+    ("track", "/track-record", "Track record"),
     ("pricing", "/pricing", "Pricing"),
     ("contact", "/contact", "Contact"),
 )
@@ -825,6 +869,8 @@ _FOOTER = (
     "AI portfolio analyst for Canadian investors. Read-only. No trade execution.</p></div>"
     '<div class="foot-col"><h4>Product</h4>'
     '<a href="/">Home</a><a href="/#how">How it works</a>'
+    '<a href="/track-record">Track record</a>'
+    '<a href="/sample-digest">Sample digest</a>'
     '<a href="/pricing">Pricing</a><a href="/#faq">FAQ</a></div>'
     '<div class="foot-col"><h4>Legal</h4>'
     '<a href="/privacy">Privacy</a><a href="/terms">Terms</a></div>'
@@ -886,11 +932,13 @@ def _layout(title: str, description: str, body: str, active: str = "", path: str
 _HOME_BODY = """
 <section class="hero">
   <div class="hero-copy">
-    <h1 data-hero>Know what matters before the market opens.</h1>
-    <p class="lead" data-hero>Your holdings. Your brief. Every morning.</p>
+    <h1 data-hero>The AI analyst that shows its work.</h1>
+    <p class="lead" data-hero>Your real holdings, briefed every morning.
+    Every number computed, every claim verified &mdash; and a public track
+    record to prove it.</p>
     <div class="cta-row" data-hero>
       <a class="btn lg" href="/app#signup" data-auth="cta">Get started free</a>
-      <a class="quiet" href="#how">See how it works</a>
+      <a class="quiet" href="/track-record">See the track record</a>
     </div>
   </div>
   <div class="hero-scene">
@@ -920,6 +968,10 @@ _HOME_BODY = """
       <span class="mock-alert-k">Macro alert</span>
       <p class="fc-a">Major AI copyright lawsuit ruling shakes tech stocks. NVDA and MSFT in your portfolio are affected.</p>
     </div>
+    <div class="float-card fc-verify" data-float aria-hidden="true">
+      <span class="mock-alert-k">Verified</span>
+      <p class="fc-a">Deep dive complete: <strong>14 of 14 claims</strong> re-checked against live market data. 0 challenged.</p>
+    </div>
   </div>
 </section>
 
@@ -928,13 +980,34 @@ _HOME_BODY = """
   <div class="ledger" data-reveal-group data-stagger="0.45">
     <div class="ledger-row" data-reveal-item>
       <h3>Morning digest</h3>
-      <p>Overnight moves, what changed, and what to watch, written for your tickers.</p>
+      <p>Overnight moves, what changed, and what to watch, written for your tickers.
+      <a href="/sample-digest">See a sample</a>.</p>
       <span class="meta">Weekdays, your time</span>
     </div>
     <div class="ledger-row" data-reveal-item>
-      <h3>Macro alerts</h3>
+      <h3>Top Picks<span class="pro-pill">Pro</span></h3>
+      <p>A daily board screened from ~560 S&amp;P 500 and TSX names &mdash; quantitative
+      factors first, then AI analysts, then a verifier that re-checks every number.
+      Scored on a <a href="/track-record">public track record</a>.</p>
+      <span class="meta">Daily, pre-market</span>
+    </div>
+    <div class="ledger-row" data-reveal-item>
+      <h3>Deep Dives<span class="pro-pill">Pro</span></h3>
+      <p>Four research agents &mdash; fundamentals, technicals, risk, news &mdash;
+      investigate a holding in parallel, and an adversarial fact-checker re-tests
+      every claim before you see the report.</p>
+      <span class="meta">On demand</span>
+    </div>
+    <div class="ledger-row" data-reveal-item>
+      <h3>Macro alerts<span class="pro-pill">Pro</span></h3>
       <p>Fed decisions, energy shocks, geopolitics. Only when they touch your holdings.</p>
       <span class="meta">As it happens</span>
+    </div>
+    <div class="ledger-row" data-reveal-item>
+      <h3>Risk Lab<span class="pro-pill">Pro</span></h3>
+      <p>Monte Carlo futures, risk contribution, and correlation &mdash; quant analytics
+      on your actual book, explained in plain English.</p>
+      <span class="meta">Always current</span>
     </div>
     <div class="ledger-row" data-reveal-item>
       <h3>On-demand answers</h3>
@@ -947,6 +1020,56 @@ _HOME_BODY = """
       <span class="meta">Continuous</span>
     </div>
   </div>
+</section>
+
+<section id="proof">
+  <div class="security-grid">
+    <div data-reveal>
+      <h2>Never trust a guessed number.</h2>
+      <p class="sect-lead">Most AI tools assert; Cirvia proves. Every figure you see
+      is computed from market data, and everything the AI writes is re-checked
+      before it reaches you.</p>
+    </div>
+    <ul class="checklist" data-reveal>
+      <li>Every number is computed from source data &mdash; the AI is never allowed to make one up</li>
+      <li>An adversarial critic re-checks each claim with its own live tools</li>
+      <li>Challenged picks are demoted or flagged before you see them</li>
+      <li>Each pick&rsquo;s entry price is frozen at publication and scored publicly against the S&amp;P 500 &mdash; misses included</li>
+    </ul>
+  </div>
+  <div class="stat-strip" data-track-stats hidden>
+    <div class="stat"><span class="k" data-stat="picks">&ndash;</span>
+      <span class="l">picks measured, last 180 days</span></div>
+    <div class="stat"><span class="k" data-stat="hit">&ndash;</span>
+      <span class="l">beat the S&amp;P 500 over the same span</span></div>
+    <div class="stat"><span class="k" data-stat="avg">&ndash;</span>
+      <span class="l">average return per pick</span></div>
+  </div>
+  <p data-reveal style="margin-top:1.6rem;">
+    <a class="btn ghost" href="/track-record">See the public track record</a>
+  </p>
+  <script>
+  (function () {
+    fetch('/stocks/picks/track-record?days=180')
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        /* below ~30 measured picks the stats are noise, not signal — the
+           strip stays hidden and the track-record page carries the detail */
+        if (!d || !d.available || !d.summary || !(d.summary.measured >= 30)) return;
+        var s = d.summary;
+        function put(k, v) {
+          var el = document.querySelector('[data-stat="' + k + '"]');
+          if (el && v != null) el.textContent = v;
+        }
+        put('picks', s.measured);
+        put('hit', s.hit_rate_pct != null ? s.hit_rate_pct + '%' : null);
+        put('avg', s.avg_return_pct != null
+          ? (s.avg_return_pct > 0 ? '+' : '') + s.avg_return_pct + '%' : null);
+        document.querySelector('[data-track-stats]').hidden = false;
+      })
+      .catch(function () { /* stat strip simply stays hidden */ });
+  })();
+  </script>
 </section>
 
 <section id="showcase">
@@ -1006,6 +1129,16 @@ _HOME_BODY = """
     <details data-reveal-item><summary>Is this financial advice?</summary>
     <p>No. Cirvia is informational only. It explains and contextualizes; it does not
     tell you to buy or sell.</p></details>
+    <details data-reveal-item><summary>Do the picks actually work?</summary>
+    <p>Judge for yourself. Every daily pick&rsquo;s entry price is frozen at
+    publication and scored against the S&amp;P 500 on a
+    <a href="/track-record">public track record</a> &mdash; misses stay on the
+    board. Picks are research with receipts, not recommendations.</p></details>
+    <details data-reveal-item><summary>How do I know the AI isn&rsquo;t making things up?</summary>
+    <p>Every number is computed from market data in code &mdash; the AI is never
+    allowed to assert one. Written claims are re-checked by an adversarial
+    verifier with its own live tools, and anything challenged is demoted or
+    flagged before you see it.</p></details>
     <details data-reveal-item><summary>Which brokerages work?</summary>
     <p>Wealthsimple, Questrade, and most major North American brokerages. Connections
     are handled by SnapTrade, a trusted service that links millions of brokerage
@@ -1019,7 +1152,8 @@ _HOME_BODY = """
 
 <div class="cta-final" data-reveal>
   <h2>Know your portfolio by 9:00.</h2>
-  <p>Start free. Connected in under three minutes.</p>
+  <p>Every new account starts with 7 days of full Pro &mdash; no card required.
+  Connected in under three minutes.</p>
   <a class="btn lg" href="/app#signup" data-auth="cta">Get started free</a>
 </div>
 """
@@ -1370,6 +1504,7 @@ _PRICING_BODY = f"""
         <li>1 connected account</li>
         <li>Weekly digest on up to 3 holdings</li>
         <li>3 chat questions per week</li>
+        <li>Watchlist for up to 3 tickers</li>
       </ul>
       <a class="btn ghost" href="/app#signup">Start free</a>
     </div>
@@ -1380,8 +1515,14 @@ _PRICING_BODY = f"""
       <ul>
         <li>Unlimited connected accounts</li>
         <li>Daily weekday digest across all holdings</li>
+        <li>Top Picks &mdash; the daily verified board, with its
+        <a href="/track-record">public track record</a></li>
+        <li>Deep Dive research reports, 2 per week</li>
+        <li>Risk Lab &mdash; Monte Carlo, risk contribution, correlation</li>
         <li>Macro alerts when the world moves</li>
+        <li>Price-anomaly alerts on unusual moves</li>
         <li>10 chat questions per day</li>
+        <li>Watchlist for up to 30 tickers</li>
       </ul>
       <a class="btn ghost" href="/app/settings?billing=upgrade">Go Pro</a>
       <p class="price-note" style="margin-top:0.75rem;">New here? Signing up
@@ -1421,10 +1562,239 @@ _PRICING_BODY = f"""
 """
 
 
+# --------------------------------------------------------------------------
+# Track record (public proof page — body rendered per-request from live data)
+# --------------------------------------------------------------------------
+
+_TRACK_RECORD_INTRO = """
+<section class="hero" style="padding-bottom:0;">
+  <div class="hero-copy">
+    <h1 data-hero>Every pick. Priced honestly.</h1>
+    <p class="lead" data-hero>Each day&rsquo;s Top Picks are published with a frozen
+    entry price and scored here against the S&amp;P 500 over the identical span.
+    Misses stay on the board &mdash; nothing is ever deleted.</p>
+  </div>
+</section>
+"""
+
+_TRACK_RECORD_METHOD = """
+<section>
+  <h2 data-reveal>How this is measured</h2>
+  <div class="steps" data-reveal-group>
+    <div class="step" data-reveal-item><div class="num"></div><div><h3>Entry price is frozen</h3>
+    <p>The moment a pick is published, its entry price is recorded and never revised.</p></div></div>
+    <div class="step" data-reveal-item><div class="num"></div><div><h3>Scored at read time</h3>
+    <p>Returns are total returns &mdash; dividend- and split-adjusted &mdash; computed fresh
+    from publication to the latest stored close each time this page loads, not curated
+    snapshots.</p></div></div>
+    <div class="step" data-reveal-item><div class="num"></div><div><h3>Benchmarked, same span</h3>
+    <p>Each pick is compared against the S&amp;P 500 with dividends reinvested, from its
+    publication date to now. Beating a bull market is the bar, not just going up.</p></div></div>
+  </div>
+  <p class="sect-lead" style="margin-top:1.6rem;">Picks are research with receipts, not
+  recommendations. Past performance does not guarantee future results.</p>
+</section>
+
+<div class="cta-final" data-reveal>
+  <h2>See today&rsquo;s board with your own portfolio.</h2>
+  <p>Every new account starts with 7 days of full Pro &mdash; no card required.</p>
+  <a class="btn lg" href="/app#signup" data-auth="cta">Get started free</a>
+</div>
+"""
+
+
+def _signed_pct(value: float | None) -> str:
+    if value is None:
+        return "&ndash;"
+    return f"{'+' if value > 0 else ''}{value:.2f}%"
+
+
+def track_record_html(payload: dict) -> str:
+    """The public /track-record page, rendered from the same payload the
+    /stocks/picks/track-record JSON route returns."""
+    summary = payload.get("summary") or {}
+    entries = payload.get("entries") or []
+    if not payload.get("available") or not entries:
+        body = _TRACK_RECORD_INTRO + """
+<section>
+  <div class="callout" data-reveal>The track record is measured from live pick data and
+  builds day by day as picks season. Check back shortly &mdash; every pick published from
+  day one will appear here, wins and misses alike.</div>
+</section>
+""" + _TRACK_RECORD_METHOD
+        return _layout(
+            "Pick track record — Cirvia",
+            "The public, honestly-priced track record of Cirvia's daily Top Picks, "
+            "benchmarked against the S&P 500.",
+            body,
+            active="track",
+            path="/track-record",
+        )
+
+    stats = ""
+    if summary.get("measured"):
+        hit = (
+            f"{summary['hit_rate_pct']}%" if summary.get("hit_rate_pct") is not None
+            else "&ndash;"
+        )
+        stats = f"""
+  <div class="stat-strip" data-reveal>
+    <div class="stat"><span class="k">{summary["measured"]}</span>
+      <span class="l">picks measured</span></div>
+    <div class="stat"><span class="k">{hit}</span>
+      <span class="l">beat the S&amp;P 500 over the same span</span></div>
+    <div class="stat"><span class="k">{_signed_pct(summary.get("avg_return_pct"))}</span>
+      <span class="l">average return per pick</span></div>
+  </div>"""
+
+    rows = ""
+    for e in entries:
+        entry_price = (
+            f"${e['entry_price']:,.2f}" if e.get("entry_price") is not None else "&ndash;"
+        )
+        ret = e.get("return_pct")
+        bench = e.get("benchmark_return_pct")
+        ret_cls = "gain" if (ret or 0) > 0 else ("loss" if (ret or 0) < 0 else "")
+        beat = "&ndash;"
+        if ret is not None and bench is not None:
+            beat = "&#10003;" if ret > bench else "&#8211;"
+        rows += f"""
+      <tr>
+        <td class="num">{e["run_date"]}</td>
+        <td class="tick">{e["ticker"]}</td>
+        <td class="num">{e.get("rank") or "&ndash;"}</td>
+        <td class="num">{entry_price}</td>
+        <td class="num {ret_cls}">{_signed_pct(ret)}</td>
+        <td class="num">{_signed_pct(bench)}</td>
+        <td class="num">{beat}</td>
+      </tr>"""
+
+    body = f"""{_TRACK_RECORD_INTRO}
+<section style="padding-top:2.5rem;">
+  {stats}
+  <div class="table-scroll" data-reveal>
+    <table class="tr-table">
+      <thead><tr>
+        <th>Published</th><th>Ticker</th><th>Rank</th><th>Entry</th>
+        <th style="text-align:right;">Return</th>
+        <th style="text-align:right;">S&amp;P 500, same span</th>
+        <th style="text-align:right;">Beat</th>
+      </tr></thead>
+      <tbody>{rows}
+      </tbody>
+    </table>
+  </div>
+  <p style="color:var(--ink-3);font-size:0.85rem;margin-top:0.9rem;">Returns are total
+  returns (dividends and splits included), computed from each pick&rsquo;s last close
+  before publication to the latest stored close, at the moment this page loads. The
+  S&amp;P 500 column is SPY total return over the identical span.</p>
+</section>
+{_TRACK_RECORD_METHOD}"""
+    return _layout(
+        "Pick track record — Cirvia",
+        "The public, honestly-priced track record of Cirvia's daily Top Picks, "
+        "benchmarked against the S&P 500.",
+        body,
+        active="track",
+        path="/track-record",
+    )
+
+
+# --------------------------------------------------------------------------
+# Sample digest (public proof page — static, mirrors the real digest format)
+# --------------------------------------------------------------------------
+
+_SAMPLE_DIGEST_BODY = """
+<section class="hero" style="padding-bottom:0;">
+  <div class="hero-copy">
+    <h1 data-hero>A morning digest, up close.</h1>
+    <p class="lead" data-hero>This is what lands on your phone at 9:00 &mdash; written
+    fresh each morning from your actual holdings. The sample below covers an
+    illustrative portfolio.</p>
+  </div>
+</section>
+
+<div class="show-panel" data-hero style="max-width:640px;margin:2.5rem auto 0;">
+  <div class="mock-top"><span class="mock-dot"></span>Morning digest &mdash; sample
+    <span class="mock-date">9:00 AM</span></div>
+  <div class="dg">
+    <p class="dg-line"><strong>PORTFOLIO:</strong> &minus;0.6% today (&minus;$318)</p>
+    <p class="dg-label">TOP RISK</p>
+    <p>Rate-sensitive names are 38% of the book ahead of Thursday&rsquo;s Bank of
+    Canada decision; ENB and TD would feel a hawkish surprise most.</p>
+    <p class="dg-label">NOTABLE</p>
+    <ul>
+      <li>NVDA &minus;2.1%, extending yesterday&rsquo;s slide after the AI copyright
+      ruling; still the largest single-name exposure at 18%.</li>
+      <li>VFV +0.8% with the S&amp;P 500&rsquo;s rebound &mdash; the index sleeve did
+      the lifting today.</li>
+      <li>TD upgraded at a major bank on credit normalization.</li>
+    </ul>
+    <p class="dg-label">WATCH TODAY</p>
+    <p>Bank of Canada rate decision, 9:45 AM ET &mdash; direct read-through to ENB,
+    TD, and the REIT sleeve.</p>
+    <p class="dg-label">HOLDINGS <span class="pro-pill">Pro</span></p>
+    <div class="dg-holding"><span class="h">NVDA &middot; $9,120 &middot; 18.2% of book &middot; &minus;2.1% today</span>
+      <p>Extends yesterday&rsquo;s slide on the copyright ruling; no new company-specific news this morning.</p></div>
+    <div class="dg-holding"><span class="h">VFV &middot; $14,480 &middot; 28.9% of book &middot; +0.8% today</span>
+      <p>Tracking the S&amp;P 500&rsquo;s rebound; nothing name-specific.</p></div>
+    <div class="dg-holding"><span class="h">TD &middot; $6,240 &middot; 12.4% of book &middot; +1.2% today</span>
+      <p>Upgraded this morning on credit normalization; watch the BoC decision Thursday.</p></div>
+    <div class="dg-holding"><span class="h">QUIET: 5 others little changed; largest ENB &minus;0.3%.</span></div>
+  </div>
+</div>
+
+<section>
+  <h2 data-reveal>What you&rsquo;re looking at</h2>
+  <div class="ledger" data-reveal-group>
+    <div class="ledger-row" data-reveal-item>
+      <h3>Written for your book</h3>
+      <p>The digest is generated each morning from your synced holdings &mdash; not a
+      generic market newsletter with your name on it.</p>
+      <span class="meta"></span>
+    </div>
+    <div class="ledger-row" data-reveal-item>
+      <h3>One risk, called out</h3>
+      <p>TOP RISK is the single most important thing in your portfolio today. On a quiet
+      day it names your biggest exposure &mdash; it never invents drama.</p>
+      <span class="meta"></span>
+    </div>
+    <div class="ledger-row" data-reveal-item>
+      <h3>Numbers you can trust</h3>
+      <p>Every figure is computed from market data before the AI writes a word. It
+      explains the numbers; it is never allowed to make them up.</p>
+      <span class="meta"></span>
+    </div>
+    <div class="ledger-row" data-reveal-item>
+      <h3>Tuned to you</h3>
+      <p>Your investor profile &mdash; horizon, goals, experience &mdash; sets the lookback
+      window and what counts as worth mentioning.</p>
+      <span class="meta"></span>
+    </div>
+  </div>
+</section>
+
+<div class="cta-final" data-reveal>
+  <h2>Tomorrow morning, this could be your portfolio.</h2>
+  <p>Every new account starts with 7 days of full Pro &mdash; no card required.</p>
+  <a class="btn lg" href="/app#signup" data-auth="cta">Get started free</a>
+</div>
+"""
+
+SAMPLE_DIGEST_HTML = _layout(
+    "Sample morning digest — Cirvia",
+    "See exactly what Cirvia's morning digest looks like: portfolio move, top risk, "
+    "notable items, and what to watch — written from your real holdings.",
+    _SAMPLE_DIGEST_BODY,
+    path="/sample-digest",
+)
+
+
 LANDING_HTML = _layout(
     "Cirvia — AI portfolio analyst for Canadian investors",
-    "Connect your brokerage, get a daily digest, macro alerts, and on-demand answers about your "
-    "real holdings. Read-only. No trade execution.",
+    "The AI analyst that shows its work: a daily brief on your real holdings, verified "
+    "stock research with a public track record, and on-demand answers. Read-only. "
+    "No trade execution.",
     _HOME_BODY,
     active="home",
     path="/",
@@ -1433,8 +1803,8 @@ LANDING_HTML = _layout(
 PRICING_HTML = _layout(
     "Pricing — Cirvia",
     "Cirvia pricing: start free with a weekly digest and chat questions, or go Pro at "
-    "$15/mo USD ($120/yr) for unlimited accounts, daily digests, macro alerts, and 10 "
-    "chat questions a day.",
+    "$15/mo USD ($120/yr) for daily digests, verified Top Picks with a public track "
+    "record, Deep Dive reports, Risk Lab, and macro alerts.",
     _PRICING_BODY,
     active="pricing",
     path="/pricing",
