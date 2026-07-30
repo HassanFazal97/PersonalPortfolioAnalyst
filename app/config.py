@@ -311,6 +311,11 @@ class Settings(BaseSettings):
     digest_cron: str = Field(default="0 9 * * 1-5", alias="DIGEST_CRON")
     tz: str = Field(default="America/Toronto", alias="TZ")
 
+    # Daily trial-lifecycle notices (app/trial_notices.py): T-2 days, day-of,
+    # +3 days undecided. DB-only scan + delivery-queue writes, so it defaults
+    # on (after the morning digest). "" disables.
+    trial_notices_cron: str = Field(default="0 10 * * *", alias="TRIAL_NOTICES_CRON")
+
     # ---- Daily holding-news refresh (news_items feed) ----------------------
     # Runs 7 days a week (unlike the weekday digest) so weekend news lands on
     # the day it happens instead of arriving as a Monday backlog. Scheduled

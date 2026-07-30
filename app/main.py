@@ -48,7 +48,6 @@ from app.agent.prompts import (
 )
 from app.auth.context import set_current_user_id
 from app.auth.jwt import AuthError, jwks_url_for, verify_supabase_jwt
-from app.perf import authcache, snapshot
 from app.config import (
     DEFAULT_USER_ID,
     chat_run_budget,
@@ -80,6 +79,7 @@ from app.landing import (
 )
 from app.memory import ingest as memory_ingest
 from app.memory.embeddings import memory_enabled
+from app.perf import authcache, snapshot
 from app.plans import (
     effective_plan,
     max_digest_holdings,
@@ -102,6 +102,7 @@ from app.scheduler import DeliveryScheduler, DigestScheduler, IntervalScheduler
 from app.streaming import SENTINEL, ProgressBroker, sse_response
 from app.tools import (
     fundamentals,
+    logos,
     market,
     portfolio,
     portfolio_risk,
@@ -117,6 +118,7 @@ from app.tools.registry import (
     ToolContext,
 )
 from app.tools.tickers import normalize_ticker
+from app.trial_notices import run_trial_notices
 from app.webapp import (
     NOT_CONFIGURED_HTML,
     dashboard_page,
@@ -150,6 +152,7 @@ async def lifespan(app: FastAPI):
     app.state.deep_dive_scheduler = None
     app.state.picks_sync_scheduler = None
     app.state.picks_scheduler = None
+    app.state.trial_notices_scheduler = None
     app.state.delivery_scheduler = None
     app.state.quote_warm_scheduler = None
     app.state.positions_refresh_scheduler = None
@@ -292,6 +295,20 @@ async def lifespan(app: FastAPI):
             picks_scheduler.start()
             app.state.picks_scheduler = picks_scheduler
 
+        if settings.trial_notices_cron:
+            async def _run_trial_notices() -> None:
+                await run_trial_notices(repo, get_settings())
+
+            trial_notices_scheduler = DigestScheduler(
+                heartbeat_wrapped("trial_notices", repo, _run_trial_notices),
+                cron=settings.trial_notices_cron,
+                timezone=settings.tz,
+                job_id="trial_notices",
+                misfire_grace_seconds=settings.digest_misfire_grace_seconds,
+            )
+            trial_notices_scheduler.start()
+            app.state.trial_notices_scheduler = trial_notices_scheduler
+
         if settings.quote_warm_interval_seconds > 0:
             async def _warm_builder(user_id: uuid.UUID, name: str):
                 set_current_user_id(user_id)
@@ -373,6 +390,8 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        if app.state.trial_notices_scheduler is not None:
+            app.state.trial_notices_scheduler.shutdown()
         if app.state.positions_refresh_scheduler is not None:
             app.state.positions_refresh_scheduler.shutdown()
         if app.state.quote_warm_scheduler is not None:
@@ -1656,6 +1675,15 @@ def create_app() -> FastAPI:
             ],
         }
 
+    @app.get("/funnel")
+    async def funnel_summary(request: Request) -> dict:
+        """Owner-only funnel milestone counts (signup → connected → trial →
+        decision) — the measurements the roadmap gates decisions on."""
+        if _user_id(request) != _OWNER_USER_ID:
+            raise HTTPException(status_code=403, detail="owner only")
+        repo = _require_repo(app)
+        return {"events": await repo.funnel_counts()}
+
     @app.get("/runs")
     async def list_runs(
         request: Request, trigger: str | None = None, limit: int = 50
@@ -1787,6 +1815,12 @@ def create_app() -> FastAPI:
             result = await sync_brokerage_positions(repo, user_id=user_id)
         except (SnapTradeError, RuntimeError) as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
+        # First successful sync is the value moment: arm the account's one
+        # no-card Pro trial (no-op on every later sync) and mark the funnel.
+        armed = await repo.maybe_start_trial(user_id, get_settings().trial_days)
+        await repo.record_funnel_event("portfolio_connected", user_id=user_id)
+        if armed is not None:
+            result = {**result, "trial_ends_at": armed.isoformat()}
         snapshot.store.invalidate(user_id, "portfolio", "status", "me")
         return result
 
@@ -2401,6 +2435,10 @@ def create_app() -> FastAPI:
         user_id = _user_id(request)
         snapshot.store.touch(user_id)
         snap, stale = snapshot.store.get(user_id)
+        if not snap:
+            # Cold start for this user+process: cheap point to stamp the
+            # once-per-account milestone (insert is idempotent).
+            await repo.record_funnel_event("dashboard_viewed", user_id=user_id)
         sections: dict[str, dict] = {
             n: {"data": snap[n]} for n in snapshot.SECTION_NAMES if n in snap
         }
@@ -2468,6 +2506,26 @@ def create_app() -> FastAPI:
             for t, data in funds.items()
         }
         return {"metrics": metrics}
+
+    @app.get("/portfolio/logo/{ticker}")
+    async def portfolio_logo(request: Request, ticker: str) -> Response:
+        """Company logo for a ticker, resolved and cached server-side so the
+        browser never tells a third-party icon host what the user holds.
+        404 (no website / no icon yet) renders as the legend's lettermark."""
+        repo = _require_repo(app)
+        icon = await logos.get_logo(
+            _validated_ticker(ticker), repo=repo, settings=get_settings()
+        )
+        if icon is None:
+            raise HTTPException(status_code=404, detail="no logo for this ticker")
+        body, media_type = icon
+        return Response(
+            body,
+            media_type=media_type,
+            # Logos are immutable in practice; a day of browser cache keeps
+            # repeat dashboard loads from re-requesting all of them.
+            headers={"Cache-Control": "private, max-age=86400"},
+        )
 
     @app.get("/portfolio/risk-analytics")
     async def portfolio_risk_analytics(request: Request) -> dict:

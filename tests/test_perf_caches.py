@@ -4,8 +4,6 @@ import asyncio
 import uuid
 from time import time as now
 
-import pytest
-
 from app.perf import authcache
 from app.perf.snapshot import SnapshotStore, section_ttl
 

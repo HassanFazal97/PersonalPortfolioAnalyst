@@ -2,22 +2,31 @@
 
 Pricing copy lives on ``/pricing``; these helpers are the enforcement layer.
 
-Trial semantics (``users.trial_ends_at``, migration 017): new signups get a
-no-card Pro trial. While it runs the user is Pro everywhere. When it lapses
-without a decision, digests PAUSE (neither cadence) until the user either
-upgrades (webhook sets plan='pro' and clears the timestamp) or picks Free
-(``POST /billing/choose-free`` clears it). NULL = no trial state.
+Trial semantics (``users.trial_ends_at`` migration 017, ``trial_started_at``
+migration 024): the no-card Pro trial arms at the user's first successful
+portfolio sync (``Repo.maybe_start_trial``), so every trial day is a value
+day. While it runs the user is Pro everywhere. When it lapses without a
+decision, digests PAUSE for a bounded grace window
+(``TRIAL_DECISION_GRACE_DAYS``) — the forced-choice moment — after which the
+account silently resumes as plain Free: a Free user receiving Monday digests
+is a live upgrade prospect, an indefinitely-paused user is churn. Either
+explicit resolution clears ``trial_ends_at`` (paying via the webhook, or
+``POST /billing/choose-free``). NULL = no trial state.
 """
 
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from app.config import DEFAULT_USER_ID, Settings
 
 _OWNER_USER_ID = uuid.UUID(DEFAULT_USER_ID)
+
+# How long a lapsed, undecided trial holds digests before the account
+# auto-resumes on the Free cadence.
+TRIAL_DECISION_GRACE_DAYS = 7
 
 
 def _trial_ends_at(user: Any | None) -> datetime | None:
@@ -34,12 +43,14 @@ def trial_active(user: Any | None, *, now: datetime | None = None) -> bool:
 def trial_decision_pending(user: Any | None, *, now: datetime | None = None) -> bool:
     """Trial lapsed and the user hasn't chosen upgrade-or-Free yet.
 
-    This is the digests-paused state; both resolutions clear ``trial_ends_at``
-    (paying via the webhook, or choosing Free explicitly)."""
+    This is the digests-paused state, bounded: past the grace window the
+    account is treated as plain Free with no pending decision (no DB write
+    needed — every consumer resolves through this function)."""
     ends = _trial_ends_at(user)
     if ends is None or getattr(user, "plan", "free") == "pro":
         return False
-    return (now or datetime.now(timezone.utc)) >= ends
+    moment = now or datetime.now(timezone.utc)
+    return ends <= moment < ends + timedelta(days=TRIAL_DECISION_GRACE_DAYS)
 
 
 def effective_plan(user: Any | None, *, now: datetime | None = None) -> str:

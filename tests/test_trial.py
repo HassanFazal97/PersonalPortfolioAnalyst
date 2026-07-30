@@ -98,24 +98,82 @@ def test_trial_user_gets_daily_cadence():
 # --- provisioning ---------------------------------------------------------------
 
 
-async def test_signup_provisions_trial():
+async def test_signup_does_not_arm_trial():
+    # The clock starts at the first portfolio sync (the first value moment),
+    # not at signup: a user who signs up Monday and connects Friday should
+    # still get all 7 Pro days.
     repo = FakeRepo()
     uid = await repo.get_or_create_user(auth_id=uuid.uuid4(), trial_days=7)
     user = await repo.get_user(uid)
-    assert trial_active(user)
-    assert effective_plan(user) == "pro"
-    # Idempotent: a second sight of the same auth_id doesn't reset the clock.
-    ends = user.trial_ends_at
-    await repo.get_or_create_user(auth_id=user.auth_id, trial_days=7)
-    assert (await repo.get_user(uid)).trial_ends_at == ends
-
-
-async def test_signup_without_trial_days_starts_free():
-    repo = FakeRepo()
-    uid = await repo.get_or_create_user(auth_id=uuid.uuid4(), trial_days=0)
-    user = await repo.get_user(uid)
     assert user.trial_ends_at is None
     assert effective_plan(user) == "free"
+
+
+async def test_first_sync_arms_trial_exactly_once():
+    repo = FakeRepo()
+    uid = await repo.get_or_create_user(auth_id=uuid.uuid4())
+    ends = await repo.maybe_start_trial(uid, 7)
+    user = await repo.get_user(uid)
+    assert ends is not None and user.trial_ends_at == ends
+    assert trial_active(user) and effective_plan(user) == "pro"
+    # A later sync never resets the clock...
+    assert await repo.maybe_start_trial(uid, 7) is None
+    assert (await repo.get_user(uid)).trial_ends_at == ends
+    # ...and choosing Free then reconnecting can't re-arm a consumed trial.
+    await repo.resolve_trial(uid)
+    assert await repo.maybe_start_trial(uid, 7) is None
+    assert (await repo.get_user(uid)).trial_ends_at is None
+
+
+async def test_trial_disabled_or_paying_never_arms():
+    repo = FakeRepo()
+    uid = await repo.get_or_create_user(auth_id=uuid.uuid4())
+    assert await repo.maybe_start_trial(uid, 0) is None
+    pro = uuid.uuid4()
+    repo.seed_user(pro, plan="pro")
+    assert await repo.maybe_start_trial(pro, 7) is None
+
+
+def test_decision_pending_is_grace_bounded():
+    # The digests-paused forced-choice moment lasts TRIAL_DECISION_GRACE_DAYS;
+    # after that the account silently resumes as plain Free (no DB write —
+    # every consumer resolves through trial_decision_pending).
+    from app.plans import TRIAL_DECISION_GRACE_DAYS
+
+    now = datetime.now(timezone.utc)
+    inside = SimpleNamespace(
+        plan="free",
+        trial_ends_at=now - timedelta(days=TRIAL_DECISION_GRACE_DAYS - 1),
+    )
+    past = SimpleNamespace(
+        plan="free",
+        trial_ends_at=now - timedelta(days=TRIAL_DECISION_GRACE_DAYS + 1),
+    )
+    assert trial_decision_pending(inside) is True
+    assert trial_decision_pending(past) is False
+    assert effective_plan(past) == "free"
+
+
+async def _fake_sync(repo, *, user_id, refresh=True):
+    return {"synced": 1}
+
+
+def test_first_portfolio_sync_arms_trial_via_route(monkeypatch):
+    repo = FakeRepo()
+    uid = uuid.uuid4()
+    repo.seed_user(uid)
+    client = _client(monkeypatch, repo)
+    _as_user(monkeypatch, uid)
+    monkeypatch.setattr(main, "sync_brokerage_positions", _fake_sync)
+
+    body = client.post("/portfolio/sync", headers=_AUTH).json()
+    assert "trial_ends_at" in body
+    user = repo._users_by_id[uid]
+    assert trial_active(user)
+    assert (uid, "portfolio_connected") in repo.funnel_events
+    assert (uid, "trial_started") in repo.funnel_events
+    # The second sync is just a sync — no trial fields in the response.
+    assert "trial_ends_at" not in client.post("/portfolio/sync", headers=_AUTH).json()
 
 
 # --- digest pipeline pause --------------------------------------------------------

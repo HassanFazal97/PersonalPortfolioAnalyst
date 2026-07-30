@@ -94,8 +94,12 @@ class User(Base):
     )
     # No-card Pro trial (migration 017). Future = trial active (Pro
     # experience); past + plan 'free' = digests paused pending the user's
-    # upgrade-or-free decision; NULL = resolved or never had one.
+    # upgrade-or-free decision (bounded by the grace window in app/plans.py);
+    # NULL = resolved or not yet started.
     trial_ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # When the account's one trial was armed (migration 024) — at the first
+    # successful portfolio sync, not signup. Non-NULL = consumed, never re-arm.
+    trial_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Stripe billing linkage (migration 015). Customer id survives a
     # downgrade so a re-subscribe reuses the same Stripe customer.
     stripe_customer_id: Mapped[str | None] = mapped_column(Text, unique=True)
@@ -571,6 +575,27 @@ class StockPickEntry(Base):
     entry_price: Mapped[Decimal | None] = mapped_column(Numeric)
     factors: Mapped[dict | None] = mapped_column(JSONB)
     thesis_summary: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class FunnelEvent(Base):
+    """Once-per-account funnel milestone (migration 025): signup → connected
+    → trial → decision. The composite PK makes recording idempotent; anything
+    repeatable belongs in agent_runs/digests, not here."""
+
+    __tablename__ = "funnel_events"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    event: Mapped[str] = mapped_column(Text, primary_key=True)
+    meta: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'")
+    )
     created_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

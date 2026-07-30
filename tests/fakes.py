@@ -42,10 +42,13 @@ class FakeRepo:
         self.daily_prices: dict[str, list[SimpleNamespace]] = {}
         # Insertion-ordered (user_id, ticker) -> row; dict order = created_at order.
         self._watchlist: dict[tuple[Any, str], SimpleNamespace] = {}
+        # (user_id, event) -> meta; mirrors funnel_events' once-per-account PK.
+        self.funnel_events: dict[tuple[Any, str], dict] = {}
 
     def seed_user(self, user_id, *, plan="free", digest_enabled=True, email=None,
                   digest_tickers=None, stripe_customer_id=None,
-                  stripe_subscription_id=None, trial_ends_at=None):
+                  stripe_subscription_id=None, trial_ends_at=None,
+                  trial_started_at=None):
         self._users_by_id[user_id] = SimpleNamespace(
             id=user_id, auth_id=None, email=email, plan=plan,
             digest_enabled=digest_enabled, timezone="America/Toronto",
@@ -56,6 +59,7 @@ class FakeRepo:
             plan_since=None, stripe_current_period_end=None,
             stripe_cancel_at_period_end=False,
             trial_ends_at=trial_ends_at,
+            trial_started_at=trial_started_at,
             investor_archetype=None, risk_tolerance=None,
             investing_horizon=None, investing_experience=None,
             investing_goals=[], profile_completed_at=None,
@@ -94,14 +98,12 @@ class FakeRepo:
         return rows[:limit]
 
     async def get_or_create_user(self, *, auth_id, email=None, trial_days=0):
+        # Mirrors the real repo: provisioning no longer arms the trial —
+        # that happens at first portfolio sync via maybe_start_trial.
+        del trial_days
         if auth_id not in self._users_by_auth:
             uid = uuid.uuid4()
             self._users_by_auth[auth_id] = uid
-            trial_ends_at = (
-                datetime.now(timezone.utc) + timedelta(days=trial_days)
-                if trial_days > 0
-                else None
-            )
             self._users_by_id[uid] = SimpleNamespace(
                 id=uid, auth_id=auth_id, email=email, plan="free", digest_enabled=True,
                 timezone="America/Toronto", digest_send_time="07:45",
@@ -109,18 +111,51 @@ class FakeRepo:
                 stripe_customer_id=None, stripe_subscription_id=None,
                 plan_since=None, stripe_current_period_end=None,
                 stripe_cancel_at_period_end=False,
-                trial_ends_at=trial_ends_at,
+                trial_ends_at=None, trial_started_at=None,
                 investor_archetype=None, risk_tolerance=None,
                 investing_horizon=None, investing_experience=None,
                 investing_goals=[], profile_completed_at=None,
                 profile_prompt_dismissed_at=None,
             )
+            await self.record_funnel_event("signup", user_id=self._users_by_auth[auth_id])
         return self._users_by_auth[auth_id]
+
+    async def maybe_start_trial(self, user_id, trial_days):
+        if trial_days <= 0:
+            return None
+        user = self._users_by_id.get(user_id)
+        if (
+            user is None
+            or user.plan == "pro"
+            or getattr(user, "trial_started_at", None) is not None
+        ):
+            return None
+        now = datetime.now(timezone.utc)
+        user.trial_started_at = now
+        user.trial_ends_at = now + timedelta(days=trial_days)
+        await self.record_funnel_event("trial_started", user_id=user_id)
+        return user.trial_ends_at
 
     async def resolve_trial(self, user_id):
         user = self._users_by_id.get(user_id)
         if user is not None:
             user.trial_ends_at = None
+        await self.record_funnel_event("chose_free", user_id=user_id)
+
+    async def list_trial_users(self):
+        return [
+            u for u in self._users_by_id.values()
+            if getattr(u, "trial_ends_at", None) is not None and u.plan != "pro"
+        ]
+
+    async def record_funnel_event(self, event_name, *, user_id, meta=None):
+        self.funnel_events.setdefault((user_id, event_name), meta or {})
+
+    async def funnel_counts(self):
+        counts: dict[str, int] = {}
+        for (_uid, event_name) in self.funnel_events:
+            counts[event_name] = counts.get(event_name, 0) + 1
+        return counts
 
     async def get_user(self, user_id):
         return self._users_by_id.get(user_id)
@@ -777,6 +812,7 @@ class FakeRepo:
         self.outbound.append(stored_body)
         self._outbox[msg_id] = SimpleNamespace(
             id=msg_id,
+            user_id=user_id,
             body=stored_body,
             status="queued",
             attempts=0,
@@ -785,6 +821,12 @@ class FakeRepo:
             payload={"kind": kind, **({"subject": subject} if subject else {})},
         )
         return msg_id
+
+    async def has_outbound_of_kind(self, user_id, kind):
+        return any(
+            m.user_id == user_id and m.payload.get("kind") == kind
+            for m in self._outbox.values()
+        )
 
     # ---- job heartbeats (mirrors app/db/repo.py) -------------------------
 

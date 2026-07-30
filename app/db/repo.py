@@ -7,6 +7,7 @@ functions. The agent loop, tools, and API routes depend only on this surface.
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 import uuid
 from datetime import date, datetime, timedelta, timezone
@@ -32,6 +33,7 @@ from app.db.models import (
     DailyPrice,
     DeepDiveReport,
     Digest,
+    FunnelEvent,
     JobHeartbeat,
     MemoryChunk,
     ModelCall,
@@ -55,6 +57,8 @@ from app.delivery.channels import CHANNELS
 # Owner (user #1) attribution until per-user auth lands. Every tenant-scoped
 # read/write defaults to this user; pass user_id to scope to another.
 _OWNER_USER_ID = uuid.UUID(DEFAULT_USER_ID)
+
+logger = logging.getLogger(__name__)
 
 
 def digest_mentions_ticker(body: str | None, ticker: str) -> bool:
@@ -266,22 +270,47 @@ class Repo:
         self, *, auth_id: uuid.UUID, email: str | None = None, trial_days: int = 0
     ) -> uuid.UUID:
         """Resolve the app user for a Supabase auth uid, provisioning on first
-        sight (with a no-card Pro trial when ``trial_days`` > 0). Returns the
-        app ``users.id`` (distinct from the auth uid)."""
+        sight. Returns the app ``users.id`` (distinct from the auth uid).
+
+        The no-card Pro trial is NOT armed here — it starts at the first
+        successful portfolio sync (``maybe_start_trial``), so all
+        ``trial_days`` are value days. The parameter is kept for call-site
+        compatibility but no longer read."""
+        del trial_days
         async with self._session() as s:
             existing = await s.execute(select(User.id).where(User.auth_id == auth_id))
             row = existing.scalar_one_or_none()
             if row is not None:
                 return row
-            trial_ends_at = (
-                datetime.now(timezone.utc) + timedelta(days=trial_days)
-                if trial_days > 0
-                else None
-            )
-            user = User(auth_id=auth_id, email=email, trial_ends_at=trial_ends_at)
+            user = User(auth_id=auth_id, email=email)
             s.add(user)
             await s.commit()
+            await self.record_funnel_event("signup", user_id=user.id)
             return user.id
+
+    async def maybe_start_trial(
+        self, user_id: uuid.UUID, trial_days: int
+    ) -> datetime | None:
+        """Arm the account's one no-card Pro trial at the first value moment
+        (first successful portfolio sync). Returns the new ``trial_ends_at``
+        when armed; None when already consumed, already paying, or disabled."""
+        if trial_days <= 0:
+            return None
+        async with self._session() as s:
+            user = await s.get(User, user_id)
+            if (
+                user is None
+                or user.plan == "pro"
+                or user.trial_started_at is not None
+            ):
+                return None
+            now = datetime.now(timezone.utc)
+            user.trial_started_at = now
+            user.trial_ends_at = now + timedelta(days=trial_days)
+            ends = user.trial_ends_at
+            await s.commit()
+        await self.record_funnel_event("trial_started", user_id=user_id)
+        return ends
 
     async def resolve_trial(self, user_id: uuid.UUID) -> None:
         """The user chose to continue on Free (or the trial state is otherwise
@@ -292,6 +321,51 @@ class Repo:
                 return
             user.trial_ends_at = None
             await s.commit()
+        await self.record_funnel_event("chose_free", user_id=user_id)
+
+    async def list_trial_users(self) -> list[User]:
+        """Users with live trial state (active or lapsed-undecided): the
+        trial-notices job's scan set. Paying users have no trial state."""
+        async with self._session() as s:
+            result = await s.execute(
+                select(User).where(
+                    User.trial_ends_at.is_not(None), User.plan != "pro"
+                )
+            )
+            return list(result.scalars().all())
+
+    async def record_funnel_event(
+        self,
+        event_name: str,
+        *,
+        user_id: uuid.UUID,
+        meta: dict[str, Any] | None = None,
+    ) -> None:
+        """Record a once-per-account funnel milestone. Idempotent (PK conflict
+        is a no-op) and never raises — analytics must not break product paths."""
+        try:
+            async with self._session() as s:
+                stmt = (
+                    pg_insert(FunnelEvent)
+                    .values(user_id=user_id, event=event_name, meta=meta or {})
+                    .on_conflict_do_nothing(
+                        index_elements=[FunnelEvent.user_id, FunnelEvent.event]
+                    )
+                )
+                await s.execute(stmt)
+                await s.commit()
+        except Exception:  # noqa: BLE001 - observability is best-effort
+            logger.warning(
+                "funnel event %s for %s failed", event_name, user_id, exc_info=True
+            )
+
+    async def funnel_counts(self) -> dict[str, int]:
+        """Accounts per funnel milestone — the roadmap's decision dashboard."""
+        async with self._session() as s:
+            result = await s.execute(
+                select(FunnelEvent.event, func.count()).group_by(FunnelEvent.event)
+            )
+            return {event: int(n) for event, n in result.all()}
 
     async def list_active_user_ids(self) -> list[uuid.UUID]:
         """Users who should receive scheduled digests.
@@ -449,7 +523,8 @@ class Repo:
             user = await s.get(User, user_id)
             if user is None:
                 return
-            if plan == "pro" and user.plan != "pro":
+            upgraded = plan == "pro" and user.plan != "pro"
+            if upgraded:
                 user.plan_since = datetime.now(timezone.utc)
             user.plan = plan
             if plan == "pro":
@@ -463,6 +538,8 @@ class Repo:
                 user.stripe_current_period_end = None
                 user.stripe_cancel_at_period_end = False
             await s.commit()
+        if upgraded:
+            await self.record_funnel_event("upgraded", user_id=user_id)
 
     async def stripe_event_seen(self, event_id: str) -> bool:
         """Whether this webhook event id was already processed successfully."""
@@ -1333,6 +1410,21 @@ class Repo:
             s.add(msg)
             await s.commit()
             return msg.id
+
+    async def has_outbound_of_kind(self, user_id: uuid.UUID, kind: str) -> bool:
+        """Whether a message of this payload kind was ever queued for the user
+        — the trial-notices dedup check (each notice sends at most once per
+        account; accounts get one trial)."""
+        async with self._session() as s:
+            result = await s.execute(
+                select(OutboundMessage.id)
+                .where(
+                    OutboundMessage.user_id == user_id,
+                    OutboundMessage.payload["kind"].astext == kind,
+                )
+                .limit(1)
+            )
+            return result.scalar_one_or_none() is not None
 
     async def claim_due_outbound(
         self, limit: int = 25, *, lease_seconds: int = 120
