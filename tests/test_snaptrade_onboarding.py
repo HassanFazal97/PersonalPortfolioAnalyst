@@ -200,7 +200,7 @@ def _status_service(monkeypatch, connections):
     service.list_connections.return_value = connections
     service.list_accounts.return_value = []
 
-    async def fake_service_for_user(repo, user_id, settings):
+    async def fake_service_for_user(repo, user_id, settings, **kwargs):
         return service
 
     monkeypatch.setattr(

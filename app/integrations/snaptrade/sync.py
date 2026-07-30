@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import datetime
 from typing import Any
@@ -37,16 +38,25 @@ async def sync_brokerage_positions(
             raise
         service = SnapTradeService(settings)
 
+    # The SnapTrade SDK is synchronous (requests): every remote call runs
+    # via to_thread so a sync — inline from POST /portfolio/sync or from the
+    # background positions job — never blocks the event loop.
     if refresh:
         refresh_skipped = 0
-        for conn in service.list_connections():
+        for conn in await asyncio.to_thread(service.list_connections):
             auth_id = conn.get("id") or conn.get("authorization_id")
-            if auth_id and not service.refresh_connection(str(auth_id)):
+            if auth_id and not await asyncio.to_thread(
+                service.refresh_connection, str(auth_id)
+            ):
                 refresh_skipped += 1
     else:
         refresh_skipped = 0
 
-    accounts = [a for a in service.list_accounts() if is_investment_account(a)]
+    accounts = [
+        a
+        for a in await asyncio.to_thread(service.list_accounts)
+        if is_investment_account(a)
+    ]
     if not accounts:
         raise RuntimeError(
             "No investment accounts found. Open the connect URL and link "
@@ -60,7 +70,9 @@ async def sync_brokerage_positions(
         account_id = account.get("id")
         if not account_id:
             continue
-        positions = service.get_account_positions(str(account_id))
+        positions = await asyncio.to_thread(
+            service.get_account_positions, str(account_id)
+        )
         rows = map_account_positions(account, positions)
         mapped.extend(rows)
         account_summaries.append(

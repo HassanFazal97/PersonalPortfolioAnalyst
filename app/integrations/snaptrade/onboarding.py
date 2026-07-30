@@ -40,15 +40,23 @@ def _require_commercial_for_user(settings: Settings, user_id: uuid.UUID) -> None
         )
 
 
+_UNFETCHED: Any = object()  # sentinel: "caller did not pre-fetch the row"
+
+
 async def resolve_credentials(
     repo: Repo,
     user_id: uuid.UUID,
     settings: Settings,
+    *,
+    row: Any = _UNFETCHED,
 ) -> SnapTradeUserCredentials | None:
     """Load decrypted SnapTrade credentials for a user.
 
-    Owner falls back to env ``SNAPTRADE_USER_*`` when no DB row exists."""
-    row = await repo.get_snaptrade_credentials(user_id)
+    Owner falls back to env ``SNAPTRADE_USER_*`` when no DB row exists.
+    Callers that already hold the credentials row pass it via ``row`` to
+    skip the duplicate DB fetch."""
+    if row is _UNFETCHED:
+        row = await repo.get_snaptrade_credentials(user_id)
     if row is not None:
         try:
             secret = decrypt_secret(settings.broker_secrets_key, row.user_secret_enc)
@@ -89,7 +97,7 @@ async def register_snaptrade_user(
     st_user_id = snaptrade_user_id_for(user_id)
     service = SnapTradeService(settings, credentials=None)
     try:
-        result = service.register_user(st_user_id)
+        result = await asyncio.to_thread(service.register_user, st_user_id)
     except SnapTradeError as exc:
         if not exc.user_exists:
             raise
@@ -99,13 +107,13 @@ async def register_snaptrade_user(
         # registration. The user is unusable as-is, so delete it remotely and
         # register fresh; the caller re-connects their brokerage right after
         # this anyway.
-        service.delete_user(st_user_id)
+        await asyncio.to_thread(service.delete_user, st_user_id)
         result = None
         for attempt in range(_REREGISTER_ATTEMPTS):
             if attempt:
                 await asyncio.sleep(_REREGISTER_DELAY_SECONDS)
             try:
-                result = service.register_user(st_user_id)
+                result = await asyncio.to_thread(service.register_user, st_user_id)
                 break
             except SnapTradeError as retry_exc:
                 # Deletion is queued on SnapTrade's side; give it a moment.
@@ -126,10 +134,12 @@ async def service_for_user(
     repo: Repo,
     user_id: uuid.UUID,
     settings: Settings,
+    *,
+    row: Any = _UNFETCHED,
 ) -> SnapTradeService:
     """Build a SnapTrade client scoped to the authenticated user."""
     _require_commercial_for_user(settings, user_id)
-    creds = await resolve_credentials(repo, user_id, settings)
+    creds = await resolve_credentials(repo, user_id, settings, row=row)
     if creds is None:
         raise SnapTradeError(
             "SnapTrade is not registered for this user. "
@@ -153,8 +163,14 @@ async def portfolio_status(
     accounts_count = 0
     if registered:
         try:
-            service = await service_for_user(repo, user_id, settings)
-            connections = service.list_connections()
+            service = await service_for_user(repo, user_id, settings, row=row)
+            # The SnapTrade SDK is synchronous (requests): run both remote
+            # calls off-loop and in parallel so this endpoint never stalls
+            # the event loop (and every other in-flight request with it).
+            connections, accounts = await asyncio.gather(
+                asyncio.to_thread(service.list_connections),
+                asyncio.to_thread(service.list_accounts),
+            )
             # SnapTrade flags a connection ``disabled`` when its brokerage auth
             # breaks (revoked/expired). Only live connections count as
             # connected; a disabled-only set means "reconnect needed".
@@ -165,7 +181,7 @@ async def portfolio_status(
                 await repo.update_snaptrade_status(
                     user_id, connected_at=datetime.now()
                 )
-            accounts_count = len(service.list_accounts())
+            accounts_count = len(accounts)
         except SnapTradeError as exc:
             if exc.stale_user and row is not None:
                 # The stored secret was issued under a different clientId

@@ -106,6 +106,17 @@ class Settings(BaseSettings):
     # How often the macro scan runs, in minutes. 0 disables the in-process
     # interval job (still triggerable via POST /macro/scan or external cron).
     macro_scan_interval_minutes: int = Field(default=0, alias="MACRO_SCAN_INTERVAL_MINUTES")
+
+    # ---- Dashboard snapshot warming (app/perf/snapshot.py) ----------------
+    # Quote warmer: rebuilds portfolio/watchlist snapshot sections for
+    # recently-active users so warm dashboard loads never wait on yfinance.
+    # 0 disables (do disable for local verification runs).
+    quote_warm_interval_seconds: int = Field(default=90, alias="QUOTE_WARM_INTERVAL_SECONDS")
+    # Background brokerage positions refresh for recently-active connected
+    # users (SnapTrade). 0 disables.
+    positions_refresh_interval_minutes: int = Field(
+        default=45, alias="POSITIONS_REFRESH_INTERVAL_MINUTES"
+    )
     macro_max_iterations: int = Field(default=30, alias="MACRO_MAX_ITERATIONS")
     macro_max_cost_usd: float = Field(default=2.00, alias="MACRO_MAX_COST_USD")
     # Owner attribution until per-user auth lands (roadmap Phase 2).

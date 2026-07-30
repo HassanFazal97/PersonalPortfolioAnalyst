@@ -98,8 +98,18 @@ class Repo:
         connect_args: dict = {"command_timeout": 60}
         if ssl:
             connect_args["ssl"] = "require"
+        # pool_size sized for the dashboard fan-out: a single page load runs
+        # several endpoint handlers concurrently, each opening short-lived
+        # sessions; the SQLAlchemy default of 5 queues checkouts under that
+        # burst. 10+10 stays well inside Supabase connection limits for one
+        # process.
         self._engine: AsyncEngine = create_async_engine(
-            database_url, echo=echo, connect_args=connect_args, pool_pre_ping=True
+            database_url,
+            echo=echo,
+            connect_args=connect_args,
+            pool_pre_ping=True,
+            pool_size=10,
+            max_overflow=10,
         )
         self._session: async_sessionmaker[AsyncSession] = async_sessionmaker(
             self._engine, expire_on_commit=False
