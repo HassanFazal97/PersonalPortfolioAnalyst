@@ -1454,6 +1454,17 @@ _ONBOARDING_BODY = """
     <button class="btn ghost full" id="connected-btn" style="display:none;">I've finished connecting</button>
     <div class="error-box" id="connect-error"></div>
     <p class="muted-note">A new tab will open. Come back here when you're done.</p>
+    <p class="muted-note" style="text-align:center;"><a href="#" id="manual-link">No
+    brokerage link? Type your holdings instead</a></p>
+    <div id="manual-panel" style="display:none;">
+      <p class="muted-note">Ticker and share count, one per row — e.g.
+      <strong>NVDA</strong> or <strong>RY.TO</strong>. You can link a brokerage
+      later to keep this synced automatically.</p>
+      <div id="manual-rows"></div>
+      <p class="muted-note"><a href="#" id="manual-add-row">+ Add another</a></p>
+      <button class="btn full" id="manual-save-btn">Analyze these holdings</button>
+      <div class="error-box" id="manual-error"></div>
+    </div>
   </div>
 
   <div class="step-panel" id="panel-sync" style="display:none;">
@@ -1733,6 +1744,73 @@ document.getElementById('connect-btn').addEventListener('click', async () => {
 });
 
 document.getElementById('connected-btn').addEventListener('click', pollStatus);
+
+// --- manual holdings fallback: convert the users who won't link a brokerage
+// to an unknown site on day one; SnapTrade can upsell later.
+
+function manualAddRow(ticker = '', qty = '') {
+  const row = document.createElement('div');
+  row.className = 'manual-row';
+  row.style.cssText = 'display:flex;gap:0.5rem;margin-top:0.5rem;';
+  row.innerHTML =
+    '<input type="text" placeholder="Ticker (e.g. NVDA)" class="m-ticker" ' +
+    'style="flex:2;text-transform:uppercase;" value="' + ticker + '">' +
+    '<input type="number" placeholder="Shares" class="m-qty" min="0" ' +
+    'step="any" style="flex:1;" value="' + qty + '">';
+  document.getElementById('manual-rows').appendChild(row);
+}
+
+document.getElementById('manual-link').addEventListener('click', (e) => {
+  e.preventDefault();
+  const panel = document.getElementById('manual-panel');
+  if (panel.style.display === 'none') {
+    panel.style.display = 'block';
+    if (!document.querySelector('.manual-row')) {
+      for (let i = 0; i < 3; i++) manualAddRow();
+    }
+  } else {
+    panel.style.display = 'none';
+  }
+});
+
+document.getElementById('manual-add-row').addEventListener('click', (e) => {
+  e.preventDefault();
+  manualAddRow();
+});
+
+document.getElementById('manual-save-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('manual-save-btn');
+  document.getElementById('manual-error').style.display = 'none';
+  const positions = [];
+  document.querySelectorAll('.manual-row').forEach((row) => {
+    const t = row.querySelector('.m-ticker').value.trim().toUpperCase();
+    const q = parseFloat(row.querySelector('.m-qty').value);
+    if (t && q > 0) positions.push({ ticker: t, quantity: q });
+  });
+  if (!positions.length) {
+    showError('manual-error', 'Add at least one ticker with a share count.');
+    return;
+  }
+  btn.disabled = true;
+  try {
+    const resp = await api('/portfolio/manual', {
+      method: 'POST',
+      body: JSON.stringify({ positions }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || 'Could not save your holdings');
+    }
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    // Same beat as a brokerage sync: straight to the risk picker.
+    startProjections();
+    showRiskPicker();
+  } catch (e) {
+    showError('manual-error', e.message);
+  } finally {
+    btn.disabled = false;
+  }
+});
 
 // --- step 1: investor profile, one question per screen ------------------------
 // Typeform-style: a single question owns the stage; single-select questions
@@ -2113,7 +2191,7 @@ document.getElementById('prefs-btn').addEventListener('click', async () => {
       throw new Error(err.detail || 'Could not save preferences');
     }
     showPanel('panel-delivery');
-    initDeliveryPicker(() => { window.location.href = '/app/dashboard'; });
+    initDeliveryPicker(finishOnboarding);
   } catch (e) {
     showError('prefs-error', e.message);
   } finally {
@@ -2121,15 +2199,25 @@ document.getElementById('prefs-btn').addEventListener('click', async () => {
   }
 });
 
+
+// Onboarding's last beat: kick the instant first briefing (202s immediately,
+// runs server-side), then land on the dashboard in welcome mode so the
+// digest card polls for it. The aha moment should be minutes away, not
+// tomorrow at 9am.
+async function finishOnboarding() {
+  try { await api('/digest/first', { method: 'POST' }); } catch (e) { /* best-effort */ }
+  window.location.href = '/app/dashboard?welcome=1';
+}
+
 // Back from the Discord OAuth connect flow (delivery is the last step):
 // success means the channel is already verified server-side, so onboarding
 // is done; failure reopens the delivery picker to try again.
 const dcStatus = new URLSearchParams(window.location.search).get('discord');
 if (dcStatus === 'connected') {
-  window.location.replace('/app/dashboard');
+  finishOnboarding();
 } else if (dcStatus) {
   showPanel('panel-delivery');
-  initDeliveryPicker(() => { window.location.href = '/app/dashboard'; })
+  initDeliveryPicker(finishOnboarding)
     .then(() => dpError(dcStatus === 'cancelled'
       ? 'Discord connection was cancelled. Try again, or paste a webhook URL instead.'
       : 'Discord connection failed. Try again, or paste a webhook URL instead.'));
@@ -3527,8 +3615,33 @@ function applyBootstrap(boot) {
   loadHoldings(val('portfolio'));
   loadWatching(val('watchlist'));
   loadDigest(val('digest'));  // data: null is valid ("no digest yet")
+  if (WELCOME && !val('digest')) pollFirstBriefing();
   loadGeneralNews(val('news'));
   Promise.allSettled([meReady, banners]).then(checkPersonalize);
+}
+
+// Welcome mode (?welcome=1, set by onboarding): the first briefing is being
+// written server-side right now — poll for it so the aha moment lands on
+// this very page instead of in tomorrow's inbox.
+const WELCOME = new URLSearchParams(window.location.search).get('welcome') === '1';
+let firstBriefingPolls = 0;
+function pollFirstBriefing() {
+  const empty = document.getElementById('digest-empty');
+  if (empty) empty.innerHTML = '<span class="spinner"></span> Your first ' +
+    'briefing is being written from your holdings right now \u2014 it lands ' +
+    'here in a minute or two.';
+  const tick = async () => {
+    firstBriefingPolls += 1;
+    try {
+      const res = await api('/digest/latest');
+      if (res.ok) { loadDigest(await res.json()); return; }
+    } catch (e) { /* keep polling */ }
+    if (firstBriefingPolls < 24) setTimeout(tick, 8000);
+    else if (empty) empty.textContent = 'Your first briefing is taking longer ' +
+      'than usual \u2014 it will appear here shortly, and your daily brief ' +
+      'arrives tomorrow morning either way.';
+  };
+  setTimeout(tick, 8000);
 }
 
 let bootRepolls = 0;

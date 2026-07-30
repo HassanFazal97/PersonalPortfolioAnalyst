@@ -463,6 +463,17 @@ class CheckoutRequest(BaseModel):
     interval: str = "monthly"  # 'monthly' | 'annual'
 
 
+class ManualPositionIn(BaseModel):
+    ticker: str
+    quantity: float
+
+
+class ManualPortfolioRequest(BaseModel):
+    """Typed holdings for users who won't link a brokerage on day one."""
+
+    positions: list[ManualPositionIn]
+
+
 _bearer = HTTPBearer(auto_error=False)
 
 # Exempt from bearer auth so platform liveness probes and uptime pingers — which
@@ -1744,6 +1755,45 @@ def create_app() -> FastAPI:
         snapshot.store.invalidate(user_id, "digest", "news")
         return result
 
+    first_briefings_active: set[uuid.UUID] = set()
+
+    @app.post("/digest/first", status_code=202)
+    async def digest_first(request: Request) -> dict:
+        """The instant first briefing — onboarding's aha moment.
+
+        Fired as the user finishes onboarding, so their first value arrives in
+        minutes, not with tomorrow's 9am digest. Runs in the background (the
+        browser navigates away immediately); a no-op once any digest exists,
+        so it can't be farmed for free runs."""
+        repo = _require_repo(app)
+        user_id = _user_id(request)
+        user = await repo.get_user(user_id)
+        tz = user.timezone if user is not None else get_settings().tz
+        if await get_latest_digest(repo, user_id=user_id, tz=tz) is not None:
+            return {"status": "exists"}
+        if user_id in first_briefings_active:
+            return {"status": "running"}
+        if not await repo.list_positions(user_id=user_id):
+            raise HTTPException(
+                status_code=400, detail="Add holdings before your first briefing."
+            )
+        first_briefings_active.add(user_id)
+
+        async def drive() -> None:
+            try:
+                await run_digest_pipeline(repo, user_id=user_id, force=True)
+                await repo.record_funnel_event("first_briefing", user_id=user_id)
+                snapshot.store.invalidate(user_id, "digest", "news")
+            except Exception:
+                logging.getLogger(__name__).exception("first briefing failed")
+            finally:
+                first_briefings_active.discard(user_id)
+
+        task = asyncio.create_task(drive())
+        stream_tasks.add(task)
+        task.add_done_callback(stream_tasks.discard)
+        return {"status": "started"}
+
     @app.get("/digest/latest")
     async def digest_latest(request: Request) -> dict:
         repo = _require_repo(app)
@@ -1859,6 +1909,76 @@ def create_app() -> FastAPI:
         if armed is not None:
             result = {**result, "trial_ends_at": armed.isoformat()}
         snapshot.store.invalidate(user_id, "portfolio", "status", "me")
+        return result
+
+    _MANUAL_ACCOUNT = "Manual"
+    _MANUAL_MAX_ROWS = 30
+
+    @app.post("/portfolio/manual")
+    async def set_manual_portfolio(
+        req: ManualPortfolioRequest, request: Request
+    ) -> dict:
+        """Typed-in holdings — the fallback for users who won't link a
+        brokerage to an unknown site on day one (the funnel's #1 drop-off).
+
+        Replaces the user's ``Manual`` account wholesale (brokerage-synced
+        accounts are untouched). Cost basis is unknowable for typed entries,
+        so avg_cost records the current price — P&L is measured from entry,
+        which the UI labels. Counts as the first value moment: arms the
+        trial and stamps the funnel, exactly like a brokerage sync."""
+        repo = _require_repo(app)
+        user_id = _user_id(request)
+        if not req.positions or len(req.positions) > _MANUAL_MAX_ROWS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Enter between 1 and {_MANUAL_MAX_ROWS} holdings.",
+            )
+        merged: dict[str, float] = {}
+        for row in req.positions:
+            ticker = _validated_ticker(row.ticker)
+            if not (0 < row.quantity <= 1e9):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"{ticker}: quantity must be a positive number.",
+                )
+            merged[ticker] = merged.get(ticker, 0.0) + row.quantity
+
+        tickers = sorted(merged)
+        quote_result = await market.get_quote({"tickers": tickers})
+        quotes = {q["ticker"]: q for q in quote_result.get("quotes", [])}
+        unknown = [
+            t for t in tickers if quotes.get(t, {}).get("last_price") is None
+        ]
+        if unknown:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Could not find a price for: {', '.join(unknown)}.",
+            )
+
+        for ticker in tickers:
+            await repo.upsert_position(
+                ticker=ticker,
+                quantity=merged[ticker],
+                avg_cost=quotes[ticker]["last_price"],
+                # Yahoo-format heuristic: .TO trades in CAD, the rest in USD.
+                currency="CAD" if ticker.endswith(".TO") else "USD",
+                account=_MANUAL_ACCOUNT,
+                user_id=user_id,
+            )
+        # Drop manual rows not re-submitted; never touch brokerage accounts.
+        keep = {(t, _MANUAL_ACCOUNT) for t in tickers} | {
+            (p.ticker, p.account)
+            for p in await repo.list_positions(user_id=user_id)
+            if p.account != _MANUAL_ACCOUNT
+        }
+        removed = await repo.prune_positions_except(keep, user_id=user_id)
+
+        armed = await repo.maybe_start_trial(user_id, get_settings().trial_days)
+        await repo.record_funnel_event("portfolio_connected", user_id=user_id)
+        snapshot.store.invalidate(user_id, "portfolio", "status", "me")
+        result: dict = {"positions": len(tickers), "removed": removed}
+        if armed is not None:
+            result["trial_ends_at"] = armed.isoformat()
         return result
 
     @app.delete("/connection")
