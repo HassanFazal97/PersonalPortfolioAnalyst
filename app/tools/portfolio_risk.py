@@ -24,7 +24,7 @@ from app.quant import returns as qreturns
 from app.quant import simulate as qsimulate
 from app.quant.covariance import ledoit_wolf
 from app.quant.riskdecomp import decompose
-from app.tools import fundamentals, portfolio, price_store
+from app.tools import fundamentals, portfolio, price_store, riskfree
 from app.tools.tickers import normalize_tickers
 
 # ~2 calendar years so the covariance has ~500 daily observations — enough for
@@ -36,9 +36,15 @@ MAX_TICKERS = 25
 _FETCH_CONCURRENCY = 4
 # How many correlated pairs / risk drivers to surface in the narration payload.
 _TOP_N = 5
-# Benchmark for portfolio beta / scenario stress. US index; converted to CAD in
-# the returns builder so beta is currency-consistent with the CAD book.
-BENCHMARK_TICKER = "^GSPC"
+# Benchmark for portfolio beta / tracking error / scenario stress: a
+# geography-blended total-return composite. A Canadian holding XIU deserves
+# to be measured against *their* market, not just the S&P — so the benchmark
+# blends the US and Canadian sleeves by the portfolio's own CAD/USD market-
+# value split, using dividend-adjusted (total-return) ETF closes. The blend
+# is geometric on levels, which makes its log return exactly the weighted
+# sum of the sleeves' log returns.
+US_BENCHMARK_TICKER = "SPY"     # S&P 500 total-return proxy (USD)
+CA_BENCHMARK_TICKER = "XIC.TO"  # S&P/TSX Capped Composite (CAD)
 
 # Beta-scaled market-shock scenarios. Stated as benchmark (S&P 500, in CAD
 # terms) returns; portfolio impact = beta × shock. Sized to real historical
@@ -61,6 +67,55 @@ class _Loaded:
     mv_by_ticker: dict[str, float]
     dropped_for_size: list[str]
     note: str | None = None  # set when there's nothing analyzable
+    benchmark_label: str | None = None  # human description of the blend
+
+
+def _blend_benchmark_rows(
+    us_rows: list[dict[str, Any]],
+    ca_rows: list[dict[str, Any]],
+    fx_rows: list[dict[str, Any]] | None,
+    w_ca: float,
+) -> tuple[list[dict[str, Any]], str] | None:
+    """A single CAD total-return benchmark series blended by geography.
+
+    The US sleeve converts to CAD (level × USDCAD), then the composite level
+    is the geometric blend ``us_cad^w_us · ca^w_ca`` on the inner-join
+    calendar — so its log return is exactly the weighted sum of the sleeves'
+    log returns. Falls back to whichever sleeve has data; None when neither
+    does (or FX is missing for a needed US sleeve)."""
+    w_ca = min(1.0, max(0.0, w_ca))
+    us = {r["date"]: float(r["adj_close"]) for r in us_rows or []}
+    ca = {r["date"]: float(r["adj_close"]) for r in ca_rows or []}
+    fx = {r["date"]: float(r["adj_close"]) for r in fx_rows or []}
+
+    if us and fx and w_ca < 1.0:
+        us_cad = {d: us[d] * fx[d] for d in us.keys() & fx.keys()}
+    else:
+        us_cad = {}
+
+    if us_cad and ca and 0.0 < w_ca < 1.0:
+        dates = sorted(us_cad.keys() & ca.keys())
+        if len(dates) >= 2:
+            rows = [
+                {
+                    "date": d,
+                    "adj_close": (us_cad[d] ** (1.0 - w_ca)) * (ca[d] ** w_ca),
+                }
+                for d in dates
+            ]
+            label = (
+                f"{round((1 - w_ca) * 100)}% S&P 500 (SPY) + "
+                f"{round(w_ca * 100)}% S&P/TSX (XIC.TO), CAD total return"
+            )
+            return rows, label
+    # Degenerate weights or one sleeve missing: use what exists.
+    if ca and (w_ca >= 1.0 or not us_cad):
+        rows = [{"date": d, "adj_close": ca[d]} for d in sorted(ca)]
+        return rows, "S&P/TSX (XIC.TO), CAD total return"
+    if us_cad:
+        rows = [{"date": d, "adj_close": us_cad[d]} for d in sorted(us_cad)]
+        return rows, "S&P 500 (SPY), CAD total return"
+    return None
 
 
 async def _load_portfolio_returns(
@@ -116,7 +171,7 @@ async def _load_portfolio_returns(
     dropped_for_size = ranked[MAX_TICKERS:]
 
     needs_fx = any(currency_by_ticker.get(t) == "USD" for t in tickers)
-    # FX is also needed to convert a USD benchmark to CAD.
+    # FX is also needed to convert the benchmark's US sleeve to CAD.
     fetch_fx = needs_fx or with_benchmark
     sem = asyncio.Semaphore(_FETCH_CONCURRENCY)
 
@@ -133,11 +188,28 @@ async def _load_portfolio_returns(
     if fetch_fx:
         targets.append(qreturns.FX_TICKER)
     if with_benchmark:
-        targets.append(BENCHMARK_TICKER)
+        targets.extend((US_BENCHMARK_TICKER, CA_BENCHMARK_TICKER))
     fetched = dict(await asyncio.gather(*(_one(t) for t in targets)))
 
     fx_rows = fetched.get(qreturns.FX_TICKER) if fetch_fx else None
-    benchmark_rows = fetched.get(BENCHMARK_TICKER) if with_benchmark else None
+    benchmark_rows = None
+    benchmark_label = None
+    if with_benchmark:
+        cad_mv = sum(
+            mv_by_ticker[t]
+            for t in tickers
+            if currency_by_ticker.get(t) != "USD"
+        )
+        total_mv_included = sum(mv_by_ticker[t] for t in tickers)
+        w_ca = cad_mv / total_mv_included if total_mv_included > 0 else 0.0
+        blended = _blend_benchmark_rows(
+            fetched.get(US_BENCHMARK_TICKER, []),
+            fetched.get(CA_BENCHMARK_TICKER, []),
+            fx_rows,
+            w_ca,
+        )
+        if blended is not None:
+            benchmark_rows, benchmark_label = blended
     closes_by_ticker = {t: fetched.get(t, []) for t in tickers}
 
     rm = qreturns.build_returns_matrix(
@@ -145,7 +217,7 @@ async def _load_portfolio_returns(
         {t: currency_by_ticker[t] for t in tickers},
         fx_rows,
         benchmark_rows=benchmark_rows,
-        benchmark_currency="USD",
+        benchmark_currency="CAD",
     )
     if rm.n_assets < 2:
         note = "Not enough overlapping price history to build a covariance matrix."
@@ -156,7 +228,10 @@ async def _load_portfolio_returns(
         return _Loaded(rm, np.empty(0), mv_by_ticker, dropped_for_size, note=note)
 
     weights = np.array([mv_by_ticker[t] for t in rm.tickers], dtype=float)
-    return _Loaded(rm, weights, mv_by_ticker, dropped_for_size)
+    return _Loaded(
+        rm, weights, mv_by_ticker, dropped_for_size,
+        benchmark_label=benchmark_label,
+    )
 
 
 # --------------------------------------------------------------------------
@@ -186,9 +261,7 @@ async def risk_analytics_payload(ctx: Any) -> dict[str, Any]:
 
     port = tailrisk.portfolio_return_series(rm.matrix, loaded.weights)
     var95 = tailrisk.value_at_risk(port, 0.95)
-    rf = float(
-        getattr(ctx.settings, "risk_free_rate_annual", performance.DEFAULT_RISK_FREE_ANNUAL)
-    )
+    rf = await riskfree.current_risk_free_annual(ctx.repo, ctx.settings)
     stats = performance.performance_stats(port, rm.benchmark_returns, rf_annual=rf)
     beta_value = (
         tailrisk.beta(port, rm.benchmark_returns) if rm.benchmark_returns is not None else None
@@ -240,6 +313,8 @@ async def risk_analytics_payload(ctx: Any) -> dict[str, Any]:
             "cvar95_1d_pct": round(var95.cvar_pct * 100, 2),
             "sharpe_ratio": round(stats.sharpe, 2) if stats.sharpe is not None else None,
             "portfolio_beta": round(beta_value, 2) if beta_value is not None else None,
+            "risk_free_rate_pct": round(stats.risk_free_rate_pct, 2),
+            "benchmark": loaded.benchmark_label,
         },
         "holdings": holdings,
         "correlation": {"tickers": [d.tickers[i] for i in idx], "matrix": matrix},
@@ -637,9 +712,7 @@ async def assess_risk_adjusted_performance(payload: dict[str, Any], ctx: Any) ->
 
     rm = loaded.rm
     port = tailrisk.portfolio_return_series(rm.matrix, loaded.weights)
-    rf = float(
-        getattr(ctx.settings, "risk_free_rate_annual", performance.DEFAULT_RISK_FREE_ANNUAL)
-    )
+    rf = await riskfree.current_risk_free_annual(ctx.repo, ctx.settings)
     stats = performance.performance_stats(port, rm.benchmark_returns, rf_annual=rf)
     beta_value = (
         tailrisk.beta(port, rm.benchmark_returns) if rm.benchmark_returns is not None else None
@@ -665,6 +738,7 @@ async def assess_risk_adjusted_performance(payload: dict[str, Any], ctx: Any) ->
             ),
             "portfolio_beta": round(beta_value, 2) if beta_value is not None else None,
             "risk_free_rate_pct": round(stats.risk_free_rate_pct, 2),
+            "benchmark": loaded.benchmark_label,
             "history_obs": stats.obs,
         },
         "sector_exposure": sector_exposure,

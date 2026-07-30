@@ -28,7 +28,7 @@ import logging
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
-from app.tools import market
+from app.tools import market, riskfree
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +44,8 @@ _FX_TICKER = "USDCAD=X"
 # use dividend-adjusted closes, so their benchmark must include dividends too
 # (^GSPC is price-only and would flatter picks by the index dividend yield).
 _TRACK_BENCHMARK_TICKER = "SPY"
+# Canadian sleeve of the blended portfolio benchmark (portfolio_risk.py).
+_CA_BENCHMARK_TICKER = "XIC.TO"
 
 
 def _rows_from_stored(stored: list[Any]) -> list[dict[str, Any]]:
@@ -101,9 +103,20 @@ async def run_daily_prices_sync(repo: Any, settings: Any) -> dict[str, Any]:
         | set(await repo.list_distinct_watchlist_tickers())
     )
     # The engine and the track record also need these, never "held".
-    for extra in (_BENCHMARK_TICKER, _FX_TICKER, _TRACK_BENCHMARK_TICKER):
+    extras = (
+        _BENCHMARK_TICKER,
+        _FX_TICKER,
+        _TRACK_BENCHMARK_TICKER,
+        _CA_BENCHMARK_TICKER,
+    )
+    for extra in extras:
         if extra not in tickers:
             tickers = [*tickers, extra]
+
+    # Same nightly beat: persist the BoC 3-month T-bill yield so every
+    # Sharpe/Sortino uses the real risk-free rate without a request-path
+    # network call (app/tools/riskfree.py).
+    await riskfree.sync_risk_free(repo)
 
     synced = 0
     failed = 0

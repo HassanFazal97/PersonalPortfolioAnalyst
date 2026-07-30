@@ -94,7 +94,8 @@ async def test_estimate_downside_risk_produces_var_cvar_and_scenarios(monkeypatc
         "NVDA": _walk(1.0, vol=0.02),
         "RY.TO": _walk(3.0, vol=0.009),
         "USDCAD=X": _walk(4.0, vol=0.004),
-        "^GSPC": _walk(5.0, vol=0.011),
+        "SPY": _walk(5.0, vol=0.011),
+        "XIC.TO": _walk(6.0, vol=0.008),
     }
 
     market.cache_clear()
@@ -138,7 +139,8 @@ async def test_assess_risk_adjusted_performance_and_sector_exposure(monkeypatch)
         "NVDA": _walk(1.0, vol=0.02),
         "RY.TO": _walk(3.0, vol=0.009),
         "USDCAD=X": _walk(4.0, vol=0.004),
-        "^GSPC": _walk(5.0, vol=0.011),
+        "SPY": _walk(5.0, vol=0.011),
+        "XIC.TO": _walk(6.0, vol=0.008),
     }
 
     async def fake_funds(tickers, *, repo, settings):

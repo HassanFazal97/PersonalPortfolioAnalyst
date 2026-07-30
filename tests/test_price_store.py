@@ -23,8 +23,14 @@ def _patch_live(monkeypatch, counter):
         counter["n"] += 1
         return _live_rows()
 
+    async def no_boc():
+        return None  # keep the nightly sync's BoC call off the network
+
     market.cache_clear()
     monkeypatch.setattr(market, "_fetch_adjusted_closes_raw", fake)
+    from app.tools import riskfree
+
+    monkeypatch.setattr(riskfree, "fetch_boc_tbill_yield", no_boc)
 
 
 async def test_fill_on_miss_fetches_live_and_persists(monkeypatch):
@@ -96,10 +102,10 @@ async def test_sync_covers_holdings_plus_benchmark_and_fx(monkeypatch):
         ]
     )
     out = await price_store.run_daily_prices_sync(repo, get_settings())
-    # Two holdings + ^GSPC + USDCAD=X + SPY (track-record benchmark).
-    assert out["tickers"] == 5
-    assert out["synced"] == 5
-    for t in ("NVDA", "RY.TO", "^GSPC", "USDCAD=X", "SPY"):
+    # Two holdings + ^GSPC + USDCAD=X + SPY + XIC.TO (benchmarks).
+    assert out["tickers"] == 6
+    assert out["synced"] == 6
+    for t in ("NVDA", "RY.TO", "^GSPC", "USDCAD=X", "SPY", "XIC.TO"):
         assert t in repo.daily_prices
 
 
@@ -120,6 +126,6 @@ async def test_sync_includes_watched_tickers(monkeypatch):
     await repo.add_watchlist_ticker(uuid.UUID(DEFAULT_USER_ID), "NVDA")
 
     out = await price_store.run_daily_prices_sync(repo, get_settings())
-    # NVDA + SHOP.TO (deduped) + ^GSPC + USDCAD=X + SPY.
-    assert out["tickers"] == 5
+    # NVDA + SHOP.TO (deduped) + ^GSPC + USDCAD=X + SPY + XIC.TO.
+    assert out["tickers"] == 6
     assert "SHOP.TO" in repo.daily_prices

@@ -42,7 +42,8 @@ _SERIES = {
     "NVDA": _walk(1.0, vol=0.02),
     "RY.TO": _walk(3.0, vol=0.009),
     "USDCAD=X": _walk(4.0, vol=0.004),
-    "^GSPC": _walk(5.0, vol=0.011),
+    "SPY": _walk(5.0, vol=0.011),
+        "XIC.TO": _walk(6.0, vol=0.008),
 }
 
 

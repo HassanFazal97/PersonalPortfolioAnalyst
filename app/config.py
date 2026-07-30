@@ -213,6 +213,9 @@ class Settings(BaseSettings):
     deep_dive_max_iterations: int = Field(default=40, alias="DEEP_DIVE_MAX_ITERATIONS")
     # Rolling 7-day quota per Pro user. Owner/service token is exempt.
     deep_dive_weekly_limit: int = Field(default=2, alias="DEEP_DIVE_WEEKLY_LIMIT")
+    # Annual risk-free override as a decimal (0.045 = 4.5%). 0 = automatic:
+    # the nightly-synced BoC 3-month T-bill yield (app/tools/riskfree.py).
+    risk_free_rate_annual: float = Field(default=0.0, alias="RISK_FREE_RATE_ANNUAL")
     # Free tier tastes the analyst depth: 1 per rolling 30 days (0 = Pro-only).
     deep_dive_free_monthly_limit: int = Field(
         default=1, alias="DEEP_DIVE_FREE_MONTHLY_LIMIT"
