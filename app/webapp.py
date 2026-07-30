@@ -217,14 +217,23 @@ input:focus, select:focus { border-color: var(--accent-hover); }
 .posture-card .pc-sub { color: var(--ink-3); font-size: 0.78rem;
   min-height: 2.6em; }
 .posture-card .pc-fan { margin: 0.4rem 0 0.2rem; }
-.posture-card .pc-range { font-size: 0.82rem; color: var(--ink);
-  font-variant-numeric: tabular-nums; }
-.posture-card .pc-stats { font-size: 0.76rem; color: var(--ink-3); }
+/* per-card stat grid: labels muted, values carry the hierarchy */
+.posture-card .pc-nums { display: grid; grid-template-columns: auto 1fr;
+  gap: 0.12rem 0.6rem; align-items: baseline; }
+.pc-nums .pn-l { color: var(--ink-3); font-size: 0.76rem; }
+.pc-nums .pn-v { text-align: right; font-size: 0.84rem; font-weight: 600;
+  color: var(--ink); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pc-nums .pn-v.pos { color: var(--gain); }
+.pc-nums .pn-v.neg { color: var(--loss); }
 .mf-outer { fill: oklch(52% 0.17 295); opacity: 0.14; }
 .mf-inner { fill: oklch(52% 0.17 295); opacity: 0.30; }
 .mf-median { stroke: var(--accent-text); stroke-width: 2; fill: none;
   stroke-linejoin: round; stroke-linecap: round; }
 .mf-zero { stroke: var(--line-strong); stroke-width: 1; }
+.mf-endlbl { font-size: 10px; font-weight: 600; fill: var(--ink-2);
+  font-variant-numeric: tabular-nums; }
+.mf-endlbl.pos { fill: var(--gain); }
+.mf-endlbl.neg { fill: var(--loss); }
 #posture-btn { margin-top: 0.4rem; }
 .status-line { display: flex; align-items: center; gap: 0.6rem; margin: 1rem 0;
   color: var(--ink-3); font-size: 0.95rem; }
@@ -240,21 +249,67 @@ input:focus, select:focus { border-color: var(--accent-hover); }
 @media (prefers-reduced-motion: reduce) {
   .skl, .skl-inline { animation: none; opacity: 0.7; }
 }
-/* dashboard: wide two-column shell, main work column + sticky utility rail */
+/* dashboard: summary strip + tabbed sections, chat in a floating panel */
 .dash-wrap { max-width: 1400px; padding-top: 1.5rem; }
 .dash-wrap .topbar { margin-bottom: 1.1rem; }
-.dash-layout { display: grid; grid-template-columns: minmax(0, 1fr) 380px;
-  gap: 1rem; align-items: start; }
-.dash-main { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
-.dash-rail { position: sticky; top: 4.4rem;
-  display: flex; flex-direction: column; gap: 1rem; }
-@media (max-width: 1080px) {
-  .dash-layout { grid-template-columns: 1fr; }
-  .dash-rail { position: static; }
-}
+.dash-wrap .warn-banner { margin-bottom: 1rem; }
+.dash-summary { display: flex; flex-wrap: wrap; gap: 0.6rem 2rem; align-items: baseline;
+  background: var(--surface-1); border: 1px solid var(--line); border-radius: var(--r-l);
+  padding: 0.85rem 1.3rem; margin-bottom: 1rem; }
+.sum-item { display: flex; flex-direction: column; }
+.sum-item .k { font-size: 0.72rem; font-weight: 600; color: var(--ink-3);
+  text-transform: uppercase; letter-spacing: 0.05em; }
+.sum-item .v { font-size: 1.25rem; font-weight: 650; color: var(--ink);
+  font-variant-numeric: tabular-nums; }
+.sum-item .v .sub { font-size: 0.85rem; font-weight: 500; color: var(--ink-3); }
+.sum-digest-chip { margin-left: auto; align-self: center; font-size: 0.85rem;
+  color: var(--accent-text); background: var(--accent-wash); border: 1px solid var(--line);
+  border-radius: 999px; padding: 0.3rem 0.8rem; cursor: pointer; font-family: var(--font); }
+.dash-tabs { display: flex; gap: 0.25rem; border-bottom: 1px solid var(--line-strong);
+  margin-bottom: 1rem; overflow-x: auto; scrollbar-width: none; }
+.dash-tabs::-webkit-scrollbar { display: none; }
+.dash-tab { background: none; border: none; border-bottom: 2px solid transparent;
+  font-family: var(--font); font-size: 0.95rem; font-weight: 600; color: var(--ink-3);
+  padding: 0.55rem 0.9rem 0.65rem; cursor: pointer; white-space: nowrap;
+  margin-bottom: -1px; transition: color 0.15s var(--ease); }
+.dash-tab:hover { color: var(--ink); }
+.dash-tab[aria-selected="true"] { color: var(--accent-text); border-bottom-color: var(--accent); }
+.dash-panel { display: none; flex-direction: column; gap: 1rem; min-width: 0; }
+.dash-panel.active { display: flex; }
 .dash-card { background: var(--surface-1); border: 1px solid var(--line);
   border-radius: var(--r-l); padding: 1.15rem 1.3rem 1.25rem; }
-.dash-rail .chat-log { max-height: min(48vh, 440px); }
+/* floating chat: pill launcher + anchored slide-out panel */
+.chat-fab { position: fixed; right: 1.25rem; bottom: 1.25rem; z-index: 70;
+  display: inline-flex; align-items: center; gap: 0.5rem; min-height: 48px;
+  padding: 0 1.2rem; border: none; border-radius: 999px; background: var(--accent);
+  color: white; font-family: var(--font); font-size: 0.95rem; font-weight: 650;
+  cursor: pointer; box-shadow: 0 10px 28px oklch(35% 0.05 300 / 0.35); }
+.chat-fab:hover { background: var(--accent-hover); }
+.chat-panel { position: fixed; right: 1.25rem; bottom: 5.6rem; z-index: 71;
+  width: min(400px, calc(100vw - 2rem)); height: min(70vh, 620px);
+  display: none; flex-direction: column; background: var(--surface-1);
+  border: 1px solid var(--line-strong); border-radius: var(--r-l);
+  padding: 1rem 1.15rem 1.05rem; box-shadow: 0 18px 48px oklch(35% 0.05 300 / 0.3); }
+.chat-panel.open { display: flex; }
+.chat-panel h3 { display: flex; justify-content: space-between; align-items: baseline; }
+.chat-panel .chat-log { flex: 1; min-height: 0; max-height: none; }
+.chat-close { background: none; border: none; color: var(--ink-3); cursor: pointer;
+  font-size: 1.1rem; padding: 0.2rem 0.4rem; font-family: var(--font); }
+/* holdings tab: table beside allocation donut */
+.holdings-split { display: grid; grid-template-columns: minmax(0, 1fr) 250px;
+  gap: 1.5rem; align-items: start; margin-top: 0.5rem; }
+@media (max-width: 900px) { .holdings-split { grid-template-columns: 1fr; } }
+.pie-box svg { display: block; width: 100%; max-width: 220px; height: auto; margin: 0 auto; }
+.pie-slice { cursor: pointer; transition: opacity 0.15s var(--ease); }
+.pie-leg-row { transition: opacity 0.15s var(--ease); }
+.pie-box.has-hover .pie-slice:not(.hl),
+.pie-box.has-hover .pie-leg-row:not(.hl) { opacity: 0.35; }
+.pie-legend { margin-top: 0.75rem; font-size: 0.82rem; }
+.pie-leg-row { display: flex; align-items: center; gap: 0.5rem; padding: 0.18rem 0;
+  color: var(--ink-2); font-variant-numeric: tabular-nums; cursor: default; }
+.pie-leg-row .sw { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+.pie-leg-row .t { font-weight: 600; color: var(--ink); flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; }
 .dash-card h3 { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; }
 .dash-card h3 .tag { font-size: 0.8rem; font-weight: 600; color: var(--ink-3);
   font-variant-numeric: tabular-nums; }
@@ -517,6 +572,10 @@ tr:last-child td { border-bottom: none; }
   .link-btn { padding: 0.5rem 0.25rem; margin: -0.5rem -0.25rem; }
   .link-btn:hover { text-decoration: none; }
   .chart-controls button { padding: 0.45rem 0.9rem; }
+  .chat-panel { inset: 0; width: auto; height: auto; border-radius: 0; z-index: 75; }
+  .chat-fab { bottom: 0.9rem; right: 0.9rem; }
+  .dash-summary { gap: 0.5rem 1.25rem; padding: 0.75rem 1rem; }
+  .sum-digest-chip { margin-left: 0; }
   .auth-form-col { padding: 2.5rem 1.25rem; }
   .ob-rail { overflow-x: auto; }
   .step-panel { padding: 1.25rem 1rem; }
@@ -533,9 +592,20 @@ async function getToken() {
   return data.session ? data.session.access_token : null;
 }
 
+// Cached per-user page data (see the dashboard boot sequence) must never
+// outlive the session it belongs to.
+function clearBootCaches() {
+  try {
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith('cirvia:boot:')) localStorage.removeItem(k);
+    }
+  } catch (e) { /* storage unavailable */ }
+}
+
 async function api(path, opts = {}) {
   const token = await getToken();
-  if (!token) { window.location.href = '/app'; throw new Error('not signed in'); }
+  if (!token) { clearBootCaches(); window.location.href = '/app'; throw new Error('not signed in'); }
   const resp = await fetch(path, {
     ...opts,
     headers: {
@@ -544,7 +614,7 @@ async function api(path, opts = {}) {
       ...(opts.headers || {}),
     },
   });
-  if (resp.status === 401) { window.location.href = '/app'; throw new Error('session expired'); }
+  if (resp.status === 401) { clearBootCaches(); window.location.href = '/app'; throw new Error('session expired'); }
   return resp;
 }
 
@@ -555,6 +625,7 @@ async function requireSession() {
 }
 
 async function signOut() {
+  clearBootCaches();
   await sb.auth.signOut();
   window.location.href = '/app';
 }
@@ -678,7 +749,8 @@ def _page(
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{title}</title>
 <meta name="robots" content="noindex">
-{ICON_LINKS}{_FONT_LINKS}<style>{_CSS}{_APP_CSS}</style>
+{ICON_LINKS}{_FONT_LINKS}<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<style>{_CSS}{_APP_CSS}</style>
 </head>
 <body>
 {shell}
@@ -1381,7 +1453,8 @@ _ONBOARDING_BODY = """
     <h2>Pick your risk comfort</h2>
     <p id="posture-intro">Here's <strong>your actual portfolio</strong> replayed
     5,000 times over the next year at three risk levels. The shaded range holds
-    90% of the simulated outcomes. Which ride looks right to you?</p>
+    90% of the simulated outcomes, and all three charts share one scale &mdash;
+    wider means wilder. Which ride looks right to you?</p>
     <div class="status-line" id="posture-status"><span class="spinner"></span>
     <span id="posture-status-text">Crunching two years of your holdings' history&hellip;</span></div>
     <div class="posture-cards" id="posture-cards" style="display:none;"></div>
@@ -1826,27 +1899,42 @@ function startProjections() {
 
 const obPct = (n) => (n >= 0 ? '+' : '\\u2212') + Math.abs(n).toFixed(0) + '%';
 
-function miniFan(p) {
+// All three cards share the same [lo, hi] percent domain, so a calm book is a
+// visibly thin wedge and a wild one fills the frame — the shapes carry the
+// comparison. The right gutter holds the great-year / brutal-year tip labels.
+function miniFan(p, lo, hi) {
   const b = p.bands_pct;
-  const m = b.p50.length, W = 240, H = 96, pad = 4;
-  const lo = Math.min.apply(null, b.p5), hi = Math.max.apply(null, b.p95);
+  const m = b.p50.length, W = 260, H = 120, padL = 4, padR = 74, padT = 7, padB = 7;
   const span = Math.max(1e-6, hi - lo);
-  const x = (i) => pad + (i / (m - 1)) * (W - 2 * pad);
-  const y = (v) => pad + (1 - (v - lo) / span) * (H - 2 * pad);
+  const x = (i) => padL + (i / (m - 1)) * (W - padL - padR);
+  const y = (v) => padT + (1 - (v - lo) / span) * (H - padT - padB);
   const line = (arr) => arr.map((v, i) =>
     (i ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(v).toFixed(1)).join(' ');
   const band = (top, bot) => 'M' +
     top.map((v, i) => x(i).toFixed(1) + ' ' + y(v).toFixed(1)).join(' L') +
     ' L' + bot.map((v, i) => x(i).toFixed(1) + ' ' + y(v).toFixed(1)).reverse().join(' L') + ' Z';
-  let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" height="' + H +
-    '" preserveAspectRatio="none" role="img" aria-label="Simulated one-year outcome range">';
+  const cad = p.terminal_cad, tp = p.terminal_pct;
+  const great = cad ? fmtCadOb(cad.p95) : obPct(tp.p95);
+  const brutal = cad ? fmtCadOb(cad.p5) : obPct(tp.p5);
+  let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;height:auto;display:block;"' +
+    ' role="img" aria-label="Simulated one-year outcome range: a great year ' + great +
+    ', a brutal year ' + brutal + '">';
   if (lo < 0 && hi > 0) {
-    svg += '<line x1="0" x2="' + W + '" y1="' + y(0) + '" y2="' + y(0) + '" class="mf-zero"></line>';
+    svg += '<line x1="' + padL + '" x2="' + (W - padR) + '" y1="' + y(0) + '" y2="' + y(0) + '" class="mf-zero"></line>';
   }
   svg += '<path d="' + band(b.p95, b.p5) + '" class="mf-outer"></path>';
   svg += '<path d="' + band(b.p75, b.p25) + '" class="mf-inner"></path>';
   // pathLength=1 normalizes the dash math so the median can draw in on load.
   svg += '<path d="' + line(b.p50) + '" class="mf-median" pathLength="1"></path>';
+  // Tip labels, nudged apart so a thin (defensive) wedge can't overlap them.
+  let yTop = y(b.p95[m - 1]) + 3.5, yBot = y(b.p5[m - 1]) + 3.5;
+  yTop = Math.max(yTop, 10);
+  yBot = Math.min(Math.max(yBot, yTop + 13), H - 3);
+  yTop = Math.min(yTop, yBot - 13);
+  svg += '<text x="' + (W - padR + 7) + '" y="' + yTop.toFixed(1) + '" class="mf-endlbl ' +
+    (tp.p95 >= 0 ? 'pos' : 'neg') + '">' + great + '</text>';
+  svg += '<text x="' + (W - padR + 7) + '" y="' + yBot.toFixed(1) + '" class="mf-endlbl ' +
+    (tp.p5 >= 0 ? 'pos' : 'neg') + '">' + brutal + '</text>';
   return svg + '</svg>';
 }
 
@@ -1858,9 +1946,21 @@ function renderPostures(data) {
     document.getElementById('posture-intro').innerHTML =
       'These are <strong>typical portfolios</strong> at three risk levels, replayed ' +
       '5,000 times over the next year &mdash; yours will appear in the Risk Lab once ' +
-      'there\\u2019s enough price history. The shaded range holds 90% of outcomes. ' +
+      'there\\u2019s enough price history. The shaded range holds 90% of outcomes, and ' +
+      'all three charts share one scale &mdash; wider means wilder. ' +
+      'Which ride looks right to you?';
+  } else if (data.portfolio_value_cad) {
+    document.getElementById('posture-intro').innerHTML =
+      'Here\\u2019s <strong>your actual portfolio</strong> &mdash; ' +
+      fmtCadOb(data.portfolio_value_cad) + ' today &mdash; replayed 5,000 times over ' +
+      'the next year at three risk levels. The shaded range holds 90% of the simulated ' +
+      'outcomes, and all three charts share one scale &mdash; wider means wilder. ' +
       'Which ride looks right to you?';
   }
+  // One percent-domain across all three fans, so their shapes are comparable.
+  const avail = POSTURE_ORDER.map((k) => data.postures[k]).filter(Boolean);
+  const fanLo = Math.min.apply(null, avail.map((p) => Math.min.apply(null, p.bands_pct.p5)));
+  const fanHi = Math.max.apply(null, avail.map((p) => Math.max.apply(null, p.bands_pct.p95)));
   box.innerHTML = '';
   POSTURE_ORDER.forEach((key) => {
     const p = data.postures[key];
@@ -1870,17 +1970,23 @@ function renderPostures(data) {
     card.className = 'posture-card';
     card.setAttribute('role', 'button');
     card.setAttribute('tabindex', '0');
-    const cad = p.terminal_cad;
-    const range = cad
-      ? 'a great year ' + fmtCadOb(cad.p95) + ' \\u00b7 a brutal year ' + fmtCadOb(cad.p5)
-      : 'a great year ' + obPct(p.terminal_pct.p95) + ' \\u00b7 a brutal year ' + obPct(p.terminal_pct.p5);
+    const cad = p.terminal_cad, tp = p.terminal_pct;
+    const great = cad ? fmtCadOb(cad.p95) + ' (' + obPct(tp.p95) + ')' : obPct(tp.p95);
+    const brutal = cad ? fmtCadOb(cad.p5) + ' (' + obPct(tp.p5) + ')' : obPct(tp.p5);
     card.innerHTML =
       '<span class="pc-title">' + meta.title + '</span>' +
       '<span class="pc-sub">' + (data.fallback ? 'a typical portfolio at this level' : meta.sub) + '</span>' +
-      '<div class="pc-fan">' + miniFan(p) + '</div>' +
-      '<span class="pc-range">' + range + '</span>' +
-      '<span class="pc-stats">swings about \\u00b1' + p.annualized_vol_pct.toFixed(0) +
-      '%/yr \\u00b7 ' + Math.round(p.probability_of_loss_pct) + '% of runs ended down</span>';
+      '<div class="pc-fan">' + miniFan(p, fanLo, fanHi) + '</div>' +
+      '<div class="pc-nums">' +
+      '<span class="pn-l">a great year</span><span class="pn-v ' +
+      (tp.p95 >= 0 ? 'pos' : 'neg') + '">' + great + '</span>' +
+      '<span class="pn-l">a brutal year</span><span class="pn-v ' +
+      (tp.p5 >= 0 ? 'pos' : 'neg') + '">' + brutal + '</span>' +
+      '<span class="pn-l">typical swing</span><span class="pn-v">\\u00b1' +
+      p.annualized_vol_pct.toFixed(0) + '%/yr</span>' +
+      '<span class="pn-l">odds of a down year</span><span class="pn-v">' +
+      Math.round(p.probability_of_loss_pct) + ' in 100</span>' +
+      '</div>';
     const pick = () => {
       chosenPosture = key;
       box.querySelectorAll('.posture-card').forEach((c) => c.classList.remove('selected'));
@@ -2037,8 +2143,6 @@ _DASHBOARD_BODY = """
   <h1 style="font-size:1.5rem;">Dashboard</h1>
   <span class="who" id="who"></span>
 </div>
-<div class="dash-layout">
-<div class="dash-main">
   <div class="warn-banner" id="trial-banner" style="display:none;">
     <span><strong>Your Pro trial has ended and your digests are paused.</strong>
     Choose to keep Pro or continue on Free to start receiving them again.</span>
@@ -2071,11 +2175,35 @@ _DASHBOARD_BODY = """
       <button class="link-btn" id="connection-banner-dismiss">Dismiss</button>
     </span>
   </div>
+
+  <section class="dash-summary" id="dash-summary">
+    <div class="sum-item"><span class="k">Portfolio value</span>
+      <span class="v" id="sum-value">&mdash;</span></div>
+    <div class="sum-item"><span class="k">Day</span>
+      <span class="v" id="sum-day">&mdash;</span></div>
+    <div class="sum-item"><span class="k">Total return</span>
+      <span class="v" id="sum-total">&mdash;</span></div>
+    <button class="sum-digest-chip" id="sum-digest" style="display:none;"></button>
+  </section>
+
+  <nav class="dash-tabs" role="tablist" aria-label="Dashboard sections">
+    <button class="dash-tab" role="tab" data-tab="digest">Digest</button>
+    <button class="dash-tab" role="tab" data-tab="deep-dive">Deep Dive</button>
+    <button class="dash-tab" role="tab" data-tab="news">News</button>
+    <button class="dash-tab" role="tab" data-tab="holdings">Holdings</button>
+    <button class="dash-tab" role="tab" data-tab="watching" style="display:none;">Watching</button>
+  </nav>
+
+  <div class="dash-panel" data-panel="digest" role="tabpanel">
   <div class="dash-card" id="digest-card" style="display:none;">
     <h3>Today's digest <span class="updated-at" id="digest-updated"></span></h3>
     <div class="digest-body" id="digest-body"></div>
   </div>
+  <p class="muted-note" id="digest-empty">No digest yet today. Your morning brief
+  lands here before the market opens.</p>
+  </div>
 
+  <div class="dash-panel" data-panel="deep-dive" role="tabpanel">
   <div class="dash-card" id="deep-dive-card">
     <h3>Deep Dive <span class="tag">Pro</span>
       <span class="refresh-row">
@@ -2092,7 +2220,9 @@ _DASHBOARD_BODY = """
     <div id="dd-report" style="display:none;"></div>
     <div class="error-box" id="dd-error"></div>
   </div>
+  </div>
 
+  <div class="dash-panel" data-panel="news" role="tabpanel">
   <div class="dash-card">
     <h3>News</h3>
     <div class="filters-row" id="news-filters">
@@ -2134,7 +2264,9 @@ _DASHBOARD_BODY = """
       <div class="skl"></div><div class="skl short"></div>
     </div></div>
   </div>
+  </div>
 
+  <div class="dash-panel" data-panel="holdings" role="tabpanel">
   <div class="dash-card">
     <h3>Holdings
       <span class="refresh-row">
@@ -2143,30 +2275,12 @@ _DASHBOARD_BODY = """
         <span class="tag" id="totals"></span>
       </span>
     </h3>
-    <div id="holdings"><div aria-hidden="true">
-      <div class="skl"></div><div class="skl"></div><div class="skl short"></div>
-    </div></div>
-  </div>
-
-  <div class="dash-card" id="watching-card" style="display:none;">
-    <h3>Watching <span class="tag" id="watching-count"></span></h3>
-    <p class="muted-note" style="margin-top:0.5rem;">Stocks you follow without
-    holding them: news coverage, a digest line, and anomaly alerts. Find more
-    with the search bar above.</p>
-    <div id="watching-list"></div>
-  </div>
-</div>
-
-<aside class="dash-rail">
-  <div class="dash-card">
-    <h3>Ask Cirvia</h3>
-    <div class="chat-log" id="chat-log"></div>
-    <div class="chat-row">
-      <input id="chat-input" placeholder="Any news on my holdings today?" maxlength="500">
-      <button class="btn" id="chat-btn">Send</button>
+    <div class="holdings-split">
+      <div id="holdings"><div aria-hidden="true">
+        <div class="skl"></div><div class="skl"></div><div class="skl short"></div>
+      </div></div>
+      <div class="pie-box" id="holdings-pie" style="display:none;"></div>
     </div>
-    <p class="muted-note" id="chat-quota" style="display:none;"></p>
-    <p class="muted-note">Informational only. Cirvia never gives buy or sell advice.</p>
   </div>
 
   <div class="dash-card" id="watchlist-card" style="display:none;">
@@ -2176,8 +2290,29 @@ _DASHBOARD_BODY = """
     <button class="btn" id="save-watchlist-btn" style="margin-top:0.75rem;">Save watchlist</button>
     <div class="error-box" id="watchlist-save-error"></div>
   </div>
+  </div>
 
-</aside>
+  <div class="dash-panel" data-panel="watching" role="tabpanel">
+  <div class="dash-card" id="watching-card" style="display:none;">
+    <h3>Watching <span class="tag" id="watching-count"></span></h3>
+    <p class="muted-note" style="margin-top:0.5rem;">Stocks you follow without
+    holding them: news coverage, a digest line, and anomaly alerts. Find more
+    with the search bar above.</p>
+    <div id="watching-list"></div>
+  </div>
+  </div>
+
+<button class="chat-fab" id="chat-fab" aria-expanded="false" aria-controls="chat-panel">
+  Ask Cirvia</button>
+<div class="chat-panel" id="chat-panel" role="dialog" aria-label="Ask Cirvia">
+  <h3>Ask Cirvia <button class="chat-close" id="chat-close" aria-label="Close chat">&#10005;</button></h3>
+  <div class="chat-log" id="chat-log"></div>
+  <div class="chat-row">
+    <input id="chat-input" placeholder="Any news on my holdings today?" maxlength="500">
+    <button class="btn" id="chat-btn">Send</button>
+  </div>
+  <p class="muted-note" id="chat-quota" style="display:none;"></p>
+  <p class="muted-note">Informational only. Cirvia never gives buy or sell advice.</p>
 </div>
 """
 
@@ -2202,6 +2337,48 @@ function pctCell(v) {
   return `<td class="${cls}">${v >= 0 ? '+' : ''}${v.toFixed(2)}%</td>`;
 }
 
+// /me resolves in parallel with the other loaders (assigned in the fan-out
+// at the bottom); anything that needs meProfile awaits this instead of
+// serializing the whole dashboard behind /me.
+let meReady = null;
+// Deep-dive data is lazy: fetched on first activation of its tab, not on
+// every dashboard load (the payload is a full report markdown).
+let deepDiveWanted = false;
+let deepDiveInited = false;
+function maybeInitDeepDive() {
+  if (deepDiveInited) return;
+  if (!meReady) { deepDiveWanted = true; return; }  // tab restored pre-fan-out
+  deepDiveInited = true;
+  meReady.then(() => initDeepDive());
+}
+
+// Tabbed sections: hash > saved tab > digest. Panels hide via .active so the
+// loaders keep writing into their usual elements whether visible or not.
+const TAB_KEY = 'cirvia-dash-tab';
+const TAB_NAMES = ['digest', 'deep-dive', 'news', 'holdings', 'watching'];
+function tabBtn(name) { return document.querySelector('.dash-tab[data-tab="' + name + '"]'); }
+// Hashes are #tab-<name>: a bare #holdings would collide with id="holdings"
+// and make the browser scroll to the table on load.
+function hashTab() {
+  return location.hash.startsWith('#tab-') ? location.hash.slice(5) : '';
+}
+function activateTab(name, save = true) {
+  if (!TAB_NAMES.includes(name) || tabBtn(name).style.display === 'none') name = 'digest';
+  document.querySelectorAll('.dash-tab').forEach((b) =>
+    b.setAttribute('aria-selected', String(b.dataset.tab === name)));
+  document.querySelectorAll('.dash-panel').forEach((p) =>
+    p.classList.toggle('active', p.dataset.panel === name));
+  if (name === 'deep-dive') maybeInitDeepDive();
+  if (save) localStorage.setItem(TAB_KEY, name);
+  if ('#tab-' + name !== location.hash) history.replaceState(null, '', '#tab-' + name);
+  // Panels render while hidden (they measure 0); re-run scroll affordances.
+  window.dispatchEvent(new Event('resize'));
+}
+document.querySelectorAll('.dash-tab').forEach((b) =>
+  b.addEventListener('click', () => activateTab(b.dataset.tab)));
+window.addEventListener('hashchange', () => activateTab(hashTab(), false));
+activateTab(hashTab() || localStorage.getItem(TAB_KEY) || 'digest', Boolean(hashTab()));
+
 function filterSince() {
   const p = document.getElementById('filter-period').value;
   if (p === 'all') return null;
@@ -2212,6 +2389,9 @@ function filterSince() {
 
 function newsQuery(extra) {
   const params = new URLSearchParams();
+  // Full bodies ride along with every item; 20 keeps the payload sane and
+  // the feed still fills the panel (server default is 50).
+  params.set('limit', '20');
   const since = filterSince();
   if (since) params.set('since', since);
   const kind = document.getElementById('filter-kind').value;
@@ -2284,30 +2464,44 @@ function renderNewsItems(el, items, emptyMsg) {
   staggerIn(el.querySelectorAll('.news-item'));
 }
 
-async function loadDigest() {
+async function loadDigest(data) {
   const card = document.getElementById('digest-card');
+  const empty = document.getElementById('digest-empty');
+  const chip = document.getElementById('sum-digest');
+  const noDigest = () => {
+    card.style.display = 'none';
+    empty.style.display = 'block';
+    chip.style.display = 'none';
+  };
   try {
-    const res = await api('/digest/latest');
-    if (!res.ok) { card.style.display = 'none'; return; }  // 404 until today's runs
-    const data = await res.json();
-    if (!data || !data.body) { card.style.display = 'none'; return; }
+    if (data === undefined) {
+      const res = await api('/digest/latest');
+      if (!res.ok) { noDigest(); return; }  // 404 until today's runs
+      data = await res.json();
+    }
+    if (!data || !data.body) { noDigest(); return; }
     document.getElementById('digest-body').innerHTML = formatNewsBody(data.body);
+    let when = '';
     if (data.generated_at) {
-      document.getElementById('digest-updated').textContent =
-        new Date(data.generated_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      when = new Date(data.generated_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      document.getElementById('digest-updated').textContent = when;
     }
     card.style.display = 'block';
+    empty.style.display = 'none';
+    chip.textContent = 'Digest' + (when ? ' · ' + when : '');
+    chip.style.display = 'inline-block';
   } catch (e) {
-    card.style.display = 'none';
+    noDigest();
   }
 }
+document.getElementById('sum-digest').addEventListener('click', () => activateTab('digest'));
 
-async function loadGeneralNews() {
+async function loadGeneralNews(data) {
   const el = document.getElementById('general-news');
   try {
     // No forced kind: the Kind filter drives the feed (per-holding articles
     // also live on each stock's detail page).
-    const data = await (await api('/news?' + newsQuery())).json();
+    if (data === undefined) data = await (await api('/news?' + newsQuery())).json();
     renderNewsItems(el, data.items,
       'No news yet. Digests, alerts, and holding articles appear here once Cirvia surfaces them.');
   } catch (e) {
@@ -2319,9 +2513,9 @@ function reloadNewsFeeds() {
   loadGeneralNews();
 }
 
-async function loadMe() {
+async function loadMe(data) {
   try {
-    meProfile = await (await api('/me')).json();
+    meProfile = data || await (await api('/me')).json();
     const trial = meProfile.trial || {};
     const planLabel = trial.active ? 'Pro trial'
       : ((meProfile.effective_plan || meProfile.plan) === 'pro' ? 'Pro' : 'Free');
@@ -2337,7 +2531,6 @@ async function loadMe() {
         'up to ' + (meProfile.digest_tickers_limit || 3);
     }
     renderChatQuota(meProfile.chat_quota);
-    initDeepDive();
   } catch (e) {}
 }
 
@@ -2363,18 +2556,23 @@ function renderChatQuota(q) {
   el.style.display = 'block';
 }
 
-async function loadHoldings() {
+async function loadHoldings(data) {
   const el = document.getElementById('holdings');
   try {
-    const pf = await (await api('/portfolio')).json();
+    const pf = data || await (await api('/portfolio')).json();
     document.getElementById('holdings-updated').textContent =
       'Updated ' + new Date().toLocaleTimeString();
     if (!pf.positions || pf.positions.length === 0) {
       el.innerHTML = '<p class="muted-note">No holdings yet. ' +
         '<a href="/app/onboarding">Connect your brokerage</a> to sync your portfolio.</p>';
+      renderSummary([], {});
+      renderHoldingsPie([], {});
       return;
     }
     portfolioTickers = [...new Set(pf.positions.map((p) => p.ticker))];
+    // /portfolio and /me race in parallel; the badge set needs meProfile,
+    // so settle /me here (normally already resolved — zero added wait).
+    if (meReady) { try { await meReady; } catch (e) {} }
     const watchlist = new Set(meProfile && meProfile.digest_tickers ? meProfile.digest_tickers : []);
     const totals = pf.totals || {};
     if (totals.total_market_value_cad != null) {
@@ -2425,6 +2623,8 @@ async function loadHoldings() {
     el.innerHTML = '<div class="table-scroll"><table><thead><tr><th>Ticker</th><th>Qty</th><th>Value</th>' +
       '<th>Day</th><th>Total</th><th>Weight</th><th>Fwd P/E</th><th>Yield</th>' +
       '<th>Off high</th><th>Earnings</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
+    renderSummary([...byTicker.values()], totals);
+    renderHoldingsPie([...byTicker.values()], totals);
     el.querySelectorAll('.holdings-row').forEach((row) => {
       // The whole row navigates; the ticker anchor keeps middle-click/new-tab.
       row.addEventListener('click', () => {
@@ -2450,16 +2650,127 @@ async function loadHoldings() {
 
 // Weight is client-side math: /portfolio already carries per-row market value,
 // currency, and the USDCAD rate used for the CAD totals.
+function mvCadOf(g, totals) {
+  if (g.market_value == null) return null;
+  if (g.currency === 'CAD') return g.market_value;
+  if (g.currency === 'USD' && totals.usdcad_rate != null) {
+    return g.market_value * totals.usdcad_rate;
+  }
+  return null;
+}
+
 function weightCell(g, totals) {
   const total = totals.total_market_value_cad;
-  if (g.market_value == null || !total) return '—';
-  let mvCad = null;
-  if (g.currency === 'CAD') mvCad = g.market_value;
-  else if (g.currency === 'USD' && totals.usdcad_rate != null) {
-    mvCad = g.market_value * totals.usdcad_rate;
-  }
-  if (mvCad == null) return '—';
+  const mvCad = mvCadOf(g, totals);
+  if (mvCad == null || !total) return '—';
   return (mvCad / total * 100).toFixed(1) + '%';
+}
+
+function sumCell(id, amount, pct) {
+  const el = document.getElementById(id);
+  if (amount == null) { el.textContent = '—'; el.className = 'v'; return; }
+  const sign = amount >= 0 ? '+' : '';
+  el.className = 'v ' + (amount >= 0 ? 'pos' : 'neg');
+  el.innerHTML = sign + esc(fmtMoney(amount)) +
+    (pct == null ? '' : ' <span class="sub">' + sign + pct.toFixed(2) + '%</span>');
+}
+
+function renderSummary(groups, totals) {
+  const valEl = document.getElementById('sum-value');
+  if (totals.total_market_value_cad == null) {
+    valEl.textContent = '—';
+    sumCell('sum-day', null);
+    sumCell('sum-total', null);
+    return;
+  }
+  valEl.innerHTML = esc(fmtMoney(totals.total_market_value_cad)) +
+    (totals.includes_all_positions === false
+      ? ' <span class="sub">some unpriced</span>' : '');
+  // No portfolio-level day change server-side: back it out of each priced
+  // group's value and day % (value / (1 + pct) recovers yesterday's value).
+  let dayPnl = null, covered = 0;
+  for (const g of groups) {
+    const mvCad = mvCadOf(g, totals);
+    if (mvCad == null || g.day_change_pct == null) continue;
+    dayPnl = (dayPnl ?? 0) + mvCad - mvCad / (1 + g.day_change_pct / 100);
+    covered += mvCad;
+  }
+  sumCell('sum-day', dayPnl,
+    dayPnl == null || !covered ? null : dayPnl / (covered - dayPnl) * 100);
+  sumCell('sum-total', totals.total_unrealized_pnl_cad, totals.total_unrealized_pnl_pct);
+}
+
+// Allocation donut: hand-rolled SVG (same approach as the Risk Lab charts).
+// Lavender-anchored OKLCH categorical scale at matched lightness/chroma.
+const PIE_COLORS = [
+  'oklch(55% 0.17 295)', 'oklch(50% 0.11 155)', 'oklch(58% 0.12 75)',
+  'oklch(55% 0.13 230)', 'oklch(55% 0.14 335)', 'oklch(52% 0.11 195)',
+  'oklch(52% 0.13 25)', 'oklch(48% 0.09 120)',
+];
+const PIE_OTHER = 'oklch(65% 0.02 300)';
+
+function renderHoldingsPie(groups, totals) {
+  const box = document.getElementById('holdings-pie');
+  const priced = groups.map((g) => ({ t: g.ticker, v: mvCadOf(g, totals) }))
+    .filter((s) => s.v != null && s.v > 0).sort((a, b) => b.v - a.v);
+  if (!priced.length) { box.style.display = 'none'; box.innerHTML = ''; return; }
+  const excluded = groups.length - priced.length;
+  const total = priced.reduce((s, x) => s + x.v, 0);
+  const MAX_SLICES = 8;
+  const slices = priced.slice(0, MAX_SLICES);
+  if (priced.length > MAX_SLICES) {
+    slices.push({ t: 'Other', v: priced.slice(MAX_SLICES).reduce((s, x) => s + x.v, 0), other: true });
+  }
+  const R = 80, RI = 48, C = 100;
+  const pt = (r, frac) => {
+    const a = frac * 2 * Math.PI - Math.PI / 2;  // start at 12 o'clock, clockwise
+    return (C + r * Math.cos(a)).toFixed(2) + ' ' + (C + r * Math.sin(a)).toFixed(2);
+  };
+  let paths = '', legend = '', acc = 0;
+  slices.forEach((s, i) => {
+    const frac = s.v / total;
+    const pctTxt = (frac * 100).toFixed(1) + '%';
+    const color = s.other ? PIE_OTHER : PIE_COLORS[i % PIE_COLORS.length];
+    const label = esc(s.t) + ' ' + pctTxt;
+    if (slices.length === 1) {
+      // A 360-degree arc has coincident endpoints and renders nothing.
+      paths += '<circle class="pie-slice" data-idx="0" cx="' + C + '" cy="' + C +
+        '" r="' + ((R + RI) / 2) + '" fill="none" stroke="' + color +
+        '" stroke-width="' + (R - RI) + '"><title>' + label + '</title></circle>';
+    } else {
+      const a0 = acc, a1 = acc + frac;
+      const large = frac > 0.5 ? 1 : 0;
+      paths += '<path class="pie-slice" data-idx="' + i + '" fill="' + color + '" d="' +
+        'M ' + pt(R, a0) + ' A ' + R + ' ' + R + ' 0 ' + large + ' 1 ' + pt(R, a1) +
+        ' L ' + pt(RI, a1) + ' A ' + RI + ' ' + RI + ' 0 ' + large + ' 0 ' + pt(RI, a0) +
+        ' Z"><title>' + label + '</title></path>';
+    }
+    legend += '<div class="pie-leg-row" data-idx="' + i + '">' +
+      '<i class="sw" style="background:' + color + '"></i>' +
+      '<span class="t">' + esc(s.t) + '</span><span>' + pctTxt + '</span></div>';
+    acc += frac;
+  });
+  box.innerHTML = '<svg viewBox="0 0 200 200" role="img" aria-label="Portfolio allocation">' +
+    paths + '<text x="100" y="104" text-anchor="middle" fill="var(--ink-3)" ' +
+    'font-size="13" font-family="inherit">' + priced.length +
+    (priced.length === 1 ? ' holding' : ' holdings') + '</text></svg>' +
+    '<div class="pie-legend">' + legend + '</div>' +
+    (excluded > 0
+      ? '<p class="muted-note">' + excluded + ' unpriced position' +
+        (excluded === 1 ? '' : 's') + ' not shown.</p>' : '');
+  box.style.display = 'block';
+  // Hovering a slice or its legend row highlights both and dims the rest.
+  box.querySelectorAll('[data-idx]').forEach((el2) => {
+    el2.addEventListener('pointerenter', () => {
+      box.classList.add('has-hover');
+      box.querySelectorAll('[data-idx="' + el2.dataset.idx + '"]')
+        .forEach((m) => m.classList.add('hl'));
+    });
+    el2.addEventListener('pointerleave', () => {
+      box.classList.remove('has-hover');
+      box.querySelectorAll('.hl').forEach((m) => m.classList.remove('hl'));
+    });
+  });
 }
 
 function fmtRatio(v) { return v == null ? '—' : v.toFixed(1); }
@@ -2494,15 +2805,23 @@ async function loadMetrics() {
   });
 }
 
-async function loadWatching() {
+async function loadWatching(data) {
   const card = document.getElementById('watching-card');
   const list = document.getElementById('watching-list');
-  let data;
   try {
-    data = await (await api('/watchlist')).json();
+    if (data === undefined) data = await (await api('/watchlist')).json();
   } catch (e) { return; }
   const items = data.items || [];
-  if (!items.length) { card.style.display = 'none'; return; }
+  if (!items.length) {
+    card.style.display = 'none';
+    tabBtn('watching').style.display = 'none';
+    // A saved/active "watching" tab with nothing to show falls back home.
+    if (document.querySelector('.dash-panel[data-panel="watching"]').classList.contains('active')) {
+      activateTab('digest');
+    }
+    return;
+  }
+  tabBtn('watching').style.display = '';
   document.getElementById('watching-count').textContent =
     data.limit == null ? String(data.used) : data.used + '/' + data.limit;
   let rows = '';
@@ -2599,6 +2918,26 @@ document.getElementById('refresh-holdings-btn').addEventListener('click', () => 
 const log = document.getElementById('chat-log');
 const input = document.getElementById('chat-input');
 const sendBtn = document.getElementById('chat-btn');
+
+const chatPanel = document.getElementById('chat-panel');
+const chatFab = document.getElementById('chat-fab');
+let chatHistoryLoaded = false;
+function setChatOpen(open) {
+  chatPanel.classList.toggle('open', open);
+  chatFab.setAttribute('aria-expanded', String(open));
+  if (open) {
+    // History is lazy: fetched on first open, not on every dashboard load.
+    if (!chatHistoryLoaded) { chatHistoryLoaded = true; loadChatHistory(); }
+    // History loaded while the panel was display:none sits at scroll 0.
+    log.scrollTop = log.scrollHeight;
+    if (matchMedia('(min-width: 641px)').matches) input.focus();
+  }
+}
+chatFab.addEventListener('click', () => setChatOpen(!chatPanel.classList.contains('open')));
+document.getElementById('chat-close').addEventListener('click', () => setChatOpen(false));
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && chatPanel.classList.contains('open')) setChatOpen(false);
+});
 
 function addMsg(text, cls) {
   const div = document.createElement('div');
@@ -2756,8 +3095,6 @@ async function loadChatHistory() {
     log.innerHTML = ''; // empty log; sendChat still works
   }
 }
-
-loadChatHistory();
 
 // --- deep dive (multi-agent research) ----------------------------------------
 // POST /deep-dive kicks off the pipeline server-side; progress arrives over
@@ -2985,13 +3322,13 @@ async function initDeepDive() {
 // Managed on /app/settings/delivery; this banner just points there.
 const DELIVERY_BANNER_KEY = 'cirvia-delivery-banner-dismissed';
 
-async function checkDeliverySetup() {
+async function checkDeliverySetup(data) {
   if (sessionStorage.getItem(DELIVERY_BANNER_KEY)) return;
   // One nudge at a time: a broken connection is the more urgent problem.
   const connBanner = document.getElementById('connection-banner');
   if (connBanner && connBanner.style.display !== 'none') return;
   try {
-    const info = await (await api('/me/notifications')).json();
+    const info = data || await (await api('/me/notifications')).json();
     const active = (info.channels || []).find(
       (c) => c.channel === info.preferred_channel);
     if (!(active && active.verified && !active.opted_out)) {
@@ -3044,10 +3381,10 @@ function connectionBroken(s) {
     (!s.connected && s.last_sync_at));
 }
 
-async function checkConnection() {
+async function checkConnection(data) {
   if (sessionStorage.getItem(BANNER_DISMISS_KEY)) return;
   try {
-    const s = await (await api('/portfolio/status')).json();
+    const s = data || await (await api('/portfolio/status')).json();
     if (connectionBroken(s)) {
       const banner = document.getElementById('connection-banner');
       banner.style.display = 'flex';
@@ -3103,13 +3440,77 @@ document.getElementById('reconnect-btn').addEventListener('click', async () => {
   }
 });
 
-loadMe().then(() => {
-  loadHoldings();
-  loadWatching();
-  loadDigest();
-  reloadNewsFeeds();
-  checkConnection().then(checkDeliverySetup).then(checkPersonalize);
-});
+// --- boot sequence -----------------------------------------------------------
+// 1) Instant paint: render the last bootstrap payload from localStorage
+//    (per-user key, 0 network — repeat visits paint in one frame).
+// 2) One aggregated GET /dashboard/bootstrap replaces the old ~8-call
+//    fan-out and re-renders every panel fresh.
+// 3) A section that failed server-side (or the whole endpoint) falls back
+//    to the individual endpoints — loaders fetch when passed no data.
+// Loaders that need meProfile await meReady internally; the banner chain
+// stays ordered (connection > delivery > personalize).
+const BOOT_VERSION = 1;
+
+function readBootCache(key) {
+  try {
+    const saved = JSON.parse(localStorage.getItem(key));
+    if (!saved || saved.v !== BOOT_VERSION) return null;
+    if (Date.now() - (saved.saved_at || 0) > 24 * 3600 * 1000) return null;
+    return saved.payload;
+  } catch (e) { return null; }
+}
+
+function writeBootCache(key, payload) {
+  try {
+    const blob = JSON.stringify({ v: BOOT_VERSION, saved_at: Date.now(), payload });
+    if (blob.length <= 200 * 1024) localStorage.setItem(key, blob);
+  } catch (e) { /* quota / private mode */ }
+}
+
+function applyBootstrap(boot) {
+  const s = (boot && boot.sections) || {};
+  const val = (n) => (s[n] && s[n].error === undefined) ? s[n].data : undefined;
+  meReady = loadMe(val('me'));
+  if (deepDiveWanted) maybeInitDeepDive();
+  const banners = checkConnection(val('status'))
+    .then(() => checkDeliverySetup(val('notifications')));
+  loadHoldings(val('portfolio'));
+  loadWatching(val('watchlist'));
+  loadDigest(val('digest'));  // data: null is valid ("no digest yet")
+  loadGeneralNews(val('news'));
+  Promise.allSettled([meReady, banners]).then(checkPersonalize);
+}
+
+let bootRepolls = 0;
+async function fetchBootstrap(key) {
+  const resp = await api('/dashboard/bootstrap');
+  if (!resp.ok) throw new Error('bootstrap ' + resp.status);
+  const boot = await resp.json();
+  if (key) writeBootCache(key, boot);
+  applyBootstrap(boot);
+  // Stale-while-revalidate: the server flags sections it is rebuilding in
+  // the background; re-poll briefly so they swap in when ready.
+  if ((boot.refreshing || []).length && bootRepolls < 3) {
+    bootRepolls++;
+    setTimeout(() => fetchBootstrap(key).catch(() => {}), 1500);
+  }
+}
+
+(async () => {
+  let key = null;
+  try {
+    const { data } = await sb.auth.getSession();
+    const uid = data && data.session && data.session.user && data.session.user.id;
+    if (uid) key = 'cirvia:boot:v' + BOOT_VERSION + ':' + uid;
+  } catch (e) { /* requireSession redirects if truly signed out */ }
+  const cached = key && readBootCache(key);
+  if (cached) applyBootstrap(cached);
+  try {
+    await fetchBootstrap(key);
+  } catch (e) {
+    applyBootstrap(null);  // full fallback: individual endpoints fetch fresh
+  }
+})();
 """
 
 

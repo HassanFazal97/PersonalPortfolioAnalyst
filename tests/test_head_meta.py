@@ -59,7 +59,7 @@ def test_all_pages_have_favicon_and_theme_color(client, path):
     html = client.get(path).text
     assert '<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,' in html
     assert '<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">' in html
-    assert '<meta name="theme-color" content="#08060c">' in html
+    assert '<meta name="theme-color" content="#f7f4fa">' in html
 
 
 @pytest.mark.parametrize("path", ["/app", "/app/onboarding", "/app/dashboard"])
