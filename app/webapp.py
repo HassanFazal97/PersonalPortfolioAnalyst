@@ -2160,7 +2160,8 @@ _DASHBOARD_BODY = """
 </div>
   <div class="warn-banner" id="trial-banner" style="display:none;">
     <span><strong>Your Pro trial has ended and your digests are paused.</strong>
-    Choose to keep Pro or continue on Free to start receiving them again.</span>
+    Keep Pro or continue on Free to start receiving them again — if you do
+    nothing, we’ll move you to Free automatically in about a week.</span>
     <span class="actions">
       <a class="btn" href="/app/settings?billing=upgrade">Choose a plan</a>
     </span>
@@ -4268,17 +4269,18 @@ function renderBilling(me) {
   }
   if (me.plan !== 'pro') {
     const upgradeBtns =
-      '<button class="btn" id="upgrade-btn">Upgrade to Pro \\u2014 $15/mo USD</button>' +
+      '<button class="btn" id="upgrade-btn">Upgrade to Pro \\u2014 $20/mo CAD</button>' +
       (billing.annual_available
         ? '<button class="link-btn" id="upgrade-annual-btn" ' +
-          'style="margin-left:0.75rem;">or $120/yr \\u2014 4 months free</button>'
+          'style="margin-left:0.75rem;">or $160/yr \\u2014 4 months free</button>'
         : '');
     if (trial.decision_pending) {
       actions.innerHTML =
         '<p class="muted-note" style="margin-bottom:0.75rem;"><strong ' +
         'style="color:var(--ink);">Your Pro trial has ended and your digests ' +
         'are paused.</strong> Keep the full Pro experience, or continue on ' +
-        'Free with a weekly digest.</p>' + upgradeBtns +
+        'Free with a weekly digest (we\u2019ll switch you to Free automatically ' +
+        'in about a week if you do nothing).</p>' + upgradeBtns +
         '<div style="margin-top:0.6rem;"><button class="link-btn" ' +
         'id="choose-free-btn">Continue with Free</button></div>';
     } else if (trial.active) {

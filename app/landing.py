@@ -1510,8 +1510,8 @@ _PRICING_BODY = f"""
     </div>
     <div class="plan featured" data-reveal-item>
       <div class="plan-tag">Pro</div>
-      <div class="price">$15<span class="per"> /mo USD</span></div>
-      <p class="price-note">or $120/yr USD &mdash; 4 months free.</p>
+      <div class="price">$20<span class="per"> /mo CAD</span></div>
+      <p class="price-note">or $160/yr CAD &mdash; 4 months free.</p>
       <ul>
         <li>Unlimited connected accounts</li>
         <li>Daily weekday digest across all holdings</li>
@@ -1538,7 +1538,7 @@ _PRICING_BODY = f"""
     <p>Yes. Cancel whenever you like from Settings &rarr; Manage billing; your Pro
     features stay active until the end of the current billing period.</p></details>
     <details data-reveal-item><summary>Is there a yearly option?</summary>
-    <p>Yes. Pro is $15/mo USD or $120/yr USD, which works out to four months free
+    <p>Yes. Pro is $20/mo CAD or $160/yr CAD, which works out to four months free
     versus paying monthly.</p></details>
     <details data-reveal-item><summary>How does the free trial work?</summary>
     <p>Every new account gets 7 days of full Pro &mdash; daily digests, macro
@@ -1803,7 +1803,7 @@ LANDING_HTML = _layout(
 PRICING_HTML = _layout(
     "Pricing — Cirvia",
     "Cirvia pricing: start free with a weekly digest and chat questions, or go Pro at "
-    "$15/mo USD ($120/yr) for daily digests, verified Top Picks with a public track "
+    "$20/mo CAD ($160/yr) for daily digests, verified Top Picks with a public track "
     "record, Deep Dive reports, Risk Lab, and macro alerts.",
     _PRICING_BODY,
     active="pricing",

@@ -29,7 +29,7 @@ def test_pages_have_expected_content(monkeypatch):
         assert "Privacy Policy" in client.get("/privacy").text
         assert "Terms of Service" in client.get("/terms").text
         pricing = client.get("/pricing").text
-        assert "Free" in pricing and "Pro" in pricing and "$12" in pricing
+        assert "Free" in pricing and "Pro" in pricing and "$160" in pricing
         # cross-links between pages
         home = client.get("/").text
         assert "/privacy" in home and "/terms" in home and "/contact" in home
