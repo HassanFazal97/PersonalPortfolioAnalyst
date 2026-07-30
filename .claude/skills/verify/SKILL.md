@@ -11,6 +11,7 @@ description: Launch and drive the Cirvia FastAPI app locally to verify changes e
 DIGEST_CRON="59 23 31 12 *" NEWS_REFRESH_CRON="" ANOMALY_SCAN_CRON="" \
 FUNDAMENTALS_REFRESH_CRON="" DAILY_PRICES_CRON="" PICKS_SYNC_CRON="" PICKS_CRON="" \
 MACRO_SCAN_INTERVAL_MINUTES=0 DELIVERY_INTERVAL_SECONDS=0 \
+QUOTE_WARM_INTERVAL_SECONDS=0 POSITIONS_REFRESH_INTERVAL_MINUTES=0 \
 .venv/bin/python -m uvicorn app.main:app --port 8399 --log-level warning
 ```
 
