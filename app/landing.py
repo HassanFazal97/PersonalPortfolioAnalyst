@@ -17,6 +17,11 @@ from app.config import get_settings
 # deploy of this constant goes live — a dead contact address on legal pages
 # is worse than a personal one.
 CONTACT_EMAIL = "hello@cirvia.ca"
+# Cirvia is not (yet) a registered business name — it's operated by this
+# individual as an unregistered sole proprietorship. Named here, not "Cirvia
+# Inc.", because that's what's actually true; update if that ever changes
+# (incorporation or an Ontario Business Names Act registration).
+LEGAL_OPERATOR = "Fazal Hassan"
 LAST_UPDATED = "July 5, 2026"
 
 # Brand mark: a stylized dahlia — one petal path rotated into three layered
@@ -882,7 +887,8 @@ _FOOTER = (
     "Cirvia is for informational purposes only and does not provide personalized "
     "investment advice or recommendations to buy or sell. Investing involves risk, "
     "including loss of principal; past performance does not guarantee future results. "
-    f"<br><br>© 2026 Cirvia · Built in Canada</p></div></footer>"
+    f"<br><br>Cirvia is operated by {LEGAL_OPERATOR}, a sole proprietorship based in "
+    f"Ontario, Canada. © 2026 {LEGAL_OPERATOR} · Built in Canada</p></div></footer>"
 )
 
 
@@ -1314,7 +1320,8 @@ _PRIVACY_BODY = f"""
   <h1>Privacy Policy</h1>
   <p class="updated">Last updated: {LAST_UPDATED}</p>
 
-  <p>Cirvia ("Cirvia", "we", "us", or "our") provides an AI portfolio analysis service for
+  <p>Cirvia ("Cirvia", "we", "us", or "our") — operated by {LEGAL_OPERATOR}, a sole
+  proprietorship based in Ontario, Canada — provides an AI portfolio analysis service for
   individual investors. This Privacy Policy explains what personal information we collect, why we
   collect it, how we use, share, and protect it, and the choices and rights you have. It is
   written to align with Canada's <em>Personal Information Protection and Electronic Documents Act</em>
@@ -1322,8 +1329,8 @@ _PRIVACY_BODY = f"""
   disclosure of your information as described here.</p>
 
   <h2>1. Accountability</h2>
-  <p>Cirvia is responsible for personal information under its control. Questions, requests, and
-  privacy complaints can be directed to our privacy contact at
+  <p>{LEGAL_OPERATOR} is responsible for personal information under Cirvia's control. Questions,
+  requests, and privacy complaints can be directed to our privacy contact at
   <a href="mailto:{CONTACT_EMAIL}">{CONTACT_EMAIL}</a>.</p>
 
   <h2>2. Information we collect</h2>
@@ -1459,9 +1466,10 @@ _TERMS_BODY = f"""
   <p class="updated">Last updated: {LAST_UPDATED}</p>
 
   <p>These Terms of Service ("Terms") form a binding agreement between you and Cirvia ("Cirvia",
-  "we", "us") governing your access to and use of the Cirvia website, application, and services
-  (collectively, the "Service"). By accessing or using the Service, you agree to these Terms and to
-  our <a href="/privacy">Privacy Policy</a>. If you do not agree, do not use the Service.</p>
+  "we", "us") — operated by {LEGAL_OPERATOR}, a sole proprietorship based in Ontario, Canada —
+  governing your access to and use of the Cirvia website, application, and services (collectively,
+  the "Service"). By accessing or using the Service, you agree to these Terms and to our
+  <a href="/privacy">Privacy Policy</a>. If you do not agree, do not use the Service.</p>
 
   <h2>1. The Service</h2>
   <p>Cirvia is an informational tool that connects to your brokerage account on a
