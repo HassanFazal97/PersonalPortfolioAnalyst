@@ -1279,7 +1279,7 @@ class Repo:
                         "kind": "digest",
                         "ticker": None,
                         "tickers": [],
-                        "headline": f"Morning digest — {d.digest_date.isoformat()}",
+                        "headline": f"Morning digest, {d.digest_date.isoformat()}",
                         "body": d.body,
                         "source": None,
                         "url": None,

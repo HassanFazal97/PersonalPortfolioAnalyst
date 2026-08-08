@@ -378,7 +378,7 @@ const EmailCard: React.FC<{ k: number }> = ({ k }) => (
           </span>
         </div>
         <div style={{ fontSize: 15.5 * k, color: C.ink2, marginTop: 2 * k }}>
-          Your morning digest — Jul 6
+          Your morning digest, Jul 6
         </div>
         <div style={{ fontSize: 14 * k, color: C.ink3, marginTop: 2 * k }}>
           VFV +0.8, NVDA +2.1, ENB −1.2. One thing to watch…
@@ -431,7 +431,7 @@ const DiscordCard: React.FC<{ k: number }> = ({ k }) => (
         </div>
         {/* real adapter posts plain webhook content, not an embed */}
         <div style={{ fontSize: 14.5 * k, color: C.ink2, marginTop: 6 * k, lineHeight: 1.55 }}>
-          Morning digest — Jul 6
+          Morning digest, Jul 6
           <br />
           VFV +0.8 · NVDA +2.1 · ENB −1.2. BoC decision lands Thursday.
         </div>

@@ -500,6 +500,18 @@ tr:last-child td { border-bottom: none; }
 .watch-wrap .muted-note { max-width: 30ch; margin-top: 0.45rem; font-size: 0.82rem; }
 .stock-price { font-size: 1.25rem; font-weight: 700;
   font-variant-numeric: tabular-nums; }
+/* valuation verdict (app/quant/valuation.py) */
+.vd-badge { display: inline-block; font-size: 0.78rem; font-weight: 650; border-radius: 999px;
+  padding: 0.16rem 0.65rem; border: 1px solid var(--line-strong); vertical-align: middle;
+  margin-left: 0.5rem; white-space: nowrap; }
+.vd-under { color: var(--gain); }
+.vd-over { color: var(--loss); }
+.vd-fair { color: var(--ink-2); }
+.vd-none { color: var(--ink-3); }
+.vd-evidence-gate { margin-top: 0.7rem; padding-top: 0.6rem; border-top: 1px solid var(--line);
+  font-size: 0.85rem; color: var(--ink-3); }
+.vd-evidence-gate a { color: var(--ink-2); }
+.vd-note { margin-top: 0.6rem; font-size: 0.82rem; color: var(--ink-3); }
 .metric-trio { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
 @media (max-width: 800px) { .metric-trio { grid-template-columns: 1fr; } }
 .metric-list { margin-top: 0.6rem; }
@@ -1457,7 +1469,7 @@ _ONBOARDING_BODY = """
     <p class="muted-note" style="text-align:center;"><a href="#" id="manual-link">No
     brokerage link? Type your holdings instead</a></p>
     <div id="manual-panel" style="display:none;">
-      <p class="muted-note">Ticker and share count, one per row — e.g.
+      <p class="muted-note">Ticker and share count, one per row, e.g.
       <strong>NVDA</strong> or <strong>RY.TO</strong>. You can link a brokerage
       later to keep this synced automatically.</p>
       <div id="manual-rows"></div>
@@ -1479,7 +1491,7 @@ _ONBOARDING_BODY = """
     <h2>Pick your risk comfort</h2>
     <p id="posture-intro">Here's <strong>your actual portfolio</strong> replayed
     5,000 times over the next year at three risk levels. The shaded range holds
-    90% of the simulated outcomes, and all three charts share one scale &mdash;
+    90% of the simulated outcomes, and all three charts share one scale:
     wider means wilder. Which ride looks right to you?</p>
     <div class="status-line" id="posture-status"><span class="spinner"></span>
     <span id="posture-status-text">Crunching two years of your holdings' history&hellip;</span></div>
@@ -1494,7 +1506,7 @@ _ONBOARDING_BODY = """
   <div class="step-panel" id="panel-watchlist" style="display:none;">
     <h2>Choose holdings to follow</h2>
     <p>On the Free plan, Cirvia tracks news for up to <strong id="wl-limit">3</strong>
-    holdings. Your largest positions are pre-selected — adjust to taste.</p>
+    holdings. Your largest positions are pre-selected; adjust to taste.</p>
     <div class="watchlist-grid" id="watchlist-grid"></div>
     <p class="muted-note" id="wl-hint"></p>
     <button class="btn full" id="watchlist-btn">Continue</button>
@@ -1518,7 +1530,7 @@ _ONBOARDING_BODY = """
     We send a one-time code to confirm it works.</p>
 """ + _DELIVERY_PICKER_HTML + """
     <p class="muted-note" style="text-align:center;"><a href="/app/dashboard">Skip for
-    now</a> — you can set this up anytime from the dashboard.</p>
+    now</a>, you can set this up anytime from the dashboard.</p>
   </div>
 
   </div>
@@ -2038,16 +2050,16 @@ function renderPostures(data) {
   if (data.fallback) {
     document.getElementById('posture-intro').innerHTML =
       'These are <strong>typical portfolios</strong> at three risk levels, replayed ' +
-      '5,000 times over the next year &mdash; yours will appear in the Risk Lab once ' +
+      '5,000 times over the next year; yours will appear in the Risk Lab once ' +
       'there\\u2019s enough price history. The shaded range holds 90% of outcomes, and ' +
-      'all three charts share one scale &mdash; wider means wilder. ' +
+      'all three charts share one scale: wider means wilder. ' +
       'Which ride looks right to you?';
   } else if (data.portfolio_value_cad) {
     document.getElementById('posture-intro').innerHTML =
-      'Here\\u2019s <strong>your actual portfolio</strong> &mdash; ' +
-      fmtCadOb(data.portfolio_value_cad) + ' today &mdash; replayed 5,000 times over ' +
+      'Here\\u2019s <strong>your actual portfolio</strong>, ' +
+      fmtCadOb(data.portfolio_value_cad) + ' today, replayed 5,000 times over ' +
       'the next year at three risk levels. The shaded range holds 90% of the simulated ' +
-      'outcomes, and all three charts share one scale &mdash; wider means wilder. ' +
+      'outcomes, and all three charts share one scale: wider means wilder. ' +
       'Which ride looks right to you?';
   }
   // One percent-domain across all three fans, so their shapes are comparable.
@@ -2248,7 +2260,7 @@ _DASHBOARD_BODY = """
 </div>
   <div class="warn-banner" id="trial-banner" style="display:none;">
     <span><strong>Your Pro trial has ended and your digests are paused.</strong>
-    Keep Pro or continue on Free to start receiving them again — if you do
+    Keep Pro or continue on Free to start receiving them again; if you do
     nothing, we’ll move you to Free automatically in about a week.</span>
     <span class="actions">
       <a class="btn" href="/app/settings?billing=upgrade">Choose a plan</a>
@@ -2282,11 +2294,11 @@ _DASHBOARD_BODY = """
 
   <section class="dash-summary" id="dash-summary">
     <div class="sum-item"><span class="k">Portfolio value</span>
-      <span class="v" id="sum-value">&mdash;</span></div>
+      <span class="v" id="sum-value">&ndash;</span></div>
     <div class="sum-item"><span class="k">Day</span>
-      <span class="v" id="sum-day">&mdash;</span></div>
+      <span class="v" id="sum-day">&ndash;</span></div>
     <div class="sum-item"><span class="k">Total return</span>
-      <span class="v" id="sum-total">&mdash;</span></div>
+      <span class="v" id="sum-total">&ndash;</span></div>
     <button class="sum-digest-chip" id="sum-digest" style="display:none;"></button>
   </section>
 
@@ -2316,7 +2328,7 @@ _DASHBOARD_BODY = """
       </span>
     </h3>
     <p class="muted-note" id="dd-blurb" style="margin-top:0.5rem;">A team of AI
-    research agents — fundamentals, technical, risk, and news — investigates
+    research agents (fundamentals, technical, risk, and news) investigates
     your portfolio in parallel, a verifier adversarially re-checks their
     claims against live data, and a final agent writes the report.</p>
     <div id="dd-progress" style="display:none;"></div>
@@ -2433,10 +2445,10 @@ function esc(s) {
   return d.innerHTML.replaceAll('"', '&quot;').replaceAll("'", '&#39;');
 }
 function fmtMoney(v) {
-  return v == null ? '—' : v.toLocaleString('en-CA', { style: 'currency', currency: 'CAD' });
+  return v == null ? '–' : v.toLocaleString('en-CA', { style: 'currency', currency: 'CAD' });
 }
 function pctCell(v) {
-  if (v == null) return '<td>—</td>';
+  if (v == null) return '<td>–</td>';
   const cls = v >= 0 ? 'pos' : 'neg';
   return `<td class="${cls}">${v >= 0 ? '+' : ''}${v.toFixed(2)}%</td>`;
 }
@@ -2766,13 +2778,13 @@ function mvCadOf(g, totals) {
 function weightCell(g, totals) {
   const total = totals.total_market_value_cad;
   const mvCad = mvCadOf(g, totals);
-  if (mvCad == null || !total) return '—';
+  if (mvCad == null || !total) return '–';
   return (mvCad / total * 100).toFixed(1) + '%';
 }
 
 function sumCell(id, amount, pct) {
   const el = document.getElementById(id);
-  if (amount == null) { el.textContent = '—'; el.className = 'v'; return; }
+  if (amount == null) { el.textContent = '–'; el.className = 'v'; return; }
   const sign = amount >= 0 ? '+' : '';
   el.className = 'v ' + (amount >= 0 ? 'pos' : 'neg');
   el.innerHTML = sign + esc(fmtMoney(amount)) +
@@ -2782,7 +2794,7 @@ function sumCell(id, amount, pct) {
 function renderSummary(groups, totals) {
   const valEl = document.getElementById('sum-value');
   if (totals.total_market_value_cad == null) {
-    valEl.textContent = '—';
+    valEl.textContent = '–';
     sumCell('sum-day', null);
     sumCell('sum-total', null);
     return;
@@ -2911,11 +2923,11 @@ function renderHoldingsPie(groups, totals) {
   });
 }
 
-function fmtRatio(v) { return v == null ? '—' : v.toFixed(1); }
-function fmtPct(v) { return v == null ? '—' : v.toFixed(2) + '%'; }
+function fmtRatio(v) { return v == null ? '–' : v.toFixed(1); }
+function fmtPct(v) { return v == null ? '–' : v.toFixed(2) + '%'; }
 
 function fmtEarnings(d) {
-  if (!d) return '—';
+  if (!d) return '–';
   const dt = new Date(d + 'T12:00:00');
   const days = Math.round((dt - Date.now()) / 86400000);
   const label = dt.toLocaleDateString('en-CA', { month: 'short', day: 'numeric' });
@@ -2925,7 +2937,7 @@ function fmtEarnings(d) {
 
 function fillMetricCells(row, m) {
   const set = (sel, html) => { const c = row.querySelector(sel); if (c) c.innerHTML = html; };
-  set('.m-fpe', m.quote_type === 'ETF' ? '—' : fmtRatio(m.forward_pe));
+  set('.m-fpe', m.quote_type === 'ETF' ? '–' : fmtRatio(m.forward_pe));
   set('.m-yield', fmtPct(m.dividend_yield_pct));
   set('.m-52w', fmtPct(m.pct_from_52w_high));
   set('.m-earn', fmtEarnings(m.next_earnings_date));
@@ -2965,7 +2977,7 @@ async function loadWatching(data) {
   let rows = '';
   for (const it of items) {
     const held = it.held ? '<span class="watchlist-badge">held</span>' : '';
-    const price = it.last_price == null ? '—'
+    const price = it.last_price == null ? '–'
       : Number(it.last_price).toLocaleString('en-CA',
           { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     rows += `<tr class="watching-row" data-ticker="${esc(it.ticker)}">` +
@@ -3148,7 +3160,7 @@ async function sendChatStream(message, pending) {
         steps.appendChild(note);
         live.textContent = '';
       }
-      const suffix = data.input_summary ? ' — ' + data.input_summary : '';
+      const suffix = data.input_summary ? ': ' + data.input_summary : '';
       const step = addStep('⚙', (data.label || data.name) + suffix + '…');
       (openSteps[data.name] = openSteps[data.name] || []).push(step);
     } else if (name === 'tool_end') {
@@ -3197,7 +3209,7 @@ async function sendChatStream(message, pending) {
   if (!finished) {
     if (!gotEvent) throw new Error('stream ended without events');
     // Mid-run drop: the run finishes server-side; history has the answer.
-    pending.textContent = 'Connection lost — refresh to see the answer in chat history.';
+    pending.textContent = 'Connection lost, refresh to see the answer in chat history.';
   }
 }
 
@@ -3343,7 +3355,7 @@ function ddRenderSummary(r) {
   const vs = report.verification_summary || {};
   foot.textContent = vs.checked
     ? vs.checked + ' claims checked, ' + vs.verified + ' verified, ' + vs.challenged + ' challenged.'
-    : (report.disclaimer || 'Informational only — not investment advice.');
+    : (report.disclaimer || 'Informational only: not investment advice.');
   box.appendChild(foot);
 
   const actions = document.createElement('div');
@@ -3397,7 +3409,7 @@ async function ddLoadLatest(reportId) {
       document.getElementById('dd-progress').style.display = 'none';
       document.getElementById('dd-activity').style.display = 'none';
       const err = document.getElementById('dd-error');
-      err.textContent = 'The deep dive failed — nothing was charged beyond the work done. Try again.';
+      err.textContent = 'The deep dive failed; nothing was charged beyond the work done. Try again.';
       err.style.display = 'block';
     } else {
       ddRenderSummary(r);
@@ -3713,9 +3725,10 @@ _STOCK_BODY = """
     </div></div>
   </div>
   <div class="metric-trio" id="fund-cards">
-    <div class="dash-card"><h3 id="card-a-title">Valuation</h3>
+    <div class="dash-card"><h3 id="card-a-title">Valuation<span id="verdict-badge"></span></h3>
       <div class="metric-list" id="card-a"><div aria-hidden="true">
-        <div class="skl"></div><div class="skl short"></div></div></div></div>
+        <div class="skl"></div><div class="skl short"></div></div></div>
+      <div id="verdict-evidence"></div></div>
     <div class="dash-card"><h3 id="card-b-title">Growth &amp; profitability</h3>
       <div class="metric-list" id="card-b"><div aria-hidden="true">
         <div class="skl"></div><div class="skl short"></div></div></div></div>
@@ -3753,21 +3766,21 @@ _STOCK_JS = """
 requireSession();
 const TICKER = window.CIRVIA_CONFIG.ticker;
 document.getElementById('stock-title').textContent = TICKER;
-document.title = TICKER + ' — Cirvia';
+document.title = TICKER + ' | Cirvia';
 
 function esc(s) {
   const d = document.createElement('div'); d.textContent = s ?? '';
   return d.innerHTML.replaceAll('"', '&quot;').replaceAll("'", '&#39;');
 }
-function fmtNum(v, dp = 2) { return v == null ? '—' : Number(v).toFixed(dp); }
-function fmtPct(v) { return v == null ? '—' : Number(v).toFixed(2) + '%'; }
+function fmtNum(v, dp = 2) { return v == null ? '–' : Number(v).toFixed(dp); }
+function fmtPct(v) { return v == null ? '–' : Number(v).toFixed(2) + '%'; }
 function pctSpan(v) {
-  if (v == null) return '—';
+  if (v == null) return '–';
   const cls = v >= 0 ? 'pos' : 'neg';
   return `<span class="${cls}">${v >= 0 ? '+' : ''}${Number(v).toFixed(2)}%</span>`;
 }
 function fmtBig(v) {
-  if (v == null) return '—';
+  if (v == null) return '–';
   const a = Math.abs(v);
   if (a >= 1e12) return (v / 1e12).toFixed(2) + 'T';
   if (a >= 1e9) return (v / 1e9).toFixed(2) + 'B';
@@ -3775,7 +3788,7 @@ function fmtBig(v) {
   return Number(v).toLocaleString('en-CA');
 }
 function fmtCur(v, cur) {
-  if (v == null) return '—';
+  if (v == null) return '–';
   try {
     return v.toLocaleString('en-CA', { style: 'currency', currency: cur || 'CAD' });
   } catch (e) { return Number(v).toFixed(2); }
@@ -3838,7 +3851,7 @@ function fillPosition(d) {
     ['Avg cost', fmtCur(pos.avg_cost, cur)],
     ['Cost basis', fmtCur(pos.cost_basis, cur)],
     ['Market value', fmtCur(pos.market_value, cur)],
-    ['Unrealized P&L', pos.unrealized_pnl == null ? '—'
+    ['Unrealized P&L', pos.unrealized_pnl == null ? '–'
       : fmtCur(pos.unrealized_pnl, cur) + ' (' +
         (pos.unrealized_pnl_pct >= 0 ? '+' : '') + fmtNum(pos.unrealized_pnl_pct) + '%)'],
     ['Portfolio weight', fmtPct(pos.weight_pct)],
@@ -3857,9 +3870,9 @@ function fillPosition(d) {
 function fillKeyDates(d) {
   const e = d.earnings || {};
   document.getElementById('key-dates').innerHTML = rows([
-    ['Next earnings', e.next_earnings_date || '—'],
-    ['Ex-dividend', e.ex_dividend_date || '—'],
-    ['Data as of', d.fetched_at ? new Date(d.fetched_at).toLocaleDateString('en-CA') : '—'],
+    ['Next earnings', e.next_earnings_date || '–'],
+    ['Ex-dividend', e.ex_dividend_date || '–'],
+    ['Data as of', d.fetched_at ? new Date(d.fetched_at).toLocaleDateString('en-CA') : '–'],
   ]);
 }
 
@@ -3890,14 +3903,63 @@ function fillEquityCards(d) {
   ]);
 }
 
+// "Cheap or expensive" verdict (app/quant/valuation.py): a sector-relative
+// comparison, computed nightly and cached — not a live score. The badge is
+// free for every plan (same tier as the /screener grid); the evidence table
+// (per-metric sector-median comparisons) is Pro-gated inline, same
+// effective_plan() field carried on the API response.
+const VERDICT_CLASS = {
+  'Undervalued': 'vd-under', 'Expensive': 'vd-over', 'Fairly Valued': 'vd-fair',
+};
+function verdictBadge(label) {
+  return '<span class="vd-badge ' + (VERDICT_CLASS[label] || 'vd-none') + '">' +
+    esc(label) + '</span>';
+}
+function valuationEvidenceTable(metrics) {
+  const keys = Object.keys(metrics || {});
+  if (!keys.length) return '';
+  const body = keys.map((k) => {
+    const m = metrics[k];
+    return '<tr><td>' + esc(k.replaceAll('_', ' ')) + '</td>' +
+      '<td>' + (m.value ?? '–') + '</td>' +
+      '<td>' + (m.sector_median ?? '–') + '</td></tr>';
+  }).join('');
+  return '<table class="ev-table"><thead><tr><th>metric</th><th>this stock</th>' +
+    '<th>sector median</th></tr></thead><tbody>' + body + '</tbody></table>';
+}
+function fillVerdict(d) {
+  const v = d.verdict;
+  const badgeEl = document.getElementById('verdict-badge');
+  const evEl = document.getElementById('verdict-evidence');
+  if (!v) { badgeEl.innerHTML = ''; evEl.innerHTML = ''; return; }
+  badgeEl.innerHTML = verdictBadge(v.label);
+  if (v.label === 'Not enough data') {
+    evEl.innerHTML = v.not_scored_reason
+      ? '<p class="vd-note">Not scored: ' + esc(v.not_scored_reason) + '.</p>' : '';
+    return;
+  }
+  if (v.evidence_gated) {
+    evEl.innerHTML = '<div class="vd-evidence-gate">Compared against sector peers today ' +
+      '(<a href="/methodology">methodology</a>). ' +
+      '<a href="/app/settings?billing=upgrade">Upgrade to Pro</a> to see the numbers ' +
+      'behind this verdict.</div>';
+    return;
+  }
+  const ev = v.evidence || {};
+  evEl.innerHTML = valuationEvidenceTable(ev.metrics) +
+    '<p class="vd-note">Vs. ' + (ev.sector_comparison === 'sector' ? 'sector peers'
+      : 'the broader market (its sector is too small to compare against alone)') +
+    ', ' + (ev.metrics_used || 0) + ' metrics. <a href="/methodology">Methodology</a>.</p>';
+}
+
 function fillEtfCards(d) {
   const etf = d.etf || {};
   document.getElementById('card-a-title').textContent = 'Fund';
   document.getElementById('card-a').innerHTML = rows([
     ['Expense ratio', grade(etf.expense_ratio_pct, fmtPct(etf.expense_ratio_pct), 0.2, 0.6)],
     ['Assets', fmtBig(etf.total_assets)],
-    ['Category', etf.category ? esc(etf.category) : '—'],
-    ['Fund family', etf.fund_family ? esc(etf.fund_family) : '—'],
+    ['Category', etf.category ? esc(etf.category) : '–'],
+    ['Fund family', etf.fund_family ? esc(etf.fund_family) : '–'],
     ['Distribution yield', fmtPct((d.dividends || {}).dividend_yield_pct)],
   ]);
   document.getElementById('card-b-title').textContent = 'Top holdings';
@@ -3924,7 +3986,7 @@ function fillPriceAction(d) {
     document.getElementById('range-low').textContent = fmtNum(pa.low_52w);
     document.getElementById('range-high').textContent = fmtNum(pa.high_52w);
   }
-  const beta = pa.beta == null ? '—'
+  const beta = pa.beta == null ? '–'
     : fmtNum(pa.beta) + (pa.beta_source === 'computed' ? ' (est.)' : '');
   const target = pa.analyst_target == null || q.last_price == null
     ? fmtNum(pa.analyst_target)
@@ -3933,7 +3995,7 @@ function fillPriceAction(d) {
   const rating = pa.analyst_rating
     ? esc(pa.analyst_rating.replaceAll('_', ' ')) +
       (pa.analyst_count ? ` <span style="color:var(--ink-3);">(${pa.analyst_count})</span>` : '')
-    : '—';
+    : '–';
   document.getElementById('price-action').innerHTML = rows([
     ['Off 52-week high', pctSpan(pa.pct_from_52w_high)],
     ['Beta', beta],
@@ -4009,6 +4071,7 @@ async function loadDetail() {
     fillPriceAction(d);
   } else if (qt === 'EQUITY') {
     fillEquityCards(d);
+    fillVerdict(d);
     fillPriceAction(d);
   } else {
     // Crypto / FX / unknown: position, chart, and news still render.
@@ -4036,7 +4099,7 @@ function renderChart(el, bars, intraday) {
   const closes = bars.map((b) => b.close);
   if (closes.length < 2) {
     el.innerHTML = '<p class="muted-note">' + (intraday
-      ? 'No trades yet today — the 1D view fills in once the session opens.'
+      ? 'No trades yet today; the 1D view fills in once the session opens.'
       : 'Not enough history to chart.') + '</p>';
     return;
   }
@@ -4198,7 +4261,7 @@ loadNews();
 
 def stock_page(ticker: str, supabase_url: str, anon_key: str) -> str:
     return _page(
-        f"{ticker} — Cirvia",
+        f"{ticker} | Cirvia",
         _STOCK_BODY,
         supabase_url=supabase_url,
         anon_key=anon_key,
@@ -4668,7 +4731,7 @@ loadDeliveryOverview();
 
 def login_page(supabase_url: str, anon_key: str) -> str:
     return _page(
-        "Sign in — Cirvia",
+        "Sign in | Cirvia",
         _LOGIN_BODY,
         supabase_url=supabase_url,
         anon_key=anon_key,
@@ -4679,7 +4742,7 @@ def login_page(supabase_url: str, anon_key: str) -> str:
 
 def reset_page(supabase_url: str, anon_key: str) -> str:
     return _page(
-        "Set a new password — Cirvia",
+        "Set a new password | Cirvia",
         _RESET_BODY,
         supabase_url=supabase_url,
         anon_key=anon_key,
@@ -4690,7 +4753,7 @@ def reset_page(supabase_url: str, anon_key: str) -> str:
 
 def onboarding_page(supabase_url: str, anon_key: str) -> str:
     return _page(
-        "Get set up — Cirvia",
+        "Get set up | Cirvia",
         _ONBOARDING_BODY,
         supabase_url=supabase_url,
         anon_key=anon_key,
@@ -4701,7 +4764,7 @@ def onboarding_page(supabase_url: str, anon_key: str) -> str:
 
 def dashboard_page(supabase_url: str, anon_key: str) -> str:
     return _page(
-        "Dashboard — Cirvia",
+        "Dashboard | Cirvia",
         _DASHBOARD_BODY,
         supabase_url=supabase_url,
         anon_key=anon_key,
@@ -4722,7 +4785,7 @@ _RISK_BODY = """
 <div id="risk-loading" class="muted-note">Computing portfolio risk&hellip;</div>
 <div id="risk-gate" class="dash-card gate-card" style="display:none;">
   <h2>A Pro feature</h2>
-  <p>Portfolio risk analytics — how much you could lose, what's driving it, and a thousand simulated years ahead — are part of Cirvia&nbsp;Pro.</p>
+  <p>Portfolio risk analytics, how much you could lose, what's driving it, and a thousand simulated years ahead, are part of Cirvia&nbsp;Pro.</p>
   <a class="btn" href="/app/settings?billing=upgrade">Upgrade to Pro</a>
 </div>
 <div id="risk-empty" class="muted-note" style="display:none;"></div>
@@ -4965,7 +5028,7 @@ function renderHeatmap(corr) {
         : c >= 0.15 ? 'loosely related' : c > -0.15 ? 'mostly unrelated' : 'tend to move opposite';
       svg += '<rect x="' + x + '" y="' + y + '" width="' + (cell - gap) + '" height="' + (cell - gap) +
         '" rx="3" fill="' + corrColor(c) + '" data-tip="<strong>' + a + ' &middot; ' + b +
-        '</strong><br>' + c.toFixed(2) + ' &mdash; ' + phrase + '"></rect>';
+        '</strong><br>' + c.toFixed(2) + ': ' + phrase + '"></rect>';
     }
   }
   svg += '</svg>';
@@ -5155,7 +5218,7 @@ _RISK_CSS = """
 
 def risk_lab_page(supabase_url: str, anon_key: str) -> str:
     return _page(
-        "Risk Lab — Cirvia",
+        "Risk Lab | Cirvia",
         f"<style>{_RISK_CSS}</style>{_RISK_BODY}",
         supabase_url=supabase_url,
         anon_key=anon_key,
@@ -5178,8 +5241,8 @@ _PICKS_BODY = """
 <div id="picks-loading" class="muted-note">Loading today's analysis&hellip;</div>
 <div id="picks-gate" class="dash-card gate-card" style="display:none;">
   <h2>A Pro feature</h2>
-  <p>The daily Top Picks dashboard — ranked candidates with verified evidence, what's moving
-  and why, and a public track record — is part of Cirvia&nbsp;Pro.</p>
+  <p>The daily Top Picks dashboard, ranked candidates with verified evidence, what's moving
+  and why, and a public track record, is part of Cirvia&nbsp;Pro.</p>
   <a class="btn" href="/app/settings?billing=upgrade">Upgrade to Pro</a>
 </div>
 <div id="picks-empty" class="muted-note" style="display:none;"></div>
@@ -5195,7 +5258,7 @@ _PICKS_BODY = """
   <div class="dash-card picks-card" id="movers-card" style="display:none;">
     <h2>What's moving</h2>
     <p class="picks-card-sub">Statistically unusual daily moves across the universe, with the
-    catalyst when the news actually explains it &mdash; never a guessed reason.</p>
+    catalyst when the news actually explains it, never a guessed reason.</p>
     <div id="picks-movers"></div>
   </div>
 
@@ -5212,7 +5275,7 @@ _PICKS_BODY = """
     <summary>How this is built</summary>
     <p>An evening job stores adjusted prices and fundamentals for the S&amp;P&nbsp;500 and
     TSX&nbsp;60. Pre-market, a factor model scores every eligible name against its sector on
-    value, quality, growth, momentum, analyst upside, and risk &mdash; pure math, no AI.
+    value, quality, growth, momentum, analyst upside, and risk: pure math, no AI.
     Only the top-ranked names go to analyst agents, which must ground every figure in the
     computed fact sheet. A verifier then re-checks the numbers deterministically and an
     adversarial critic re-checks the claims with its own data pulls; picks with challenged
@@ -5241,8 +5304,8 @@ function evidenceTable(ev) {
   if (!ev || !ev.length) return '';
   const rows = ev.map((e) =>
     '<tr><td>' + esc(e.metric.replaceAll('_', ' ')) + '</td>' +
-    '<td>' + (e.value ?? '—') + '</td>' +
-    '<td>' + (e.sector_median ?? '—') + '</td></tr>').join('');
+    '<td>' + (e.value ?? '–') + '</td>' +
+    '<td>' + (e.sector_median ?? '–') + '</td></tr>').join('');
   return '<table class="ev-table"><thead><tr><th>metric</th><th>this stock</th>' +
     '<th>sector median</th></tr></thead><tbody>' + rows + '</tbody></table>';
 }
@@ -5267,7 +5330,7 @@ function pickCard(p, i) {
   const quantOnly = p.analysis !== 'ok';
   let body = '';
   if (quantOnly) {
-    body = '<p class="pick-thesis muted-note">Quantitative scores only — the analyst stage was ' +
+    body = '<p class="pick-thesis muted-note">Quantitative scores only: the analyst stage was ' +
       'unavailable for this name.</p>';
   } else {
     body = '<p class="pick-thesis">' + esc(p.thesis) + '</p>' +
@@ -5286,7 +5349,7 @@ function pickCard(p, i) {
         '<span class="pick-name">' + esc(p.name || '') + (p.sector ? ' · ' + esc(p.sector) : '') + '</span></span>' +
       confMeter(p.confidence) +
     '</div>' +
-    (p.demoted ? '<p class="demote-note">The verifier challenged parts of this analysis — ranked down and shown for transparency.</p>' : '') +
+    (p.demoted ? '<p class="demote-note">The verifier challenged parts of this analysis; ranked down and shown for transparency.</p>' : '') +
     body +
     '<div class="pick-foot">' + chips + verifyBadge(p.verification, p.demoted) + '</div>' +
   '</div>';
@@ -5314,7 +5377,7 @@ async function loadTrackRecord() {
   const s = data.summary;
   document.getElementById('track-card').style.display = 'block';
   document.getElementById('track-sub').textContent =
-    'Every pick is logged at its price on pick day and measured against the S&P 500 — ' +
+    'Every pick is logged at its price on pick day and measured against the S&P 500, ' +
     'no cherry-picking, the record is what it is.';
   let html = '<p class="track-line">' + s.measured + ' picks measured · average ' +
     pctFmt(s.avg_return_pct) + ' since pick' +
@@ -5338,8 +5401,8 @@ async function loadPicks() {
   const uni = data.universe || {};
   document.getElementById('picks-meta').textContent =
     'Analysis for ' + data.as_of + ' · prices through ' + (data.data_as_of || data.as_of) +
-    ' · ' + (uni.size || '—') + ' names screened, ' +
-    ((data.coverage || {}).ranked ?? '—') + ' ranked';
+    ' · ' + (uni.size || '–') + ' names screened, ' +
+    ((data.coverage || {}).ranked ?? '–') + ' ranked';
   if (data.stale) { const st = document.getElementById('picks-stale');
     st.style.display = 'block'; st.textContent = data.stale_note; }
 
@@ -5452,7 +5515,7 @@ _PICKS_CSS = """
 
 def picks_page(supabase_url: str, anon_key: str) -> str:
     return _page(
-        "Top Picks — Cirvia",
+        "Top Picks | Cirvia",
         f"<style>{_PICKS_CSS}</style>{_PICKS_BODY}",
         supabase_url=supabase_url,
         anon_key=anon_key,
@@ -5469,7 +5532,7 @@ _DEEP_DIVES_BODY = """\
 <div class="dash-card">
   <h3>Deep Dive reports <span class="tag">Pro</span></h3>
   <p class="muted-note" style="margin-top:0.5rem;">Every deep dive you run is
-  kept here. Pick a report on the left to read the full findings — each claim
+  kept here. Pick a report on the left to read the full findings; each claim
   carries the verifier's verdict.</p>
   <div class="dd-layout">
     <div class="dd-list" id="dd-list"></div>
@@ -5536,7 +5599,7 @@ function ddpRenderReport(r) {
       div.appendChild(claim);
       const ev = document.createElement('div'); ev.className = 'ev';
       ev.textContent = (f.evidence || '') +
-        (f.verification === 'challenged' && f.verification_note ? ' — verifier: ' + f.verification_note : '');
+        (f.verification === 'challenged' && f.verification_note ? ' (verifier: ' + f.verification_note + ')' : '');
       div.appendChild(ev);
       box.appendChild(div);
     }
@@ -5561,7 +5624,7 @@ function ddpRenderReport(r) {
   if ((report.failed_specialists || []).length) {
     footText += 'No findings from: ' + report.failed_specialists.join(', ') + '. ';
   }
-  foot.textContent = footText + (report.disclaimer || 'Informational only — not investment advice.');
+  foot.textContent = footText + (report.disclaimer || 'Informational only: not investment advice.');
   box.appendChild(foot);
 }
 
@@ -5573,7 +5636,7 @@ async function ddpSelect(reportId) {
   const box = document.getElementById('dd-detail');
   const cached = ddpReports.find((r) => r.report_id === reportId);
   if (cached && cached.status === 'running') {
-    ddpNote(box, 'This deep dive is still running — watch it live on the dashboard.');
+    ddpNote(box, 'This deep dive is still running; watch it live on the dashboard.');
     return;
   }
   if (cached && cached.status === 'error') {
@@ -5623,7 +5686,7 @@ async function initDeepDivesPage() {
     return;
   }
   if (!ddpReports.length) {
-    ddpNote(box, 'No deep dives yet. Run one from the dashboard — it takes a few minutes.');
+    ddpNote(box, 'No deep dives yet. Run one from the dashboard; it takes a few minutes.');
     return;
   }
   ddpRenderList();
@@ -5638,7 +5701,7 @@ initDeepDivesPage();
 
 def deep_dives_page(supabase_url: str, anon_key: str) -> str:
     return _page(
-        "Deep Dives — Cirvia",
+        "Deep Dives | Cirvia",
         _DEEP_DIVES_BODY,
         supabase_url=supabase_url,
         anon_key=anon_key,
@@ -5649,7 +5712,7 @@ def deep_dives_page(supabase_url: str, anon_key: str) -> str:
 
 def settings_page(supabase_url: str, anon_key: str) -> str:
     return _page(
-        "Settings — Cirvia",
+        "Settings | Cirvia",
         _SETTINGS_BODY,
         supabase_url=supabase_url,
         anon_key=anon_key,
@@ -5830,7 +5893,7 @@ init();
 
 def delivery_settings_page(supabase_url: str, anon_key: str) -> str:
     return _page(
-        "Delivery — Cirvia",
+        "Delivery | Cirvia",
         _DELIVERY_SETTINGS_BODY,
         supabase_url=supabase_url,
         anon_key=anon_key,

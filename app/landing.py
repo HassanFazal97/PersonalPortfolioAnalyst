@@ -17,6 +17,11 @@ from app.config import get_settings
 # deploy of this constant goes live — a dead contact address on legal pages
 # is worse than a personal one.
 CONTACT_EMAIL = "hello@cirvia.ca"
+# Cirvia is not (yet) a registered business name — it's operated by this
+# individual as an unregistered sole proprietorship. Named here, not "Cirvia
+# Inc.", because that's what's actually true; update if that ever changes
+# (incorporation or an Ontario Business Names Act registration).
+LEGAL_OPERATOR = "Fazal Hassan"
 LAST_UPDATED = "July 5, 2026"
 
 # Brand mark: a stylized dahlia — one petal path rotated into three layered
@@ -129,7 +134,7 @@ nav.scrolled {
   border-bottom-color: var(--line);
 }
 .nav-inner {
-  max-width: var(--maxw); margin: 0 auto; padding: 0.8rem 1.5rem;
+  max-width: var(--maxw); margin: 0 auto; padding: 0.8rem 0;
   display: flex; align-items: center; justify-content: space-between; gap: 1rem;
 }
 .logo { font-size: 1.3rem; font-weight: 800; letter-spacing: -0.03em; color: var(--ink); }
@@ -409,6 +414,25 @@ h3 { font-size: 1.05rem; font-weight: 650; margin-bottom: 0.3rem; }
 .tr-table tr:last-child td { border-bottom: none; }
 .tr-table .num { text-align: right; font-variant-numeric: tabular-nums; }
 .tr-table .tick { font-weight: 700; color: var(--ink); }
+/* valuation screener (/screener) */
+.scr-controls { display: flex; gap: 0.7rem; flex-wrap: wrap; align-items: center;
+  margin-top: 1.6rem; }
+.scr-search { flex: 1 1 260px; background: var(--surface-1); border: 1px solid var(--line);
+  border-radius: var(--r-m); padding: 0.6rem 0.9rem; color: var(--ink); font-size: 0.92rem;
+  font-family: inherit; }
+.scr-search:focus { outline: none; border-color: var(--line-strong); }
+.scr-count { color: var(--ink-3); font-size: 0.85rem; white-space: nowrap; }
+.scr-table th[data-sort] { cursor: pointer; user-select: none; }
+.scr-table th[data-sort]:hover { color: var(--ink); }
+.scr-table th[data-sort]::after { content: ""; margin-left: 0.3rem; opacity: 0.5; }
+.scr-table th[data-sort].asc::after { content: "\\2191"; opacity: 1; }
+.scr-table th[data-sort].desc::after { content: "\\2193"; opacity: 1; }
+.vd-badge { display: inline-block; font-size: 0.78rem; font-weight: 650; border-radius: 999px;
+  padding: 0.16rem 0.65rem; border: 1px solid var(--line-strong); white-space: nowrap; }
+.vd-under { color: var(--gain); }
+.vd-over { color: var(--loss); }
+.vd-fair { color: var(--ink-2); }
+.vd-none { color: var(--ink-3); }
 /* sample digest: the plain-text digest, presented as it reads on your phone */
 .dg { padding-top: 0.9rem; font-size: 0.94rem; line-height: 1.6; color: var(--ink-2); }
 .dg .dg-label { font-size: 0.76rem; font-weight: 700; letter-spacing: 0.06em;
@@ -453,7 +477,7 @@ footer { border-top: 1px solid var(--line); margin-top: 2rem; }
    full-width primary CTA */
 @media (max-width: 640px) {
   .wrap { padding: 0 1.1rem 4rem; }
-  .nav-inner { padding: 0.7rem 1.1rem; }
+  .nav-inner { padding: 0.7rem 0; }
   h1 { font-size: clamp(2.1rem, 9vw, 2.5rem); }
   section { padding-top: clamp(3rem, 12vw, 4.5rem); }
   .cta-row { gap: 0.8rem; }
@@ -774,6 +798,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
 _NAV_LINKS = (
     ("how", "/#how", "How it works"),
+    ("screener", "/screener", "Screener"),
     ("track", "/track-record", "Track record"),
     ("pricing", "/pricing", "Pricing"),
     ("contact", "/contact", "Contact"),
@@ -869,6 +894,7 @@ _FOOTER = (
     "AI portfolio analyst for Canadian investors. Read-only. No trade execution.</p></div>"
     '<div class="foot-col"><h4>Product</h4>'
     '<a href="/">Home</a><a href="/#how">How it works</a>'
+    '<a href="/screener">Valuation screener</a>'
     '<a href="/track-record">Track record</a>'
     '<a href="/sample-digest">Sample digest</a>'
     '<a href="/methodology">Methodology</a>'
@@ -882,7 +908,8 @@ _FOOTER = (
     "Cirvia is for informational purposes only and does not provide personalized "
     "investment advice or recommendations to buy or sell. Investing involves risk, "
     "including loss of principal; past performance does not guarantee future results. "
-    f"<br><br>© 2026 Cirvia · Built in Canada</p></div></footer>"
+    f"<br><br>Cirvia is operated by {LEGAL_OPERATOR}, a sole proprietorship based in "
+    f"Ontario, Canada. © 2026 {LEGAL_OPERATOR} · Built in Canada</p></div></footer>"
 )
 
 
@@ -935,7 +962,7 @@ _HOME_BODY = """
   <div class="hero-copy">
     <h1 data-hero>The AI analyst that shows its work.</h1>
     <p class="lead" data-hero>Your real holdings, briefed every morning.
-    Every number computed, every claim verified &mdash; and a public track
+    Every number computed, every claim verified, and a public track
     record to prove it.</p>
     <div class="cta-row" data-hero>
       <a class="btn lg" href="/app#signup" data-auth="cta">Get started free</a>
@@ -987,14 +1014,14 @@ _HOME_BODY = """
     </div>
     <div class="ledger-row" data-reveal-item>
       <h3>Top Picks<span class="pro-pill">Pro</span></h3>
-      <p>A daily board screened from ~560 S&amp;P 500 and TSX names &mdash; quantitative
+      <p>A daily board screened from ~560 S&amp;P 500 and TSX names: quantitative
       factors first, then AI analysts, then a verifier that re-checks every number.
       Scored on a <a href="/track-record">public track record</a>.</p>
       <span class="meta">Daily, pre-market</span>
     </div>
     <div class="ledger-row" data-reveal-item>
       <h3>Deep Dives<span class="pro-pill">Pro</span></h3>
-      <p>Four research agents &mdash; fundamentals, technicals, risk, news &mdash;
+      <p>Four research agents (fundamentals, technicals, risk, news)
       investigate a holding in parallel, and an adversarial fact-checker re-tests
       every claim before you see the report.</p>
       <span class="meta">On demand</span>
@@ -1006,7 +1033,7 @@ _HOME_BODY = """
     </div>
     <div class="ledger-row" data-reveal-item>
       <h3>Risk Lab<span class="pro-pill">Pro</span></h3>
-      <p>Monte Carlo futures, risk contribution, and correlation &mdash; quant analytics
+      <p>Monte Carlo futures, risk contribution, and correlation: quant analytics
       on your actual book, explained in plain English.</p>
       <span class="meta">Always current</span>
     </div>
@@ -1032,10 +1059,10 @@ _HOME_BODY = """
       before it reaches you.</p>
     </div>
     <ul class="checklist" data-reveal>
-      <li>Every number is computed from source data &mdash; the AI is never allowed to make one up</li>
+      <li>Every number is computed from source data: the AI is never allowed to make one up</li>
       <li>An adversarial critic re-checks each claim with its own live tools</li>
       <li>Challenged picks are demoted or flagged before you see them</li>
-      <li>Each pick&rsquo;s entry price is frozen at publication and scored publicly against the S&amp;P 500 &mdash; misses included</li>
+      <li>Each pick&rsquo;s entry price is frozen at publication and scored publicly against the S&amp;P 500, misses included</li>
     </ul>
   </div>
   <div class="stat-strip" data-track-stats hidden>
@@ -1094,7 +1121,7 @@ _HOME_BODY = """
   <div class="steps" data-reveal-group>
     <div class="step" data-reveal-item><div class="num"></div><div><h3>Connect your brokerage</h3>
     <p>Pick your brokerage (Wealthsimple, Questrade, and more) and log in on a secure
-    connection page &mdash; the same way you&rsquo;d link your bank to a budgeting app.
+    connection page, the same way you&rsquo;d link your bank to a budgeting app.
     We never see your password.</p></div></div>
     <div class="step" data-reveal-item><div class="num"></div><div><h3>We read your holdings</h3>
     <p>Read-only access syncs positions and balances. Cirvia can never place a trade
@@ -1113,10 +1140,10 @@ _HOME_BODY = """
       and never handles your money.</p>
     </div>
     <ul class="checklist" data-reveal>
-      <li>We can only view your investments &mdash; never touch them</li>
-      <li>Your brokerage password stays with your bank &mdash; we never see it</li>
+      <li>We can only view your investments, never touch them</li>
+      <li>Your brokerage password stays with your bank, we never see it</li>
       <li>Everything is encrypted and stored securely</li>
-      <li>Your data is yours &mdash; no one else can ever see it</li>
+      <li>Your data is yours, no one else can ever see it</li>
     </ul>
   </div>
 </section>
@@ -1133,10 +1160,10 @@ _HOME_BODY = """
     <details data-reveal-item><summary>Do the picks actually work?</summary>
     <p>Judge for yourself. Every daily pick&rsquo;s entry price is frozen at
     publication and scored against the S&amp;P 500 on a
-    <a href="/track-record">public track record</a> &mdash; misses stay on the
+    <a href="/track-record">public track record</a>, misses stay on the
     board. Picks are research with receipts, not recommendations.</p></details>
     <details data-reveal-item><summary>How do I know the AI isn&rsquo;t making things up?</summary>
-    <p>Every number is computed from market data in code &mdash; the AI is never
+    <p>Every number is computed from market data in code: the AI is never
     allowed to assert one. Written claims are re-checked by an adversarial
     verifier with its own live tools, and anything challenged is demoted or
     flagged before you see it.</p></details>
@@ -1153,7 +1180,7 @@ _HOME_BODY = """
 
 <div class="cta-final" data-reveal>
   <h2>Know your portfolio by 9:00.</h2>
-  <p>Every new account starts with 7 days of full Pro &mdash; no card required.
+  <p>Every new account starts with 7 days of full Pro, no card required.
   Connected in under three minutes.</p>
   <a class="btn lg" href="/app#signup" data-auth="cta">Get started free</a>
 </div>
@@ -1219,11 +1246,11 @@ _METHODOLOGY_BODY = """
   <p>Cirvia's design rule is simple: <strong>every number you see is computed in
   code from market data; the AI only narrates.</strong> This page explains what
   that means for the daily Top Picks, the public track record, and the
-  portfolio analytics &mdash; including the limitations we haven't fixed yet.</p>
+  portfolio analytics, including the limitations we haven't fixed yet.</p>
 
   <h2>How the daily picks are made</h2>
   <p><strong>1. Universe.</strong> Roughly 560 names: the S&amp;P 500 plus the TSX 60.
-  Membership is recorded as dated history &mdash; when a company leaves the index or
+  Membership is recorded as dated history: when a company leaves the index or
   delists, its record stays and its prices keep updating while any published pick
   references it, so failures remain visible.</p>
   <p><strong>2. Quantitative screen.</strong> A pure-math factor screen ranks the
@@ -1232,7 +1259,7 @@ _METHODOLOGY_BODY = """
   thin), and low risk. Metrics are scored relative to each stock's sector using
   robust statistics (median and MAD, not mean and standard deviation, because
   financial ratios have fat tails). Names with stale prices or missing data are
-  excluded with a recorded reason &mdash; nothing is imputed.</p>
+  excluded with a recorded reason; nothing is imputed.</p>
   <p><strong>3. AI analysts, on a leash.</strong> Each top candidate gets an AI
   analyst that may only cite numbers from a fact sheet computed in step 2. Its
   output is then machine-checked: any cited figure that doesn't match the fact
@@ -1241,7 +1268,7 @@ _METHODOLOGY_BODY = """
   the most load-bearing claims using its own live data tools and marks each one
   verified or challenged. A pick with two or more challenged claims is demoted
   below every clean pick. Confidence scores are computed in code from screen
-  rank, data coverage, and verification results &mdash; the AI is never asked how
+  rank, data coverage, and verification results; the AI is never asked how
   confident it feels.</p>
 
   <h2>How the track record is measured</h2>
@@ -1254,14 +1281,14 @@ _METHODOLOGY_BODY = """
     from the pick's publication bar to the latest close, fresh on every page load.</li>
     <li><strong>The benchmark includes dividends.</strong> Picks are compared
     against SPY's adjusted close (an S&amp;P 500 total-return proxy) over each
-    pick's identical span &mdash; a price-only index would flatter us by the
+    pick's identical span; a price-only index would flatter us by the
     index's dividend yield.</li>
     <li><strong>Cohorts, not cherry-picks.</strong> Because a good pick can stay on
     the board for weeks, per-pick averages over-count persistent names. The honest
     headline numbers group picks into daily cohorts measured only at fully-elapsed
     horizons, plus a simulated portfolio that buys each day's top five
     equal-weighted and rebalances when the board changes.</li>
-    <li><strong>Misses stay on the board.</strong> Nothing is deleted &mdash;
+    <li><strong>Misses stay on the board.</strong> Nothing is deleted,
     including picks on companies that later fell, were removed from their index,
     or delisted.</li>
     <li><strong>Small samples stay quiet.</strong> Headline stats appear only once
@@ -1278,9 +1305,35 @@ _METHODOLOGY_BODY = """
   common trading days are compared); portfolio risk uses a shrunk covariance
   estimate (Ledoit-Wolf) rather than raw sample correlations; downside estimates
   report Value-at-Risk several ways (including a fat-tail adjustment) and say
-  which is which; Monte Carlo projections use zero drift by default &mdash; the
+  which is which; Monte Carlo projections use zero drift by default: the
   fan shows risk, not a forecast. All of it is unit-tested against closed-form
   results.</p>
+
+  <h2>How the <a href="/screener">valuation screener</a> works</h2>
+  <p>Every stock Cirvia tracks gets a plain verdict: <strong>Undervalued</strong>,
+  <strong>Fairly Valued</strong>, or <strong>Expensive</strong>. Here is exactly what
+  that measures, and what it deliberately doesn't claim yet.</p>
+  <p><strong>It compares a stock to its sector peers, today.</strong> Each verdict is
+  built from the same value factor the daily screen uses above: trailing/forward P/E,
+  PEG, price/sales, price/book, EV/EBITDA, and price/FCF, each normalized against the
+  stock's GICS sector using the same robust (median/MAD) statistics, then averaged into
+  one score. A stock needs at least two of those seven metrics to be scored at all;
+  fewer than that, and the verdict reads &ldquo;Not enough data&rdquo; rather than
+  guessing. When a sector has too few scored peers to compare against reliably, the
+  comparison quietly widens to the whole tracked universe instead, and the
+  evidence table says so.</p>
+  <p><strong>It does not yet compare a stock to its own history.</strong> A "is this
+  cheap for <em>this stock</em>, historically" verdict needs years of point-in-time
+  valuation snapshots. Cirvia only started archiving those nightly snapshots recently,
+  so there isn't yet a decade (or even a full year) of a stock's own
+  history to compare against. Rather than fabricate that comparison, today's verdict
+  only measures the sector-relative lens. Once enough snapshot history accrues, a
+  second "vs. its own history" lens will be added and disclosed with the exact window
+  it's built from, not a fixed claim we can't back up.</p>
+  <p><strong>The verdict is free; the numbers behind it are Pro.</strong> Anyone can
+  browse the <a href="/screener">full grid</a> with no account. On a stock's own page,
+  the per-metric evidence (this stock's ratio vs. its sector median) is part of
+  Cirvia&nbsp;Pro, the same as the rest of the fact sheet it's built from.</p>
 
   <h2>Limitations, honestly</h2>
   <ul>
@@ -1302,7 +1355,7 @@ _METHODOLOGY_BODY = """
     numbers.</li>
   </ul>
 
-  <p>Cirvia is informational only &mdash; research with receipts, not
+  <p>Cirvia is informational only: research with receipts, not
   recommendations, and never personalized advice to buy or sell a security.
   Past performance does not guarantee future results.</p>
 </div>
@@ -1314,7 +1367,8 @@ _PRIVACY_BODY = f"""
   <h1>Privacy Policy</h1>
   <p class="updated">Last updated: {LAST_UPDATED}</p>
 
-  <p>Cirvia ("Cirvia", "we", "us", or "our") provides an AI portfolio analysis service for
+  <p>Cirvia ("Cirvia", "we", "us", or "our"), operated by {LEGAL_OPERATOR}, a sole
+  proprietorship based in Ontario, Canada, provides an AI portfolio analysis service for
   individual investors. This Privacy Policy explains what personal information we collect, why we
   collect it, how we use, share, and protect it, and the choices and rights you have. It is
   written to align with Canada's <em>Personal Information Protection and Electronic Documents Act</em>
@@ -1322,8 +1376,8 @@ _PRIVACY_BODY = f"""
   disclosure of your information as described here.</p>
 
   <h2>1. Accountability</h2>
-  <p>Cirvia is responsible for personal information under its control. Questions, requests, and
-  privacy complaints can be directed to our privacy contact at
+  <p>{LEGAL_OPERATOR} is responsible for personal information under Cirvia's control. Questions,
+  requests, and privacy complaints can be directed to our privacy contact at
   <a href="mailto:{CONTACT_EMAIL}">{CONTACT_EMAIL}</a>.</p>
 
   <h2>2. Information we collect</h2>
@@ -1342,16 +1396,16 @@ _PRIVACY_BODY = f"""
 
   <h2>3. Information we do NOT collect</h2>
   <ul>
-    <li>Your brokerage username, password, or other login credentials — you authenticate directly
+    <li>Your brokerage username, password, or other login credentials: you authenticate directly
     with your brokerage inside SnapTrade's secure portal; those credentials never pass through or
     reach Cirvia.</li>
-    <li>Payment card details, if and when paid plans are offered — these would be handled directly
+    <li>Payment card details, if and when paid plans are offered: these would be handled directly
     by a third-party payment processor, not stored by Cirvia.</li>
   </ul>
 
   <h2>4. Purposes and how we use your information</h2>
   <ul>
-    <li>To provide the service — syncing your holdings, generating your daily digest and macro
+    <li>To provide the service: syncing your holdings, generating your daily digest and macro
     alerts, and answering your questions.</li>
     <li>To secure, maintain, debug, and improve the service.</li>
     <li>To communicate with you about your account, support requests, and service updates.</li>
@@ -1377,12 +1431,12 @@ _PRIVACY_BODY = f"""
   <p>We share the minimum information necessary with service providers that process data on our
   behalf to operate Cirvia, each bound by their own terms and privacy and security commitments:</p>
   <ul>
-    <li><strong>SnapTrade</strong> — secure brokerage connectivity (read-only holdings).</li>
-    <li><strong>Supabase</strong> — authentication and database hosting.</li>
-    <li><strong>Anthropic</strong> — the AI model that generates analysis (we send relevant
+    <li><strong>SnapTrade</strong>: secure brokerage connectivity (read-only holdings).</li>
+    <li><strong>Supabase</strong>: authentication and database hosting.</li>
+    <li><strong>Anthropic</strong>: the AI model that generates analysis (we send relevant
     portfolio context and public news; we do not send your brokerage credentials).</li>
-    <li><strong>Finnhub and other market-data providers</strong> — public market and news data.</li>
-    <li><strong>Railway</strong> — application hosting.</li>
+    <li><strong>Finnhub and other market-data providers</strong>: public market and news data.</li>
+    <li><strong>Railway</strong>: application hosting.</li>
   </ul>
   <p>We may also disclose information if required by law, to enforce our Terms, or to protect the
   rights, property, or safety of Cirvia, our users, or others. If Cirvia is involved in a merger,
@@ -1459,9 +1513,10 @@ _TERMS_BODY = f"""
   <p class="updated">Last updated: {LAST_UPDATED}</p>
 
   <p>These Terms of Service ("Terms") form a binding agreement between you and Cirvia ("Cirvia",
-  "we", "us") governing your access to and use of the Cirvia website, application, and services
-  (collectively, the "Service"). By accessing or using the Service, you agree to these Terms and to
-  our <a href="/privacy">Privacy Policy</a>. If you do not agree, do not use the Service.</p>
+  "we", "us"), operated by {LEGAL_OPERATOR}, a sole proprietorship based in Ontario, Canada,
+  governing your access to and use of the Cirvia website, application, and services (collectively,
+  the "Service"). By accessing or using the Service, you agree to these Terms and to our
+  <a href="/privacy">Privacy Policy</a>. If you do not agree, do not use the Service.</p>
 
   <h2>1. The Service</h2>
   <p>Cirvia is an informational tool that connects to your brokerage account on a
@@ -1503,8 +1558,8 @@ _TERMS_BODY = f"""
   fees on prospective notice.</p>
 
   <h2>6. Data accuracy</h2>
-  <p>Information provided by the Service — including holdings, prices, news, and AI-generated analysis
-  — may be delayed, incomplete, or inaccurate, and may contain errors. Do not rely on it as the sole
+  <p>Information provided by the Service, including holdings, prices, news, and AI-generated analysis,
+  may be delayed, incomplete, or inaccurate, and may contain errors. Do not rely on it as the sole
   basis for any financial decision. Verify important information with your brokerage and other primary
   sources.</p>
 
@@ -1588,7 +1643,7 @@ _PRICING_BODY = f"""
   <div class="hero-copy">
     <h1 data-hero>Start with a week of Pro, free.</h1>
     <p class="lead" data-hero>Every new account gets the full Pro experience for
-    7 days &mdash; no card required. Read-only on every plan; your brokerage
+    7 days, no card required. Read-only on every plan; your brokerage
     password never leaves your bank.</p>
   </div>
 </section>
@@ -1611,14 +1666,14 @@ _PRICING_BODY = f"""
     <div class="plan featured" data-reveal-item>
       <div class="plan-tag">Pro</div>
       <div class="price">$20<span class="per"> /mo CAD</span></div>
-      <p class="price-note">or $160/yr CAD &mdash; 4 months free.</p>
+      <p class="price-note">or $160/yr CAD, 4 months free.</p>
       <ul>
         <li>Unlimited connected accounts</li>
         <li>Daily weekday digest across all holdings</li>
-        <li>Top Picks &mdash; the daily verified board, with its
+        <li>Top Picks: the daily verified board, with its
         <a href="/track-record">public track record</a></li>
         <li>Deep Dive research reports, 2 per week</li>
-        <li>Risk Lab &mdash; Monte Carlo, risk contribution, correlation</li>
+        <li>Risk Lab: Monte Carlo, risk contribution, correlation</li>
         <li>Macro alerts when the world moves</li>
         <li>Price-anomaly alerts on unusual moves</li>
         <li>10 chat questions per day</li>
@@ -1626,7 +1681,7 @@ _PRICING_BODY = f"""
       </ul>
       <a class="btn ghost" href="/app/settings?billing=upgrade">Go Pro</a>
       <p class="price-note" style="margin-top:0.75rem;">New here? Signing up
-      starts a 7-day Pro trial &mdash; no card required.</p>
+      starts a 7-day Pro trial, no card required.</p>
     </div>
   </div>
 </section>
@@ -1641,8 +1696,8 @@ _PRICING_BODY = f"""
     <p>Yes. Pro is $20/mo CAD or $160/yr CAD, which works out to four months free
     versus paying monthly.</p></details>
     <details data-reveal-item><summary>How does the free trial work?</summary>
-    <p>Every new account gets 7 days of full Pro &mdash; daily digests, macro
-    alerts, and Pro chat limits &mdash; with no card on file. When it ends, your
+    <p>Every new account gets 7 days of full Pro (daily digests, macro
+    alerts, and Pro chat limits) with no card on file. When it ends, your
     digests pause until you choose: upgrade to Pro, or continue on Free. Nothing
     is ever charged automatically.</p></details>
     <details data-reveal-item><summary>What happens on the Free plan?</summary>
@@ -1672,7 +1727,7 @@ _TRACK_RECORD_INTRO = """
     <h1 data-hero>Every pick. Priced honestly.</h1>
     <p class="lead" data-hero>Each day&rsquo;s Top Picks are published with a frozen
     entry price and scored here against the S&amp;P 500 over the identical span.
-    Misses stay on the board &mdash; nothing is ever deleted.</p>
+    Misses stay on the board, nothing is ever deleted.</p>
   </div>
 </section>
 """
@@ -1684,7 +1739,7 @@ _TRACK_RECORD_METHOD = """
     <div class="step" data-reveal-item><div class="num"></div><div><h3>Entry price is frozen</h3>
     <p>The moment a pick is published, its entry price is recorded and never revised.</p></div></div>
     <div class="step" data-reveal-item><div class="num"></div><div><h3>Scored at read time</h3>
-    <p>Returns are total returns &mdash; dividend- and split-adjusted &mdash; computed fresh
+    <p>Returns are total returns (dividend- and split-adjusted) computed fresh
     from publication to the latest stored close each time this page loads, not curated
     snapshots.</p></div></div>
     <div class="step" data-reveal-item><div class="num"></div><div><h3>Benchmarked, same span</h3>
@@ -1698,7 +1753,7 @@ _TRACK_RECORD_METHOD = """
 
 <div class="cta-final" data-reveal>
   <h2>See today&rsquo;s board with your own portfolio.</h2>
-  <p>Every new account starts with 7 days of full Pro &mdash; no card required.</p>
+  <p>Every new account starts with 7 days of full Pro, no card required.</p>
   <a class="btn lg" href="/app#signup" data-auth="cta">Get started free</a>
 </div>
 """
@@ -1719,12 +1774,12 @@ def track_record_html(payload: dict) -> str:
         body = _TRACK_RECORD_INTRO + """
 <section>
   <div class="callout" data-reveal>The track record is measured from live pick data and
-  builds day by day as picks season. Check back shortly &mdash; every pick published from
+  builds day by day as picks season. Check back shortly: every pick published from
   day one will appear here, wins and misses alike.</div>
 </section>
 """ + _TRACK_RECORD_METHOD
         return _layout(
-            "Pick track record — Cirvia",
+            "Pick track record | Cirvia",
             "The public, honestly-priced track record of Cirvia's daily Top Picks, "
             "benchmarked against the S&P 500.",
             body,
@@ -1762,7 +1817,7 @@ def track_record_html(payload: dict) -> str:
   </div>
   <p style="color:var(--ink-3);font-size:0.85rem;margin-top:0.6rem;">The simulated
   portfolio buys each day&rsquo;s top-5 picks equal-weighted at the prior close and
-  rebalances when the board changes. Before transaction costs &mdash; a research
+  rebalances when the board changes. Before transaction costs: a research
   measure, not a trading result.</p>"""
 
     rows = ""
@@ -1810,12 +1865,203 @@ def track_record_html(payload: dict) -> str:
 </section>
 {_TRACK_RECORD_METHOD}"""
     return _layout(
-        "Pick track record — Cirvia",
+        "Pick track record | Cirvia",
         "The public, honestly-priced track record of Cirvia's daily Top Picks, "
         "benchmarked against the S&P 500.",
         body,
         active="track",
         path="/track-record",
+    )
+
+
+# --------------------------------------------------------------------------
+# Valuation screener (/screener) — public "cheap or expensive" grid, the
+# no-signup browse hook. Server-rendered from the same JSON
+# /stocks/valuations returns; sort/search run client-side over the ~560
+# already-rendered rows, no second request. See app/quant/valuation.py for
+# what "verdict" actually measures (sector-relative only, deliberately not
+# claiming a 10-year history Cirvia doesn't have yet).
+# --------------------------------------------------------------------------
+
+_SCREENER_INTRO = """
+<section class="hero" style="padding-bottom:1.5rem;">
+  <div class="hero-copy" style="max-width:52rem;">
+    <h1 data-hero>Is this stock cheap or expensive?</h1>
+    <p class="lead" data-hero>A verdict for every stock Cirvia tracks, computed against
+    its sector peers today, not a vague label. Every verdict comes with the
+    numbers behind it: <a href="/methodology">see the methodology</a>, sector-relative
+    limitations included.</p>
+  </div>
+</section>
+"""
+
+_SCREENER_METHOD = """
+<section id="screener-method" style="padding-top:0.5rem;">
+  <div class="callout" data-reveal>
+  <strong>What this measures today:</strong> each verdict compares a stock's valuation
+  multiples (P/E, P/S, P/B, EV/EBITDA, price/FCF, PEG) to its GICS sector peers, using a
+  robust (outlier-resistant) statistical comparison, not a raw average. It does
+  <strong>not</strong> yet compare a stock to its own history: that needs years of daily
+  snapshots Cirvia only started collecting recently, and a verdict here will say so
+  honestly rather than fake a decade it doesn't have. <a href="/methodology">Full
+  methodology</a>.
+  </div>
+</section>
+"""
+
+
+def _fmt_cap(v: float | None) -> str:
+    if v is None:
+        return "&ndash;"
+    a = abs(v)
+    if a >= 1e12:
+        return f"${v / 1e12:.2f}T"
+    if a >= 1e9:
+        return f"${v / 1e9:.2f}B"
+    if a >= 1e6:
+        return f"${v / 1e6:.1f}M"
+    return f"${v:,.0f}"
+
+
+_VERDICT_CLASS = {
+    "Undervalued": "vd-under",
+    "Expensive": "vd-over",
+    "Fairly Valued": "vd-fair",
+}
+
+
+def _verdict_badge(verdict: str) -> str:
+    cls = _VERDICT_CLASS.get(verdict, "vd-none")
+    return f'<span class="vd-badge {cls}">{verdict}</span>'
+
+
+_SCREENER_JS = """
+(function () {
+  var input = document.getElementById('scr-search');
+  var tbody = document.getElementById('scr-body');
+  if (!input || !tbody) return;
+  var rows = Array.prototype.slice.call(tbody.querySelectorAll('tr'));
+  var countEl = document.getElementById('scr-count');
+
+  function applyFilter() {
+    var q = input.value.trim().toLowerCase();
+    var shown = 0;
+    rows.forEach(function (r) {
+      var hit = !q || r.dataset.ticker.indexOf(q) !== -1 || r.dataset.name.indexOf(q) !== -1;
+      r.hidden = !hit;
+      if (hit) shown++;
+    });
+    if (countEl) countEl.textContent = shown + ' of ' + rows.length + ' shown';
+  }
+  input.addEventListener('input', applyFilter);
+  applyFilter();
+
+  var sortState = { key: null, dir: 1 };
+  document.querySelectorAll('th[data-sort]').forEach(function (th) {
+    th.addEventListener('click', function () {
+      var key = th.dataset.sort;
+      sortState.dir = sortState.key === key ? -sortState.dir : 1;
+      sortState.key = key;
+      document.querySelectorAll('th[data-sort]').forEach(function (t) {
+        t.classList.remove('asc', 'desc');
+      });
+      th.classList.add(sortState.dir === 1 ? 'asc' : 'desc');
+      var numeric = key === 'cap' || key === 'price';
+      rows.sort(function (a, b) {
+        var av = a.dataset[key] || '', bv = b.dataset[key] || '';
+        if (numeric) {
+          av = av === '' ? -Infinity : parseFloat(av);
+          bv = bv === '' ? -Infinity : parseFloat(bv);
+          return (av - bv) * sortState.dir;
+        }
+        return av.localeCompare(bv) * sortState.dir;
+      });
+      rows.forEach(function (r) { tbody.appendChild(r); });
+    });
+  });
+})();
+"""
+
+
+def screener_html(payload: dict) -> str:
+    """The public /screener page, rendered from the same JSON
+    /stocks/valuations returns."""
+    rows = payload.get("rows") or []
+    universe = payload.get("universe") or {}
+    universe_size = universe.get("size")
+    coverage_note = (
+        f"Covers ~{universe_size} US and Canadian large caps "
+        "(S&amp;P 500 + TSX 60) today." if universe_size else ""
+    )
+
+    if not rows:
+        body = _SCREENER_INTRO + f"""
+<section>
+  <div class="callout" data-reveal>Verdicts are computed nightly and build up as the
+  screen runs. Check back shortly. {coverage_note}</div>
+</section>
+""" + _SCREENER_METHOD
+        return _layout(
+            "Stock valuation screener | Cirvia",
+            "Is this stock cheap or expensive? A sector-relative verdict, with the "
+            "numbers behind it, for every stock Cirvia tracks.",
+            body,
+            active="screener",
+            path="/screener",
+        )
+
+    trs = ""
+    for r in sorted(rows, key=lambda r: (r.get("market_cap") or 0), reverse=True):
+        cap = r.get("market_cap")
+        price = r.get("last_price")
+        trs += f"""
+      <tr data-ticker="{(r.get("ticker") or "").lower()}"
+          data-name="{(r.get("name") or "").lower()}"
+          data-sector="{(r.get("sector") or "").lower()}"
+          data-cap="{cap if cap is not None else ""}"
+          data-price="{price if price is not None else ""}"
+          data-verdict="{r.get("verdict") or ""}">
+        <td class="tick"><a href="/app/stock/{r.get("ticker")}">{r.get("ticker")}</a></td>
+        <td>{r.get("name") or "&ndash;"}</td>
+        <td>{r.get("sector") or "&ndash;"}</td>
+        <td class="num">{_fmt_cap(cap)}</td>
+        <td class="num">{f"${price:,.2f}" if price is not None else "&ndash;"}</td>
+        <td>{_verdict_badge(r.get("verdict") or "Not enough data")}</td>
+      </tr>"""
+
+    body = f"""{_SCREENER_INTRO}
+<section style="padding-top:0.5rem;">
+  <div class="scr-controls" data-reveal>
+    <input class="scr-search" id="scr-search" type="text"
+           placeholder="Search by ticker or company name&hellip;">
+    <span class="scr-count" id="scr-count"></span>
+  </div>
+  <p style="color:var(--ink-3);font-size:0.85rem;margin-top:0.6rem;">{coverage_note}
+  As of {payload.get("as_of") or "&ndash;"}.</p>
+  <div class="table-scroll" data-reveal>
+    <table class="tr-table scr-table">
+      <thead><tr>
+        <th data-sort="ticker">Ticker</th>
+        <th data-sort="name">Company</th>
+        <th data-sort="sector">Sector</th>
+        <th data-sort="cap" style="text-align:right;">Market cap</th>
+        <th data-sort="price" style="text-align:right;">Price</th>
+        <th data-sort="verdict">Verdict</th>
+      </tr></thead>
+      <tbody id="scr-body">{trs}
+      </tbody>
+    </table>
+  </div>
+</section>
+{_SCREENER_METHOD}
+<script>{_SCREENER_JS}</script>"""
+    return _layout(
+        "Stock valuation screener | Cirvia",
+        "Is this stock cheap or expensive? A sector-relative verdict, with the "
+        "numbers behind it, for every stock Cirvia tracks.",
+        body,
+        active="screener",
+        path="/screener",
     )
 
 
@@ -1827,14 +2073,14 @@ _SAMPLE_DIGEST_BODY = """
 <section class="hero" style="padding-bottom:0;">
   <div class="hero-copy">
     <h1 data-hero>A morning digest, up close.</h1>
-    <p class="lead" data-hero>This is what lands on your phone at 9:00 &mdash; written
+    <p class="lead" data-hero>This is what lands on your phone at 9:00, written
     fresh each morning from your actual holdings. The sample below covers an
     illustrative portfolio.</p>
   </div>
 </section>
 
 <div class="show-panel" data-hero style="max-width:640px;margin:2.5rem auto 0;">
-  <div class="mock-top"><span class="mock-dot"></span>Morning digest &mdash; sample
+  <div class="mock-top"><span class="mock-dot"></span>Morning digest, sample
     <span class="mock-date">9:00 AM</span></div>
   <div class="dg">
     <p class="dg-line"><strong>PORTFOLIO:</strong> &minus;0.6% today (&minus;$318)</p>
@@ -1845,12 +2091,12 @@ _SAMPLE_DIGEST_BODY = """
     <ul>
       <li>NVDA &minus;2.1%, extending yesterday&rsquo;s slide after the AI copyright
       ruling; still the largest single-name exposure at 18%.</li>
-      <li>VFV +0.8% with the S&amp;P 500&rsquo;s rebound &mdash; the index sleeve did
+      <li>VFV +0.8% with the S&amp;P 500&rsquo;s rebound: the index sleeve did
       the lifting today.</li>
       <li>TD upgraded at a major bank on credit normalization.</li>
     </ul>
     <p class="dg-label">WATCH TODAY</p>
-    <p>Bank of Canada rate decision, 9:45 AM ET &mdash; direct read-through to ENB,
+    <p>Bank of Canada rate decision, 9:45 AM ET, direct read-through to ENB,
     TD, and the REIT sleeve.</p>
     <p class="dg-label">HOLDINGS <span class="pro-pill">Pro</span></p>
     <div class="dg-holding"><span class="h">NVDA &middot; $9,120 &middot; 18.2% of book &middot; &minus;2.1% today</span>
@@ -1868,14 +2114,14 @@ _SAMPLE_DIGEST_BODY = """
   <div class="ledger" data-reveal-group>
     <div class="ledger-row" data-reveal-item>
       <h3>Written for your book</h3>
-      <p>The digest is generated each morning from your synced holdings &mdash; not a
+      <p>The digest is generated each morning from your synced holdings, not a
       generic market newsletter with your name on it.</p>
       <span class="meta"></span>
     </div>
     <div class="ledger-row" data-reveal-item>
       <h3>One risk, called out</h3>
       <p>TOP RISK is the single most important thing in your portfolio today. On a quiet
-      day it names your biggest exposure &mdash; it never invents drama.</p>
+      day it names your biggest exposure; it never invents drama.</p>
       <span class="meta"></span>
     </div>
     <div class="ledger-row" data-reveal-item>
@@ -1886,7 +2132,7 @@ _SAMPLE_DIGEST_BODY = """
     </div>
     <div class="ledger-row" data-reveal-item>
       <h3>Tuned to you</h3>
-      <p>Your investor profile &mdash; horizon, goals, experience &mdash; sets the lookback
+      <p>Your investor profile (horizon, goals, experience) sets the lookback
       window and what counts as worth mentioning.</p>
       <span class="meta"></span>
     </div>
@@ -1895,22 +2141,22 @@ _SAMPLE_DIGEST_BODY = """
 
 <div class="cta-final" data-reveal>
   <h2>Tomorrow morning, this could be your portfolio.</h2>
-  <p>Every new account starts with 7 days of full Pro &mdash; no card required.</p>
+  <p>Every new account starts with 7 days of full Pro, no card required.</p>
   <a class="btn lg" href="/app#signup" data-auth="cta">Get started free</a>
 </div>
 """
 
 SAMPLE_DIGEST_HTML = _layout(
-    "Sample morning digest — Cirvia",
+    "Sample morning digest | Cirvia",
     "See exactly what Cirvia's morning digest looks like: portfolio move, top risk, "
-    "notable items, and what to watch — written from your real holdings.",
+    "notable items, and what to watch, written from your real holdings.",
     _SAMPLE_DIGEST_BODY,
     path="/sample-digest",
 )
 
 
 LANDING_HTML = _layout(
-    "Cirvia — AI portfolio analyst for Canadian investors",
+    "Cirvia | AI portfolio analyst for Canadian investors",
     "The AI analyst that shows its work: a daily brief on your real holdings, verified "
     "stock research with a public track record, and on-demand answers. Read-only. "
     "No trade execution.",
@@ -1920,7 +2166,7 @@ LANDING_HTML = _layout(
 )
 
 PRICING_HTML = _layout(
-    "Pricing — Cirvia",
+    "Pricing | Cirvia",
     "Cirvia pricing: start free with a weekly digest and chat questions, or go Pro at "
     "$20/mo CAD ($160/yr) for daily digests, verified Top Picks with a public track "
     "record, Deep Dive reports, Risk Lab, and macro alerts.",
@@ -1930,7 +2176,7 @@ PRICING_HTML = _layout(
 )
 
 CONTACT_HTML = _layout(
-    "Contact — Cirvia",
+    "Contact | Cirvia",
     "Get in touch with Cirvia for early access, support, privacy requests, or partnerships.",
     _CONTACT_BODY,
     active="contact",
@@ -1938,7 +2184,7 @@ CONTACT_HTML = _layout(
 )
 
 METHODOLOGY_HTML = _layout(
-    "Methodology — Cirvia",
+    "Methodology | Cirvia",
     "How Cirvia's daily picks are made and verified, how the public track record "
     "is measured, and the limitations we haven't fixed yet.",
     _METHODOLOGY_BODY,
@@ -1946,14 +2192,14 @@ METHODOLOGY_HTML = _layout(
 )
 
 PRIVACY_HTML = _layout(
-    "Privacy Policy — Cirvia",
+    "Privacy Policy | Cirvia",
     "How Cirvia collects, uses, and protects your personal and brokerage information.",
     _PRIVACY_BODY,
     path="/privacy",
 )
 
 TERMS_HTML = _layout(
-    "Terms of Service — Cirvia",
+    "Terms of Service | Cirvia",
     "The terms governing your use of Cirvia's read-only, informational portfolio analysis service.",
     _TERMS_BODY,
     path="/terms",

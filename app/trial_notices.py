@@ -51,7 +51,7 @@ def _notices_for(user: Any, now: datetime, settings: Any) -> list[dict[str, str]
                     "body": (
                         f"Your Cirvia Pro trial ends in {days_left} day{plural}. "
                         "After that, daily digests, Top Picks, Deep Dives, and the "
-                        "Risk Lab pause until you pick a plan — upgrade to keep "
+                        "Risk Lab pause until you pick a plan: upgrade to keep "
                         f"them, or continue free with a Monday digest.\n\n{url}"
                     ),
                     "sms": (
@@ -67,14 +67,14 @@ def _notices_for(user: Any, now: datetime, settings: Any) -> list[dict[str, str]
     out.append(
         {
             "kind": "trial_ended",
-            "subject": "Your Pro trial has ended — pick a plan",
+            "subject": "Your Pro trial has ended: pick a plan",
             "body": (
                 "Your Cirvia Pro trial has ended, so your digests are paused. "
                 "Upgrade to Pro to resume daily briefings, Top Picks, Deep "
-                "Dives, and the Risk Lab — or choose Free and keep a Monday "
+                "Dives, and the Risk Lab, or choose Free and keep a Monday "
                 f"digest on your top holdings.\n\n{url}"
             ),
-            "sms": f"Cirvia: your Pro trial ended — digests are paused. Pick a plan: {url}",
+            "sms": f"Cirvia: your Pro trial ended, digests are paused. Pick a plan: {url}",
         }
     )
     if lapsed_for >= timedelta(days=FINAL_NUDGE_DAYS):
@@ -84,13 +84,13 @@ def _notices_for(user: Any, now: datetime, settings: Any) -> list[dict[str, str]
                 "kind": "trial_final",
                 "subject": "We'll move you to the Free plan shortly",
                 "body": (
-                    "Still thinking it over? No action needed — in about "
+                    "Still thinking it over? No action needed: in about "
                     f"{resume_days} days we'll move you to the Free plan "
                     "automatically and your Monday digest will resume. Upgrade "
                     f"any time to get the daily version back.\n\n{url}"
                 ),
                 "sms": (
-                    f"Cirvia: no action needed — Free plan resumes in ~{resume_days} "
+                    f"Cirvia: no action needed, Free plan resumes in ~{resume_days} "
                     f"days. Upgrade any time: {url}"
                 ),
             }

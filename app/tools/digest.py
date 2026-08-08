@@ -136,7 +136,7 @@ async def send_digest(payload: dict[str, Any], ctx: Any = None) -> dict[str, Any
         rich_body,
         user_id=user_id,
         kind="digest",
-        subject=f"Your morning digest — {digest_date.strftime('%b %d')}",
+        subject=f"Your morning digest, {digest_date.strftime('%b %d')}",
         sms_body=body,
     )
 

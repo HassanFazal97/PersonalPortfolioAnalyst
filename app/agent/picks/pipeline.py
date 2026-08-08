@@ -77,7 +77,7 @@ logger = logging.getLogger(__name__)
 
 METHODOLOGY_VERSION = 1
 DISCLAIMER = (
-    "Ranked by a quantitative model over public data. Informational only — "
+    "Ranked by a quantitative model over public data. Informational only, "
     "not a recommendation to buy or sell. Do your own research."
 )
 # Below this fraction of the universe passing the eligibility gates, the data
@@ -572,7 +572,7 @@ async def run_stock_picks(
                 {"coverage": screen.coverage, "note": "stale data"},
                 error=(
                     f"only {screen.coverage.get('eligible', 0)}/{len(tickers)} "
-                    "universe tickers passed the eligibility gates — data store "
+                    "universe tickers passed the eligibility gates; data store "
                     "looks stale; refusing to rank"
                 ),
             )
@@ -622,7 +622,7 @@ async def run_stock_picks(
                 failed_analysts += 1
                 pick["analysis"] = "unavailable"
                 pick["valuation_evidence"] = []
-                pick["data_gaps"] = ["analyst stage unavailable — quantitative scores only"]
+                pick["data_gaps"] = ["analyst stage unavailable; quantitative scores only"]
             else:
                 fact_metrics = (row.get("evidence") or {}).get("metrics") or {}
                 verified_ev, notes = verify_evidence(

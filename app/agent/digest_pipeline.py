@@ -46,7 +46,7 @@ from app.profile import (
 from app.tools import market, news, portfolio
 from app.tools.registry import CHAT_TOOLS, ToolContext
 
-FALLBACK_BODY = "Digest failed this morning — check /runs for details."
+FALLBACK_BODY = "Digest failed this morning; check /runs for details."
 
 _OWNER_USER_ID = uuid.UUID(DEFAULT_USER_ID)
 
