@@ -191,7 +191,7 @@ export const AppDashboard: React.FC<{
               />
             ) : null}
             <NewsItem
-              head="Morning digest — Jul 6"
+              head="Morning digest, Jul 6"
               body="Quiet overnight session. NVDA up premarket ahead of Wednesday earnings; BoC rate decision lands Thursday."
               meta="digest · 7:45 AM"
             />

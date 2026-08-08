@@ -81,14 +81,14 @@ def _page(title: str, heading: str, body_html: str) -> str:
 
 
 UNSUBSCRIBED_HTML = _page(
-    "Unsubscribed — Cirvia",
+    "Unsubscribed | Cirvia",
     "You're unsubscribed.",
     "Digests stop immediately. You can turn delivery back on anytime from "
     'your <a href="/app/dashboard">dashboard</a>.',
 )
 
 INVALID_LINK_HTML = _page(
-    "Link not valid — Cirvia",
+    "Link not valid | Cirvia",
     "This link isn't valid.",
     "The unsubscribe link is invalid or has expired. You can manage delivery "
     'from your <a href="/app/dashboard">dashboard</a> instead.',

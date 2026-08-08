@@ -70,7 +70,7 @@ export const DemoHook: React.FC<SceneProps> = ({ dur }) => {
           >
             <Logo size={44} />
             <span style={{ fontSize: 32, fontWeight: 500, color: C.ink2 }}>
-              reads them for you — by 7:45 AM.
+              reads them for you, by 7:45 AM.
             </span>
           </div>
         </Center>
@@ -381,7 +381,7 @@ export const DemoChat: React.FC<SceneProps> = ({ dur }) => {
               {frame >= 84 ? (
                 <div style={{ ...bubble(false), ...rise(frame, 84, 16, 10) }}>
                   Crude fell 3% after OPEC+ signalled higher August output. ENB is your
-                  third-largest holding — pipelines are volume businesses, so the move is
+                  third-largest holding; pipelines are volume businesses, so the move is
                   sentiment more than cash flow.
                 </div>
               ) : null}
@@ -390,7 +390,7 @@ export const DemoChat: React.FC<SceneProps> = ({ dur }) => {
               {frame >= 218 ? (
                 <div style={{ ...bubble(false), ...rise(frame, 218, 16, 10) }}>
                   Apple reports earnings Thursday after close, and the Bank of Canada rate
-                  decision lands Thursday morning — that one touches T.TO and your ETFs.
+                  decision lands Thursday morning; that one touches T.TO and your ETFs.
                 </div>
               ) : null}
             </div>

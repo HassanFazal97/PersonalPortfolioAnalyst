@@ -49,7 +49,7 @@ from app.profile import build_profile_context, profile_from_user
 from app.tools.registry import ToolContext
 
 REPORT_SCHEMA_VERSION = 1
-DISCLAIMER = "Informational only — not investment advice."
+DISCLAIMER = "Informational only: not investment advice."
 
 _STAGES = ("plan", "research", "verify", "synthesize")
 

@@ -1153,7 +1153,7 @@ def create_app() -> FastAPI:
     _track_record_cache.clear()
     app = FastAPI(
         title="Cirvia",
-        description="AI portfolio analyst for Canadian investors — read-only brokerage sync, daily digest, macro alerts.",
+        description="AI portfolio analyst for Canadian investors: read-only brokerage sync, daily digest, macro alerts.",
         lifespan=lifespan,
         dependencies=[Depends(require_auth)],
     )
@@ -1570,7 +1570,7 @@ def create_app() -> FastAPI:
                 raise HTTPException(
                     status_code=403,
                     detail=(
-                        "Deep dives are a Pro feature — a team of research "
+                        "Deep dives are a Pro feature: a team of research "
                         "agents analyzing your whole portfolio. Upgrade to run one."
                     ),
                 )
@@ -2145,7 +2145,7 @@ def create_app() -> FastAPI:
                 raise HTTPException(
                     status_code=502,
                     detail=(
-                        "could not cancel your subscription — try again in a "
+                        "could not cancel your subscription; try again in a "
                         "minute or contact us"
                     ),
                 ) from exc
@@ -2237,7 +2237,7 @@ def create_app() -> FastAPI:
         if user.plan == "pro":
             raise HTTPException(
                 status_code=409,
-                detail="Already on Pro — use Manage billing to change your plan.",
+                detail="Already on Pro. Use Manage billing to change your plan.",
             )
         url = await billing.create_checkout_session(
             repo, settings, user, interval=req.interval
@@ -2742,7 +2742,7 @@ def create_app() -> FastAPI:
         if days_old > (1 if date.today().weekday() < 5 else 3):
             payload["stale"] = True
             payload["stale_note"] = (
-                f"This analysis is from {row.run_date.isoformat()} — a fresh "
+                f"This analysis is from {row.run_date.isoformat()}; a fresh "
                 "run has not completed since."
             )
         return payload
