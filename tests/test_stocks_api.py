@@ -6,6 +6,7 @@ from datetime import date, timedelta
 import pytest
 from fastapi.testclient import TestClient
 
+import app.main as main
 import app.tools.fundamentals as fundamentals
 import app.tools.market as market
 from app.config import DEFAULT_USER_ID, get_settings
@@ -287,3 +288,106 @@ async def test_stock_history_days_1_serves_intraday(monkeypatch, repo):
 async def test_metrics_requires_auth(monkeypatch, repo):
     assert _client(monkeypatch, repo).get("/portfolio/metrics").status_code == 401
     assert _client(monkeypatch, repo).get("/stocks/NVDA").status_code == 401
+
+
+# ---- valuation grid + per-ticker verdict (app/quant/valuation.py) --------
+
+
+def _as_user(monkeypatch, uid):
+    monkeypatch.setattr(main, "_user_id", lambda request: uid)
+
+
+async def _seed_valuation(repo, ticker="NVDA", **over):
+    row = {
+        "ticker": ticker,
+        "as_of": date.today(),
+        "verdict": "Undervalued",
+        "sector_z": 1.4,
+        "metrics_used": 5,
+        "sector": "Technology",
+        "sector_comparison": "sector",
+        "name": "NVIDIA Corporation",
+        "market_cap": 5e11,
+        "last_price": 160.0,
+        "evidence": {"metrics": {"forward_pe": {"value": 30.0, "sector_median": 45.0}}},
+        "not_scored_reason": None,
+    }
+    row.update(over)
+    await repo.upsert_ticker_valuations([row])
+
+
+async def test_stocks_valuations_is_public_no_auth(monkeypatch, repo):
+    await _seed_valuation(repo)
+    resp = _client(monkeypatch, repo).get("/stocks/valuations")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["universe"]["name"]
+    row = next(r for r in body["rows"] if r["ticker"] == "NVDA")
+    assert row["verdict"] == "Undervalued"
+    assert row["name"] == "NVIDIA Corporation"
+    # The list view never carries evidence — that's Pro-gated on the
+    # per-ticker page, not exposed here for anyone.
+    assert "evidence" not in row
+    assert "sector_z" not in row
+
+
+async def test_stocks_valuations_empty_state(monkeypatch, repo):
+    resp = _client(monkeypatch, repo).get("/stocks/valuations")
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "as_of": None,
+        "universe": resp.json()["universe"],
+        "rows": [],
+    }
+
+
+async def test_stock_detail_verdict_free_user_evidence_gated(monkeypatch, repo):
+    await _seed_positions(repo)
+    await _seed_fundamentals(repo)
+    await _seed_valuation(repo)
+    _seed_market(monkeypatch)
+    uid = uuid.uuid4()
+    repo.seed_user(uid, plan="free")
+    client = _client(monkeypatch, repo)
+    _as_user(monkeypatch, uid)
+    body = client.get("/stocks/NVDA", headers=_AUTH).json()
+    verdict = body["verdict"]
+    assert verdict["label"] == "Undervalued"
+    assert verdict["evidence_gated"] is True
+    assert verdict["evidence"] is None
+
+
+async def test_stock_detail_verdict_pro_user_sees_evidence(monkeypatch, repo):
+    await _seed_positions(repo)
+    await _seed_fundamentals(repo)
+    await _seed_valuation(repo)
+    _seed_market(monkeypatch)
+    uid = uuid.uuid4()
+    repo.seed_user(uid, plan="pro")
+    client = _client(monkeypatch, repo)
+    _as_user(monkeypatch, uid)
+    body = client.get("/stocks/NVDA", headers=_AUTH).json()
+    verdict = body["verdict"]
+    assert verdict["evidence_gated"] is False
+    assert verdict["evidence"]["metrics_used"] == 5
+    assert verdict["evidence"]["metrics"]["forward_pe"]["value"] == 30.0
+
+
+async def test_stock_detail_verdict_owner_bypasses_gate(monkeypatch, repo):
+    """The static-token/owner caller (single-user mode, internal tooling)
+    sees full evidence regardless of plan — same bypass every other 402
+    gate in this file uses."""
+    await _seed_positions(repo)
+    await _seed_fundamentals(repo)
+    await _seed_valuation(repo)
+    _seed_market(monkeypatch)
+    body = _client(monkeypatch, repo).get("/stocks/NVDA", headers=_AUTH).json()
+    assert body["verdict"]["evidence_gated"] is False
+
+
+async def test_stock_detail_verdict_absent_when_unscored(monkeypatch, repo):
+    await _seed_positions(repo)
+    await _seed_fundamentals(repo)
+    _seed_market(monkeypatch)
+    body = _client(monkeypatch, repo).get("/stocks/NVDA", headers=_AUTH).json()
+    assert body["verdict"] is None

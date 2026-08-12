@@ -108,6 +108,14 @@ class ScreenerResult:
     movers: list[dict[str, Any]] = field(default_factory=list)
     excluded: dict[str, str] = field(default_factory=dict)
     coverage: dict[str, Any] = field(default_factory=dict)
+    # Value factor + evidence for every eligible ticker with a scored value
+    # factor (>= _MIN_METRICS_PER_FACTOR["value"] metrics resolved),
+    # independent of whether the ticker clears the composite's *other*-factor
+    # gates. A valuation verdict (app/quant/valuation.py) shouldn't require
+    # momentum/analyst/quality coverage the way the picks composite does —
+    # a recently-listed name can be cheap without having 12 months of
+    # momentum history. Superset of the tickers in ``rows``.
+    value_evidence: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 def robust_z(values: np.ndarray) -> np.ndarray:
@@ -396,6 +404,37 @@ def score_universe(
 
     def _r(v: Any, nd: int = 4) -> float | None:
         return round(float(v), nd) if v is not None and np.isfinite(v) else None
+
+    # ---- value-only evidence, independent of the composite's rankable gate
+    value_metric_keys = [key for _, key, _s, _p in _VALUE_METRICS]
+    sector_counts: dict[str, int] = {}
+    for s in sectors:
+        sector_counts[s or ""] = sector_counts.get(s or "", 0) + 1
+    for i, t in enumerate(eligible):
+        vz = factors["value"][i]
+        if not np.isfinite(vz):
+            continue
+        metrics = {
+            key: {"value": _r(raw[key][i]), "sector_median": _r(medians[key][i])}
+            for key in value_metric_keys
+            if np.isfinite(raw[key][i])
+        }
+        result.value_evidence[t] = {
+            "sector": sectors[i],
+            "value_z": _r(vz),
+            "metrics_used": len(metrics),
+            "metrics": metrics,
+            # Approximate: whether this ticker's *sector* had enough scored
+            # peers overall to normalize against, vs. falling back to the
+            # universe-wide cross-section (mirrors MIN_SECTOR_SIZE, but per
+            # metric the real fallback can vary slightly — this is the
+            # disclosed, honest approximation, not a per-metric audit).
+            "sector_comparison": (
+                "sector"
+                if sectors[i] and sector_counts.get(sectors[i], 0) >= MIN_SECTOR_SIZE
+                else "universe (sector too small)"
+            ),
+        }
 
     rows: list[dict[str, Any]] = []
     for i, t in enumerate(eligible):

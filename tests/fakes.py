@@ -39,6 +39,7 @@ class FakeRepo:
         self._news_fingerprints: set[tuple] = set()
         self.job_heartbeats: dict[str, SimpleNamespace] = {}
         self.ticker_fundamentals: dict[str, SimpleNamespace] = {}
+        self.ticker_valuations: dict[str, SimpleNamespace] = {}
         self.daily_prices: dict[str, list[SimpleNamespace]] = {}
         # Insertion-ordered (user_id, ticker) -> row; dict order = created_at order.
         self._watchlist: dict[tuple[Any, str], SimpleNamespace] = {}
@@ -877,6 +878,20 @@ class FakeRepo:
             fetched_at=datetime.now(timezone.utc),
             fetch_error=fetch_error,
         )
+
+    # ---- ticker valuations (mirrors app/db/repo.py) -----------------------
+
+    async def get_ticker_valuations(self, tickers=None):
+        if tickers is None:
+            return dict(self.ticker_valuations)
+        return {t: row for t, row in self.ticker_valuations.items() if t in tickers}
+
+    async def upsert_ticker_valuations(self, rows):
+        for row in rows:
+            self.ticker_valuations[row["ticker"]] = SimpleNamespace(
+                updated_at=datetime.now(timezone.utc), **row
+            )
+        return len(rows)
 
     # ---- daily prices (global adjusted-close cache) ---------------------
 

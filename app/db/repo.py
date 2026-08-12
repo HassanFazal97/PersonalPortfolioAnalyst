@@ -48,6 +48,7 @@ from app.db.models import (
     StockPicksRun,
     StripeEvent,
     TickerFundamentals,
+    TickerValuation,
     ToolCall,
     Transaction,
     UniverseMembership,
@@ -1790,6 +1791,43 @@ class Repo:
             )
             await s.execute(stmt)
             await s.commit()
+
+    # ---- ticker valuations (global per-ticker verdict cache, all tenants) -
+
+    async def get_ticker_valuations(
+        self, tickers: list[str] | None = None
+    ) -> dict[str, TickerValuation]:
+        """Latest verdict per ticker. ``None`` returns the whole universe —
+        the read that drives the ``/stocks/valuations`` grid."""
+        async with self._session() as s:
+            q = select(TickerValuation)
+            if tickers is not None:
+                q = q.where(TickerValuation.ticker.in_(tickers))
+            result = await s.execute(q)
+            return {row.ticker: row for row in result.scalars().all()}
+
+    async def upsert_ticker_valuations(self, rows: list[dict[str, Any]]) -> int:
+        """Bulk-upsert verdict rows (the ``valuation_refresh`` job body, one
+        call per universe run). Unlike ``fundamentals_snapshots`` this is a
+        latest-only cache — each run overwrites the prior verdict, same
+        posture as ``upsert_ticker_fundamentals``."""
+        if not rows:
+            return 0
+        now = datetime.now(timezone.utc)
+        values = [{**row, "updated_at": now} for row in rows]
+        update_cols = {
+            col: c for col, c in TickerValuation.__table__.columns.items()
+            if col not in ("ticker",)
+        }
+        async with self._session() as s:
+            stmt = pg_insert(TickerValuation).values(values)
+            stmt = stmt.on_conflict_do_update(
+                index_elements=[TickerValuation.ticker],
+                set_={col: getattr(stmt.excluded, col) for col in update_cols},
+            )
+            await s.execute(stmt)
+            await s.commit()
+        return len(values)
 
     # ---- daily prices (global per-ticker adjusted-close cache) ------------
 

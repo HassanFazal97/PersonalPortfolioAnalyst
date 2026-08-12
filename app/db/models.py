@@ -502,6 +502,35 @@ class TickerFundamentals(Base):
     fetch_error: Mapped[str | None] = mapped_column(Text)
 
 
+class TickerValuation(Base):
+    """Global per-ticker "cheap or expensive" verdict cache (migration 028).
+
+    Latest-only, like ``TickerFundamentals`` -- not point-in-time like
+    ``FundamentalsSnapshot``. Written once daily by
+    ``app/tools/valuation_refresh.py`` from
+    ``app/quant/valuation.py::compute_valuations()``; read as a flat row by
+    both ``GET /stocks/valuations`` (public) and the ``verdict`` block on
+    ``GET /stocks/{ticker}`` (evidence field-gated to Pro plans)."""
+
+    __tablename__ = "ticker_valuations"
+
+    ticker: Mapped[str] = mapped_column(Text, primary_key=True)
+    as_of: Mapped[date] = mapped_column(Date, nullable=False)
+    verdict: Mapped[str] = mapped_column(Text, nullable=False)
+    sector_z: Mapped[Decimal | None] = mapped_column(Numeric)
+    metrics_used: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    sector: Mapped[str | None] = mapped_column(Text)
+    sector_comparison: Mapped[str | None] = mapped_column(Text)
+    name: Mapped[str | None] = mapped_column(Text)
+    market_cap: Mapped[Decimal | None] = mapped_column(Numeric)
+    last_price: Mapped[Decimal | None] = mapped_column(Numeric)
+    evidence: Mapped[dict | None] = mapped_column(JSONB)
+    not_scored_reason: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class DailyPrice(Base):
     """Global per-ticker daily adjusted-close cache (system table, not tenant
     data). The quant engine's return-history source; one row per (ticker, date),

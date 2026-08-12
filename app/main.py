@@ -76,6 +76,7 @@ from app.landing import (
     PRIVACY_HTML,
     SAMPLE_DIGEST_HTML,
     TERMS_HTML,
+    screener_html,
     track_record_html,
 )
 from app.memory import ingest as memory_ingest
@@ -111,6 +112,7 @@ from app.tools import (
     price_store,
     symbol_search,
     universe,
+    valuation_refresh,
 )
 from app.tools.registry import (
     CHAT_TOOLS,
@@ -153,6 +155,7 @@ async def lifespan(app: FastAPI):
     app.state.news_scheduler = None
     app.state.deep_dive_scheduler = None
     app.state.picks_sync_scheduler = None
+    app.state.valuation_refresh_scheduler = None
     app.state.picks_scheduler = None
     app.state.trial_notices_scheduler = None
     app.state.delivery_scheduler = None
@@ -281,6 +284,20 @@ async def lifespan(app: FastAPI):
             picks_sync_scheduler.start()
             app.state.picks_sync_scheduler = picks_sync_scheduler
 
+        if settings.valuation_refresh_cron:
+            async def _run_valuation_refresh() -> None:
+                await valuation_refresh.run_valuation_refresh(repo, settings)
+
+            valuation_refresh_scheduler = DigestScheduler(
+                heartbeat_wrapped("valuation_refresh", repo, _run_valuation_refresh),
+                cron=settings.valuation_refresh_cron,
+                timezone=settings.tz,
+                job_id="valuation_refresh",
+                misfire_grace_seconds=settings.digest_misfire_grace_seconds,
+            )
+            valuation_refresh_scheduler.start()
+            app.state.valuation_refresh_scheduler = valuation_refresh_scheduler
+
         if settings.picks_cron:
             async def _run_picks() -> None:
                 await run_stock_picks(repo)
@@ -404,6 +421,8 @@ async def lifespan(app: FastAPI):
             app.state.picks_scheduler.shutdown()
         if app.state.picks_sync_scheduler is not None:
             app.state.picks_sync_scheduler.shutdown()
+        if app.state.valuation_refresh_scheduler is not None:
+            app.state.valuation_refresh_scheduler.shutdown()
         if app.state.deep_dive_scheduler is not None:
             app.state.deep_dive_scheduler.shutdown()
         if app.state.news_scheduler is not None:
@@ -493,6 +512,12 @@ _AUTH_EXEMPT_PATHS = {
     "/sample-digest",
     "/methodology",
     "/stocks/picks/track-record",
+    # The valuation grid: the no-signup browse hook (ticker/price/verdict for
+    # the whole tracked universe), same posture as the track record above —
+    # global market data, not user data. Deeper evidence stays Pro-gated on
+    # the per-ticker page, not here.
+    "/screener",
+    "/stocks/valuations",
     # The web app pages are static HTML shells; the browser authenticates the
     # API calls it makes from them with a Supabase JWT.
     "/app",
@@ -642,6 +667,31 @@ _TRACK_BENCHMARK_TICKER = "SPY"
 # load: serve a cached payload rather than re-querying per request.
 _TRACK_RECORD_TTL_SECONDS = 900.0
 _track_record_cache: dict[int, tuple[float, dict]] = {}
+
+
+async def _valuations_payload(repo: Repo) -> dict:
+    """The valuation grid document: ticker/name/sector/cap/price/verdict for
+    the whole tracked universe, from the ``ticker_valuations`` cache written
+    nightly by app/tools/valuation_refresh.py. Shared by the public
+    /stocks/valuations JSON route and the public /screener page — same flat
+    DB read either way, no live scoring in the request path."""
+    rows = await repo.get_ticker_valuations()
+    as_of = max((r.as_of for r in rows.values()), default=None)
+    return {
+        "as_of": as_of.isoformat() if as_of else None,
+        "universe": universe.universe_snapshot(get_settings().picks_universe_limit),
+        "rows": [
+            {
+                "ticker": t,
+                "name": r.name,
+                "sector": r.sector,
+                "market_cap": float(r.market_cap) if r.market_cap is not None else None,
+                "last_price": float(r.last_price) if r.last_price is not None else None,
+                "verdict": r.verdict,
+            }
+            for t, r in sorted(rows.items())
+        ],
+    }
 
 
 def _close_before(rows: list[tuple[date, float]], d: date) -> float | None:
@@ -1225,6 +1275,18 @@ def create_app() -> FastAPI:
             except Exception:
                 logging.getLogger(__name__).exception("track record page load failed")
         return HTMLResponse(track_record_html(payload))
+
+    @app.get("/screener", response_class=HTMLResponse)
+    async def screener_page() -> HTMLResponse:
+        """Public valuation grid. Same never-500 posture as /track-record —
+        a data problem degrades to the empty-state rendering."""
+        payload: dict = {"as_of": None, "universe": {}, "rows": []}
+        if app.state.repo is not None:
+            try:
+                payload = await _valuations_payload(app.state.repo)
+            except Exception:
+                logging.getLogger(__name__).exception("screener page load failed")
+        return HTMLResponse(screener_html(payload))
 
     @app.get("/sample-digest", response_class=HTMLResponse)
     async def sample_digest_page() -> HTMLResponse:
@@ -2713,6 +2775,18 @@ def create_app() -> FastAPI:
         treated as a ticker."""
         return {"results": await symbol_search.search_symbols(q)}
 
+    @app.get("/stocks/valuations")
+    async def stocks_valuations() -> dict:
+        """The public "cheap or expensive" grid: ticker/price/verdict for the
+        whole tracked universe, written nightly by
+        app/tools/valuation_refresh.py. Public and auth-exempt, like
+        /stocks/picks/track-record — this is the no-signup browse hook, free
+        for anyone, same posture as valucurve's free list. Deeper evidence
+        (sector-median comparisons) lives on the per-ticker page and is
+        Pro-gated there, not here. Registered BEFORE /stocks/{ticker} for the
+        same route-ordering reason as /stocks/search above."""
+        return await _valuations_payload(_require_repo(app))
+
     @app.get("/stocks/picks")
     async def stock_picks(request: Request) -> dict:
         """The Best Stocks dashboard document: latest completed/partial daily
@@ -2827,6 +2901,8 @@ def create_app() -> FastAPI:
         stored = await repo.get_ticker_fundamentals([t])
         fetched_at = stored[t].fetched_at.isoformat() if t in stored else None
         watching = t in await repo.get_watchlist_tickers(user_id)
+        val_rows = await repo.get_ticker_valuations([t])
+        user = await repo.get_user(user_id)
 
         position = None
         if rows:
@@ -2870,6 +2946,33 @@ def create_app() -> FastAPI:
         profile["ticker"] = t
         profile["quote_type"] = data.get("quote_type")
 
+        # "Cheap or expensive" verdict (app/quant/valuation.py), written
+        # nightly by valuation_refresh — a flat cache read, not live scoring.
+        # The label is free (same tier as the /stocks/valuations grid); the
+        # evidence (sector-median comparisons) is Pro-gated, field-level,
+        # same effective_plan() check used for whole-endpoint 402s elsewhere
+        # in this file.
+        val = val_rows.get(t)
+        verdict = None
+        if val is not None:
+            is_pro = effective_plan(user) == "pro" or user_id == _OWNER_USER_ID
+            verdict = {
+                "label": val.verdict,
+                "as_of": val.as_of.isoformat() if val.as_of else None,
+                "not_scored_reason": val.not_scored_reason,
+                "evidence_gated": not is_pro,
+                "evidence": (
+                    {
+                        "sector_z": float(val.sector_z) if val.sector_z is not None else None,
+                        "metrics_used": val.metrics_used,
+                        "sector_comparison": val.sector_comparison,
+                        "metrics": (val.evidence or {}).get("metrics"),
+                    }
+                    if is_pro
+                    else None
+                ),
+            }
+
         if rows:
             position = {
                 "quantity": quantity,
@@ -2906,6 +3009,7 @@ def create_app() -> FastAPI:
                 "day_change_pct": day_change_pct,
             },
             "valuation": data.get("valuation"),
+            "verdict": verdict,
             "growth": data.get("growth"),
             "profitability": data.get("profitability"),
             "financial_health": data.get("financial_health"),

@@ -232,6 +232,12 @@ class Settings(BaseSettings):
     # Pro users.
     picks_cron: str = Field(default="", alias="PICKS_CRON")
     picks_sync_cron: str = Field(default="", alias="PICKS_SYNC_CRON")
+    # Valuation verdict refresh (app/tools/valuation_refresh.py): pure math
+    # over what picks_sync already wrote, so it should run shortly after it
+    # (recommend "30 20 * * 1-5"). "" (disabled) by default like the other
+    # cost-bearing jobs, even though this one costs $0 — no point computing
+    # verdicts nobody can see yet.
+    valuation_refresh_cron: str = Field(default="", alias="VALUATION_REFRESH_CRON")
     # Hard USD cap for one picks run (analysts + movers + critic + synthesis).
     # Typical runs land near $2; analysts stop being admitted at 80% of this.
     picks_max_cost_usd: float = Field(default=5.00, alias="PICKS_MAX_COST_USD")

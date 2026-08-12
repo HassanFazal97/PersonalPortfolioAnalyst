@@ -38,3 +38,50 @@ def test_nav_swap_script_omitted_without_supabase(monkeypatch):
     get_settings.cache_clear()
     html = landing._layout("t", "d", "<p>body</p>")
     assert "auth-token" not in html
+
+
+def test_screener_page_is_public_no_token(monkeypatch):
+    monkeypatch.setenv("API_TOKEN", "test-token")
+    monkeypatch.setenv("DATABASE_URL", "")
+    get_settings.cache_clear()
+    with TestClient(create_app()) as client:
+        resp = client.get("/screener")
+    assert resp.status_code == 200
+    assert "cheap or expensive" in resp.text.lower()
+
+
+def test_screener_html_empty_state():
+    from app import landing
+
+    html = landing.screener_html({"as_of": None, "universe": {}, "rows": []})
+    assert "computed nightly" in html
+
+
+def test_screener_html_renders_verdict_badges():
+    from app import landing
+
+    payload = {
+        "as_of": "2026-08-08",
+        "universe": {"name": "sp500+tsx60", "size": 563},
+        "rows": [
+            {
+                "ticker": "CHEAP", "name": "Cheap Co", "sector": "Technology",
+                "market_cap": 5.2e10, "last_price": 42.5, "verdict": "Undervalued",
+            },
+            {
+                "ticker": "RICH", "name": "Rich Co", "sector": "Technology",
+                "market_cap": 1.1e12, "last_price": 900.0, "verdict": "Expensive",
+            },
+            {
+                "ticker": "JUNK", "name": None, "sector": None,
+                "market_cap": None, "last_price": None, "verdict": "Not enough data",
+            },
+        ],
+    }
+    html = landing.screener_html(payload)
+    assert 'vd-under">Undervalued' in html
+    assert 'vd-over">Expensive' in html
+    assert 'vd-none">Not enough data' in html
+    assert "~563 US and Canadian large caps" in html
+    assert "$52.00B" in html  # market cap formatting
+    assert "JUNK" in html and "&ndash;" in html  # missing fields degrade gracefully
