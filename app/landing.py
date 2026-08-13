@@ -605,7 +605,8 @@ _SIDEBAR_CSS = """
 .sidebar-topbar .topbar-extra { flex: 1; min-width: 0; }
 @media (min-width: 901px) { .sidebar-topbar { display: none; } }
 
-.sidebar-hamburger { display: inline-flex; background: none; border: 0; cursor: pointer;
+.sidebar-hamburger { display: inline-flex; flex-direction: column; align-items: center;
+  justify-content: center; background: none; border: 0; cursor: pointer;
   padding: 0.55rem; margin: -0.55rem 0 -0.55rem -0.4rem; flex: none; }
 .sidebar-hamburger span { display: block; width: 20px; height: 2px; border-radius: 2px;
   background: var(--ink); margin: 5px 0;
