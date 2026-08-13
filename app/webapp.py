@@ -568,12 +568,21 @@ tr:last-child td { border-bottom: none; }
 .settings-panel { display: none; flex-direction: column; gap: 1rem; }
 .settings-panel.active { display: flex; }
 .settings-panel .dash-card { margin-top: 0; }
+/* Narrow screens: the rail becomes a wrapping row of chips. It must wrap
+   rather than scroll — a hidden-scrollbar strip left every section but
+   Account off-screen with no affordance. width:auto is what makes the
+   chips size to their label instead of eating a full row each. */
 @media (max-width: 800px) {
   .settings-layout { grid-template-columns: 1fr; gap: 1.25rem; }
-  .settings-rail { flex-direction: row; gap: 0.35rem; overflow-x: auto;
-    scrollbar-width: none; }
-  .settings-rail::-webkit-scrollbar { display: none; }
-  .settings-rail-item { flex: none; white-space: nowrap; padding: 0.5rem 0.8rem; }
+  .settings-rail { flex-direction: row; flex-wrap: wrap; gap: 0.4rem; }
+  .settings-rail-item { width: auto; flex: none; white-space: nowrap;
+    padding: 0.5rem 0.85rem; border-color: var(--line);
+    background: var(--surface-2); }
+  .settings-rail-item[aria-selected="true"] { background: var(--accent-wash);
+    border-color: var(--accent); color: var(--ink); }
+}
+@media (max-width: 640px) {
+  .settings-rail-item { min-height: 44px; }
 }
 .plan-limits { margin: 0.75rem 0 0; padding-left: 1.15rem; color: var(--ink-2);
   font-size: 0.92rem; }

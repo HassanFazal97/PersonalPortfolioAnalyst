@@ -686,8 +686,19 @@ html.sidebar-collapsed .side-link:focus-visible::after { opacity: 1; }
      current width via --active-sidebar-w (kept in sync by the
      html.sidebar-collapsed override above) and each box's own max-width
      (--content-w, set per selector below). */
-  footer, .app-foot { margin-left: var(--active-sidebar-w); transition: margin-left 0.2s var(--ease); }
-  .wrap, .app-wrap {
+  /* "body X" (not bare "X") is deliberate: app/webapp.py's _APP_CSS is
+     concatenated *after* this file's _CSS inside the single style element
+     ({_CSS}{_APP_CSS} - never write a literal closing style tag in these
+     comments, the HTML parser ends the element there and drops the rest of
+     the stylesheet),
+     and .app-wrap's own base rule there sets a plain "margin: 0 auto" —
+     equal specificity, later in source, so it would silently win and wipe
+     these values back to auto, leaving content centered in the full
+     viewport with no allowance for the fixed sidebar (which then overlaps
+     it). The "body " prefix outranks that regardless of source order. */
+  body footer, body .app-foot { margin-left: var(--active-sidebar-w);
+    transition: margin-left 0.2s var(--ease); }
+  body .wrap, body .app-wrap {
     margin-left: max(var(--active-sidebar-w),
       calc((100vw + var(--active-sidebar-w) - var(--content-w)) / 2));
     margin-right: max(0px, calc((100vw - var(--active-sidebar-w) - var(--content-w)) / 2));
