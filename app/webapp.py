@@ -301,23 +301,35 @@ input:focus, select:focus { border-color: var(--accent-hover); }
 .chat-close { background: none; border: none; color: var(--ink-3); cursor: pointer;
   font-size: 1.1rem; padding: 0.2rem 0.4rem; font-family: var(--font); }
 /* holdings tab: table beside allocation donut */
+.holdings-hdr { display: flex; flex-wrap: wrap; align-items: baseline;
+  justify-content: space-between; gap: 0.6rem 1rem; margin-top: 0.35rem; }
+.holdings-total { font-size: 1.35rem; font-weight: 700; color: var(--ink);
+  font-variant-numeric: tabular-nums; }
+.holdings-total .d { font-size: 0.95rem; font-weight: 650; margin-left: 0.45rem; }
+.holdings-total .d.pos { color: var(--gain); }
+.holdings-total .d.neg { color: var(--loss); }
 .holdings-split { display: grid; grid-template-columns: minmax(0, 1fr) 250px;
-  gap: 1.5rem; align-items: start; margin-top: 0.5rem; }
+  gap: 1.5rem; align-items: start; margin-top: 0.85rem; }
 @media (max-width: 900px) { .holdings-split { grid-template-columns: 1fr; } }
 .pie-box svg { display: block; width: 100%; max-width: 220px; height: auto; margin: 0 auto; }
-.pie-slice { cursor: pointer; transition: opacity 0.15s var(--ease); }
-.pie-leg-row { transition: opacity 0.15s var(--ease); }
+.pie-slice { cursor: pointer; transition: opacity 0.15s var(--ease), filter 0.15s var(--ease); }
+.pie-slice.hl { filter: brightness(1.06); }
+.pie-leg-row { transition: opacity 0.15s var(--ease), background 0.15s var(--ease); }
 .pie-box.has-hover .pie-slice:not(.hl),
 .pie-box.has-hover .pie-leg-row:not(.hl) { opacity: 0.35; }
-.pie-legend { margin-top: 0.75rem; font-size: 0.82rem; }
-.pie-leg-row { display: flex; align-items: center; gap: 0.55rem; padding: 0.16rem 0;
+.pie-legend { margin-top: 0.85rem; font-size: 0.82rem; display: flex;
+  flex-direction: column; gap: 0.1rem; }
+.pie-leg-row { display: flex; align-items: center; gap: 0.6rem;
+  padding: 0.34rem 0.5rem; border-radius: var(--r-s); margin: 0 -0.5rem;
   color: var(--ink-2); font-variant-numeric: tabular-nums; cursor: default; }
+.pie-leg-row:hover, .pie-leg-row.hl { background: var(--surface-2); }
 /* Legend avatar: slice-color disc doubling as the lettermark fallback; the
    fetched logo lands on an inset white disc, leaving a 2px slice-color ring
    so the color mapping to the donut survives the logo. */
-.pie-leg-row .lg { width: 20px; height: 20px; border-radius: 50%; flex: none;
-  position: relative; display: flex; align-items: center; justify-content: center; }
-.pie-leg-row .lg .ch { font-size: 0.6rem; font-weight: 700; color: #fff;
+.pie-leg-row .lg { width: 22px; height: 22px; border-radius: 50%; flex: none;
+  position: relative; display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 1px 2px oklch(35% 0.05 300 / 0.25); }
+.pie-leg-row .lg .ch { font-size: 0.62rem; font-weight: 700; color: #fff;
   line-height: 1; user-select: none; }
 .pie-leg-row .lg img { position: absolute; inset: 2px;
   /* imgs are replaced elements: inset alone won't size them */
@@ -330,6 +342,7 @@ input:focus, select:focus { border-color: var(--accent-hover); }
 }
 .pie-leg-row .t { font-weight: 600; color: var(--ink); flex: 1; min-width: 0;
   overflow: hidden; text-overflow: ellipsis; }
+.pie-leg-row .pct { font-weight: 700; color: var(--ink); min-width: 3.4em; text-align: right; }
 .dash-card h3 { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; }
 .dash-card h3 .tag { font-size: 0.8rem; font-weight: 600; color: var(--ink-3);
   font-variant-numeric: tabular-nums; }
@@ -2496,13 +2509,14 @@ _DASHBOARD_BODY = """
 
   <div class="dash-panel" data-panel="holdings" role="tabpanel">
   <div class="dash-card">
-    <h3>Holdings
+    <h3>Holdings</h3>
+    <div class="holdings-hdr">
+      <span class="holdings-total" id="totals"></span>
       <span class="refresh-row">
         <span class="updated-at" id="holdings-updated"></span>
         <button class="link-btn" id="refresh-holdings-btn">Refresh</button>
-        <span class="tag" id="totals"></span>
       </span>
-    </h3>
+    </div>
     <div class="holdings-split">
       <div id="holdings"><div aria-hidden="true">
         <div class="skl"></div><div class="skl"></div><div class="skl short"></div>
@@ -2804,11 +2818,13 @@ async function loadHoldings(data) {
     const watchlist = new Set(meProfile && meProfile.digest_tickers ? meProfile.digest_tickers : []);
     const totals = pf.totals || {};
     if (totals.total_market_value_cad != null) {
-      document.getElementById('totals').textContent =
-        fmtMoney(totals.total_market_value_cad) +
-        (totals.total_unrealized_pnl_pct != null
-          ? ' · ' + (totals.total_unrealized_pnl_pct >= 0 ? '+' : '') +
-            totals.total_unrealized_pnl_pct.toFixed(1) + '%'
+      const pnlPct = totals.total_unrealized_pnl_pct;
+      const sign = pnlPct != null && pnlPct >= 0 ? '+' : '';
+      document.getElementById('totals').innerHTML =
+        esc(fmtMoney(totals.total_market_value_cad)) +
+        (pnlPct != null
+          ? ' <span class="d ' + (pnlPct >= 0 ? 'pos' : 'neg') + '">' +
+            sign + pnlPct.toFixed(1) + '%</span>'
           : '');
     }
     // One row per ticker: the same instrument held in several accounts
@@ -2929,13 +2945,17 @@ function renderSummary(groups, totals) {
 }
 
 // Allocation donut: hand-rolled SVG (same approach as the Risk Lab charts).
-// Lavender-anchored OKLCH categorical scale at matched lightness/chroma.
+// Lavender-anchored OKLCH categorical scale, fixed hue order, validated against
+// --surface-1 with scripts/validate_palette.js from the dataviz skill (all
+// checks pass; the one CVD floor-band warning — green/pink — is covered by the
+// legend's direct ticker labels + logos, which is the required secondary
+// encoding for a floor-band pair).
 const PIE_COLORS = [
-  'oklch(55% 0.17 295)', 'oklch(50% 0.11 155)', 'oklch(58% 0.12 75)',
-  'oklch(55% 0.13 230)', 'oklch(55% 0.14 335)', 'oklch(52% 0.11 195)',
-  'oklch(52% 0.13 25)', 'oklch(48% 0.09 120)',
+  'oklch(58% 0.19 295)', 'oklch(66% 0.17 55)', 'oklch(62% 0.19 340)',
+  'oklch(62% 0.16 150)', 'oklch(58% 0.15 235)', 'oklch(62% 0.18 85)',
+  'oklch(60% 0.14 190)', 'oklch(56% 0.18 25)',
 ];
-const PIE_OTHER = 'oklch(65% 0.02 300)';
+const PIE_OTHER = 'oklch(58% 0.015 300)';
 
 // ticker -> Promise<objectURL|null>, memoized: the pie re-renders on every
 // portfolio refresh and this keeps that from refetching every logo each time.
@@ -2994,7 +3014,11 @@ function renderHoldingsPie(groups, totals) {
     } else {
       const a0 = acc, a1 = acc + frac;
       const large = frac > 0.5 ? 1 : 0;
-      paths += '<path class="pie-slice" data-idx="' + i + '" fill="' + color + '" d="' +
+      // A thin stroke in the card's own surface color cuts a visible gap
+      // between touching slices, so neighbors read as distinct wedges
+      // rather than one flat-colored ring (see dataviz skill: surface gap).
+      paths += '<path class="pie-slice" data-idx="' + i + '" fill="' + color +
+        '" stroke="var(--surface-1)" stroke-width="2.5" stroke-linejoin="round" d="' +
         'M ' + pt(R, a0) + ' A ' + R + ' ' + R + ' 0 ' + large + ' 1 ' + pt(R, a1) +
         ' L ' + pt(RI, a1) + ' A ' + RI + ' ' + RI + ' 0 ' + large + ' 0 ' + pt(RI, a0) +
         ' Z"><title>' + label + '</title></path>';
@@ -3003,13 +3027,16 @@ function renderHoldingsPie(groups, totals) {
       '<span class="lg" style="background:' + color + '"' +
       (s.other ? '' : ' data-ticker="' + esc(s.t) + '"') + '>' +
       (s.other ? '' : '<span class="ch">' + esc(s.t[0]) + '</span>') +
-      '</span><span class="t">' + esc(s.t) + '</span><span>' + pctTxt + '</span></div>';
+      '</span><span class="t">' + esc(s.t) + '</span><span class="pct">' + pctTxt + '</span></div>';
     acc += frac;
   });
+  const holdingWord = priced.length === 1 ? 'HOLDING' : 'HOLDINGS';
   box.innerHTML = '<svg viewBox="0 0 200 200" role="img" aria-label="Portfolio allocation">' +
-    paths + '<text x="100" y="104" text-anchor="middle" fill="var(--ink-3)" ' +
-    'font-size="13" font-family="inherit">' + priced.length +
-    (priced.length === 1 ? ' holding' : ' holdings') + '</text></svg>' +
+    paths + '<text x="100" y="97" text-anchor="middle" fill="var(--ink)" ' +
+    'font-size="30" font-weight="700" font-family="inherit">' + priced.length + '</text>' +
+    '<text x="100" y="118" text-anchor="middle" fill="var(--ink-3)" ' +
+    'font-size="10.5" font-weight="600" letter-spacing="0.05em" font-family="inherit">' +
+    holdingWord + '</text></svg>' +
     '<div class="pie-legend">' + legend + '</div>' +
     (excluded > 0
       ? '<p class="muted-note">' + excluded + ' unpriced position' +
