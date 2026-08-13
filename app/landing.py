@@ -8,6 +8,10 @@ SnapTrade / partner reviewers see.
 
 from __future__ import annotations
 
+import json
+import re
+from datetime import date
+from html import unescape
 from urllib.parse import quote, urlparse
 
 from app.config import get_settings
@@ -72,6 +76,128 @@ def _public_base_url() -> str:
     """Absolute origin for og:url / og:image (no trailing slash)."""
     return (get_settings().public_base_url or "https://cirvia.ca").rstrip("/")
 
+
+# --------------------------------------------------------------------------
+# SEO: structured data, sitemap, robots
+# --------------------------------------------------------------------------
+#
+# JSON-LD is generated from the same Python data (FAQ lists, plan numbers)
+# that drives the visible HTML, never typed twice, so the two can't drift.
+# No Review/AggregateRating schema anywhere: there are no testimonials on
+# this site, and fabricating a rating would break the same honesty posture
+# the product itself is built on (see marketing.md's compliance guardrails).
+
+
+def _strip_for_jsonld(fragment: str) -> str:
+    """Plain text for a JSON-LD string field from a bit of inline HTML
+    (an <a> tag, an HTML entity like &rsquo;): strip tags, decode entities,
+    collapse whitespace."""
+    return unescape(" ".join(re.sub(r"<[^>]+>", "", fragment).split()))
+
+
+def _jsonld_script(data: dict) -> str:
+    return f'<script type="application/ld+json">{json.dumps(data)}</script>\n'
+
+
+def _site_jsonld(base: str) -> str:
+    """Sitewide Organization + WebSite schema, emitted on every page."""
+    return _jsonld_script(
+        {
+            "@context": "https://schema.org",
+            "@graph": [
+                {
+                    "@type": "Organization",
+                    "name": "Cirvia",
+                    "url": base,
+                    "logo": f"{base}/static/apple-touch-icon.png",
+                },
+                {"@type": "WebSite", "name": "Cirvia", "url": base},
+            ],
+        }
+    )
+
+
+def _faq_html(items: list[tuple[str, str]]) -> str:
+    """Visible <details> markup for a list of (question, answer_html) pairs."""
+    return "\n".join(
+        f"    <details data-reveal-item><summary>{q}</summary>\n"
+        f"    <p>{a}</p></details>"
+        for q, a in items
+    )
+
+
+def _faq_jsonld(items: list[tuple[str, str]]) -> dict:
+    """FAQPage schema for the same (question, answer_html) pairs rendered by
+    _faq_html, so visible copy and structured data can never disagree."""
+    return {
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        "mainEntity": [
+            {
+                "@type": "Question",
+                "name": _strip_for_jsonld(q),
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": _strip_for_jsonld(a),
+                },
+            }
+            for q, a in items
+        ],
+    }
+
+
+# The 9 public marketing routes. No per-ticker or dynamic pages here yet
+# (that's ROADMAP Phase 2, blocked on data-licensing/ops work) — this is
+# just the static site's own crawl surface.
+_SITEMAP_PAGES: list[tuple[str, str, float]] = [
+    ("/", "weekly", 1.0),
+    ("/pricing", "weekly", 0.9),
+    ("/track-record", "daily", 0.8),
+    ("/screener", "daily", 0.6),
+    ("/methodology", "monthly", 0.6),
+    ("/sample-digest", "monthly", 0.5),
+    ("/contact", "yearly", 0.3),
+    ("/privacy", "yearly", 0.2),
+    ("/terms", "yearly", 0.2),
+]
+
+
+def sitemap_xml() -> str:
+    """Generated per-request (not frozen at import) so <loc> always tracks
+    the live PUBLIC_BASE_URL — prod resolves a canonical www/apex host that
+    a module-load-time constant could get stale against."""
+    base = _public_base_url()
+    today = date.today().isoformat()
+    entries = "\n".join(
+        f"  <url><loc>{base}{path}</loc><lastmod>{today}</lastmod>"
+        f"<changefreq>{freq}</changefreq><priority>{priority}</priority></url>"
+        for path, freq, priority in _SITEMAP_PAGES
+    )
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        f"{entries}\n"
+        "</urlset>"
+    )
+
+
+def robots_txt() -> str:
+    """Generated per-request for the same live-base-url reason as sitemap_xml."""
+    base = _public_base_url()
+    allow = "\n".join(f"Allow: {path}" for path, _, _ in _SITEMAP_PAGES)
+    return (
+        "User-agent: *\n"
+        f"{allow}\n"
+        "Disallow: /app\n"
+        "Disallow: /api\n"
+        "Disallow: /webhooks\n"
+        "Disallow: /funnel\n"
+        "Disallow: /stocks/\n"
+        "Disallow: /health\n"
+        f"\nSitemap: {base}/sitemap.xml\n"
+    )
+
+
 _CSS = """
 :root {
   color-scheme: light;
@@ -96,7 +222,11 @@ _CSS = """
   --r-s: 8px; --r-m: 12px; --r-l: 18px;
   --maxw: 1060px;
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
-  --font: "Libre Baskerville", Georgia, "Times New Roman", serif;
+  --font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --sidebar-w: 15rem;            /* 240px, expanded rail */
+  --sidebar-w-collapsed: 4rem;   /* 64px, icon-only rail */
+  --active-sidebar-w: var(--sidebar-w); /* tracks collapse state; see html.sidebar-collapsed below */
+  --topbar-h: 3.25rem;           /* sticky top strip (mobile drawer trigger) */
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
@@ -121,56 +251,8 @@ a:focus-visible, button:focus-visible, summary:focus-visible {
   outline: 2px solid var(--accent-text); outline-offset: 2px; border-radius: 4px;
 }
 .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 1.5rem 5.5rem; }
-/* nav: transparent over the hero, gains surface + hairline once scrolled */
-nav {
-  position: sticky; top: 0; z-index: 10;
-  background: transparent; border-bottom: 1px solid transparent;
-  transition: background 0.3s var(--ease), border-color 0.3s var(--ease);
-}
-nav.scrolled {
-  background: oklch(97.5% 0.01 305 / 0.85); backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border-bottom-color: var(--line);
-}
-.nav-inner {
-  max-width: var(--maxw); margin: 0 auto; padding: 0.8rem 0;
-  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
-}
 .logo { font-size: 1.3rem; font-weight: 800; letter-spacing: -0.03em; color: var(--ink); }
 .logo span { color: var(--accent-text); }
-.nav-links { display: flex; align-items: center; gap: 1.4rem; font-size: 0.92rem; font-weight: 500; }
-.nav-links a { color: var(--ink-3); }
-.nav-links a:hover, .nav-links a.active { color: var(--ink); text-decoration: none; }
-/* the CTA is a .btn inside .nav-links; keep its text white over the accent
-   fill (the .nav-links a rules above out-specify .btn's own color) */
-.nav-links a.btn, .nav-links a.btn:hover { color: #fff; }
-/* phone menu toggle: two bars that rotate into an X; hidden above 660px */
-.nav-toggle { display: none; background: none; border: 0; cursor: pointer;
-  padding: 0.7rem; margin: -0.35rem -0.45rem -0.35rem 0; }
-.nav-toggle span { display: block; width: 20px; height: 2px; border-radius: 2px;
-  background: var(--ink); margin: 5px 0;
-  transition: transform 0.2s var(--ease); }
-nav.menu-open .nav-toggle span:first-child { transform: translateY(3.5px) rotate(45deg); }
-nav.menu-open .nav-toggle span:last-child { transform: translateY(-3.5px) rotate(-45deg); }
-.nav-menu { display: none; }
-@media (max-width: 660px) {
-  .nav-links a:not(.btn):not(.keep) { display: none; }
-  .nav-links a.keep[data-auth=signin] { display: none; } /* lives in the menu */
-  .nav-toggle { display: block; }
-  /* the bar is transparent until scrolled; an open menu needs an opaque
-     backdrop (blur alone can't be relied on) so the hero never bleeds through */
-  nav.menu-open {
-    background: var(--bg); border-bottom-color: var(--line); }
-  nav.menu-open .nav-menu { display: flex; flex-direction: column;
-    position: absolute; top: 100%; left: 0; right: 0;
-    padding: 0.25rem 1.5rem 0.9rem;
-    background: var(--bg); border-bottom: 1px solid var(--line);
-    box-shadow: 0 18px 32px -18px oklch(35% 0.05 300 / 0.25); }
-  .nav-menu a { padding: 0.85rem 0; font-weight: 600; color: var(--ink-2);
-    border-bottom: 1px solid var(--line); }
-  .nav-menu a:last-child { border-bottom: none; }
-  .nav-menu a:hover, .nav-menu a.active { color: var(--ink); text-decoration: none; }
-}
 /* buttons */
 .btn {
   display: inline-block; font-family: var(--font); font-weight: 600; font-size: 0.92rem;
@@ -476,7 +558,6 @@ footer { border-top: 1px solid var(--line); margin-top: 2rem; }
    full-width primary CTA */
 @media (max-width: 640px) {
   .wrap { padding: 0 1.1rem 4rem; }
-  .nav-inner { padding: 0.7rem 0; }
   h1 { font-size: clamp(2.1rem, 9vw, 2.5rem); }
   section { padding-top: clamp(3rem, 12vw, 4.5rem); }
   .cta-row { gap: 0.8rem; }
@@ -502,11 +583,145 @@ _CSS += (
     " no-repeat center / contain; }\n"
 )
 
+# Sidebar shell: a persistent left rail on desktop (collapsible to an
+# icon-only rail) and an off-canvas drawer with a sticky top strip on
+# mobile/tablet. Shared by the marketing site (this file) and the signed-in
+# app shell (app/webapp.py, which imports _CSS and rides along for free) via
+# _sidebar_shell() — each caller supplies its own link list, icons, and
+# footer content; only the drawer/rail mechanics live here, once.
+# Breakpoint: 901px+ is rail mode, <=900px is drawer mode. Media queries
+# can't read custom properties, so 900/901 are hardcoded on every rule below
+# rather than derived from a --sidebar-breakpoint var.
+_SIDEBAR_CSS = """
+.sidebar-topbar {
+  position: sticky; top: 0; z-index: 20;
+  display: flex; align-items: center; gap: 0.9rem;
+  height: var(--topbar-h); padding: 0 1.1rem;
+  background: oklch(97.5% 0.01 305 / 0.9); backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--line);
+}
+.sidebar-topbar .logo { font-size: 1.1rem; }
+.sidebar-topbar .topbar-extra { flex: 1; min-width: 0; }
+@media (min-width: 901px) { .sidebar-topbar { display: none; } }
+
+.sidebar-hamburger { display: inline-flex; background: none; border: 0; cursor: pointer;
+  padding: 0.55rem; margin: -0.55rem 0 -0.55rem -0.4rem; flex: none; }
+.sidebar-hamburger span { display: block; width: 20px; height: 2px; border-radius: 2px;
+  background: var(--ink); margin: 5px 0;
+  transition: transform 0.2s var(--ease), opacity 0.2s var(--ease); }
+body.sidebar-open .sidebar-hamburger span:first-child { transform: translateY(3.5px) rotate(45deg); }
+body.sidebar-open .sidebar-hamburger span:last-child { transform: translateY(-3.5px) rotate(-45deg); }
+@media (min-width: 901px) { .sidebar-hamburger { display: none; } }
+
+.sidebar-backdrop { position: fixed; inset: 0; z-index: 79;
+  background: oklch(35% 0.05 300 / 0.35); opacity: 0; pointer-events: none;
+  transition: opacity 0.2s var(--ease); }
+.sidebar-backdrop.open { opacity: 1; pointer-events: auto; }
+@media (min-width: 901px) { .sidebar-backdrop { display: none; } }
+body.sidebar-open { overflow: hidden; }
+
+.sidebar {
+  position: fixed; top: 0; left: 0; bottom: 0; z-index: 80; overflow: hidden;
+  width: var(--sidebar-w); display: flex; flex-direction: column;
+  background: var(--surface-1); border-right: 1px solid var(--line);
+  transition: width 0.2s var(--ease);
+}
+html.sidebar-collapsed .sidebar { width: var(--sidebar-w-collapsed); }
+html.sidebar-collapsed { --active-sidebar-w: var(--sidebar-w-collapsed); }
+.sidebar-head { display: flex; align-items: center; gap: 0.3rem;
+  padding: 1.1rem 0.85rem 0.75rem 1.1rem; }
+.sidebar-head .sidebar-logo { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; }
+html.sidebar-collapsed .sidebar-logo::before { margin-right: 0; }
+.sidebar-collapse, .sidebar-close { display: inline-flex; align-items: center; justify-content: center;
+  background: none; border: 0; cursor: pointer; color: var(--ink-3); flex: none;
+  width: 28px; height: 28px; border-radius: var(--r-s);
+  transition: background 0.15s var(--ease), color 0.15s var(--ease), transform 0.2s var(--ease); }
+.sidebar-collapse svg, .sidebar-close svg { width: 16px; height: 16px; }
+.sidebar-collapse:hover, .sidebar-close:hover { background: var(--surface-2); color: var(--ink); }
+html.sidebar-collapsed .sidebar-collapse { transform: rotate(180deg); }
+.sidebar-close { display: none; }
+
+.sidebar-nav { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 0.4rem 0.7rem;
+  display: flex; flex-direction: column; gap: 0.1rem; }
+.sidebar-foot { padding: 0.7rem; border-top: 1px solid var(--line);
+  display: flex; flex-direction: column; gap: 0.25rem; }
+
+.side-link { position: relative; display: flex; align-items: center; gap: 0.85rem;
+  padding: 0.62rem 0.75rem; border-radius: var(--r-s); color: var(--ink-3);
+  font-family: var(--font); font-size: 0.92rem; font-weight: 600; white-space: nowrap;
+  overflow: hidden; background: none; border: 0; width: 100%; text-align: left; cursor: pointer; }
+.side-link:hover { background: var(--surface-2); color: var(--ink); text-decoration: none; }
+.side-link.active { background: var(--accent-deep); color: var(--accent-text); }
+.side-link .ico { flex: none; width: 20px; height: 20px; display: grid; place-items: center; }
+.side-link .ico svg { width: 19px; height: 19px; }
+.side-link .lbl { overflow: hidden; text-overflow: ellipsis; opacity: 1;
+  transition: opacity 0.12s linear; }
+.side-link.btn-cta { background: var(--accent); color: #fff; }
+.side-link.btn-cta:hover { background: var(--accent-hover); color: #fff; }
+
+html.sidebar-collapsed .side-link .lbl { opacity: 0; width: 0; }
+html.sidebar-collapsed .side-link { justify-content: center; padding-left: 0; padding-right: 0; gap: 0; }
+html.sidebar-collapsed .sidebar-head .sidebar-logo { display: none; }
+html.sidebar-collapsed .sidebar-head { justify-content: center; padding: 0.9rem 0.4rem 0.75rem; }
+html.sidebar-collapsed .side-link::after {
+  content: attr(data-label); position: absolute; left: calc(100% + 10px); top: 50%;
+  transform: translateY(-50%); background: var(--surface-1);
+  border: 1px solid var(--line-strong); border-radius: var(--r-s);
+  padding: 0.35rem 0.65rem; font-size: 0.82rem; font-weight: 600; color: var(--ink);
+  white-space: nowrap; box-shadow: 0 12px 32px oklch(35% 0.05 300 / 0.16);
+  opacity: 0; pointer-events: none; transition: opacity 0.12s var(--ease) 0.35s; z-index: 90; }
+html.sidebar-collapsed .side-link:hover::after,
+html.sidebar-collapsed .side-link:focus-visible::after { opacity: 1; }
+
+@media (min-width: 901px) {
+  /* footer/.app-foot have no max-width of their own (their .foot-inner /
+     .foot-bottom children center themselves), so they just need to clear
+     the fixed sidebar. .wrap and .app-wrap *do* cap at a max-width, so a
+     plain margin-left here would leave the auto right margin absorbing all
+     the leftover space instead of splitting it — the content would hug the
+     sidebar instead of sitting centered in the remaining viewport. Centering
+     that remaining space requires computing both margins from the sidebar's
+     current width via --active-sidebar-w (kept in sync by the
+     html.sidebar-collapsed override above) and each box's own max-width
+     (--content-w, set per selector below). */
+  footer, .app-foot { margin-left: var(--active-sidebar-w); transition: margin-left 0.2s var(--ease); }
+  .wrap, .app-wrap {
+    margin-left: max(var(--active-sidebar-w),
+      calc((100vw + var(--active-sidebar-w) - var(--content-w)) / 2));
+    margin-right: max(0px, calc((100vw - var(--active-sidebar-w) - var(--content-w)) / 2));
+    transition: margin-left 0.2s var(--ease), margin-right 0.2s var(--ease);
+  }
+  .wrap { --content-w: var(--maxw); }
+  .app-wrap { --content-w: 880px; }
+}
+
+@media (max-width: 900px) {
+  .sidebar-collapse { display: none; }
+  .sidebar-close { display: inline-flex; }
+  .sidebar, html.sidebar-collapsed .sidebar {
+    width: 16.5rem; transform: translateX(-100%);
+    transition: transform 0.2s var(--ease);
+    box-shadow: 0 18px 48px -12px oklch(35% 0.05 300 / 0.35); }
+  .sidebar.open { transform: translateX(0); }
+  html.sidebar-collapsed .side-link .lbl { opacity: 1; width: auto; }
+  html.sidebar-collapsed .side-link { justify-content: flex-start;
+    padding-left: 0.75rem; padding-right: 0.75rem; gap: 0.85rem; }
+  html.sidebar-collapsed .side-link::after { display: none; }
+  html.sidebar-collapsed .sidebar-head .sidebar-logo .word { display: inline; }
+  html.sidebar-collapsed .sidebar-logo::before { margin-right: 0.4em; }
+  html.sidebar-collapsed .sidebar-head { justify-content: flex-start;
+    padding-left: 1.1rem; padding-right: 0.85rem; }
+  html.sidebar-collapsed .sidebar-head .sidebar-logo { display: block; }
+}
+"""
+_CSS += _SIDEBAR_CSS
+
 _FONT_LINKS = (
     '<link rel="preconnect" href="https://fonts.googleapis.com">\n'
     '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>\n'
-    '<link href="https://fonts.googleapis.com/css2?family=Libre+Baskerville:'
-    'ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">\n'
+    '<link href="https://fonts.googleapis.com/css2?family=Inter:'
+    'ital,wght@0,400..800;1,400&display=swap" rel="stylesheet">\n'
 )
 
 MOTION_CDN = "https://cdn.jsdelivr.net/npm/motion@12/dist/motion.js"
@@ -615,32 +830,6 @@ _SCENE_JS = """
 # page, and beforeprint force-reveals everything, so nothing can ship blank.
 _REVEAL_JS = """
 document.addEventListener('DOMContentLoaded', function () {
-  var nav = document.querySelector('nav');
-  function onScroll() { if (nav) nav.classList.toggle('scrolled', window.scrollY > 24); }
-  window.addEventListener('scroll', onScroll, { passive: true });
-  onScroll();
-
-  /* phone menu: dependency-free so it survives a failed Motion CDN load */
-  var tgl = document.querySelector('.nav-toggle');
-  if (tgl && nav) {
-    var setMenu = function (open) {
-      nav.classList.toggle('menu-open', open);
-      tgl.setAttribute('aria-expanded', open ? 'true' : 'false');
-    };
-    tgl.addEventListener('click', function () {
-      setMenu(!nav.classList.contains('menu-open'));
-    });
-    document.getElementById('nav-menu').addEventListener('click', function (e) {
-      if (e.target.closest('a')) setMenu(false);
-    });
-    document.addEventListener('keydown', function (e) {
-      if (e.key === 'Escape') { setMenu(false); tgl.blur(); }
-    });
-    document.addEventListener('click', function (e) {
-      if (!nav.contains(e.target)) setMenu(false);
-    });
-  }
-
   if (!window.Motion || navigator.webdriver
       || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
   var animate = Motion.animate, inView = Motion.inView, stagger = Motion.stagger;
@@ -795,6 +984,95 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 """
 
+# Applies the persisted collapsed-rail state before first paint, inlined in
+# <head> (same placement as _auth_redirect_js) so desktop visitors never see
+# a flash of the wrong sidebar width. Runs on both the marketing site and
+# the app shell regardless of whether Supabase is configured.
+_SIDEBAR_PRECOLLAPSE_JS = """
+(function () {
+  try {
+    if (localStorage.getItem('cirvia:sidebar:collapsed') === '1') {
+      document.documentElement.classList.add('sidebar-collapsed');
+    }
+  } catch (e) { /* storage unavailable; default to expanded */ }
+})();
+"""
+
+# Sidebar drawer (mobile) + collapsible rail (desktop) behavior. Dependency
+# -free so it survives a failed Motion CDN load, same as the phone menu it
+# replaces. Shared by the marketing site and the app shell.
+_SIDEBAR_JS = """
+document.addEventListener('DOMContentLoaded', function () {
+  var html = document.documentElement;
+  var sidebar = document.getElementById('sidebar');
+  var backdrop = document.querySelector('[data-sidebar-backdrop]');
+  var openBtns = document.querySelectorAll('[data-sidebar-open]');
+  var closeBtn = document.querySelector('[data-sidebar-close]');
+  var collapseBtn = document.querySelector('[data-sidebar-collapse]');
+  var opener = null;
+
+  function isDrawerMode() { return matchMedia('(max-width: 900px)').matches; }
+
+  function setOpen(open) {
+    if (!sidebar) return;
+    sidebar.classList.toggle('open', open);
+    if (backdrop) backdrop.classList.toggle('open', open);
+    document.body.classList.toggle('sidebar-open', open);
+    openBtns.forEach(function (b) { b.setAttribute('aria-expanded', open ? 'true' : 'false'); });
+    if (open) {
+      var first = sidebar.querySelector('a, button');
+      if (first) first.focus();
+    } else if (opener) {
+      opener.focus();
+      opener = null;
+    }
+  }
+
+  openBtns.forEach(function (btn) {
+    btn.addEventListener('click', function () { opener = btn; setOpen(true); });
+  });
+  if (closeBtn) closeBtn.addEventListener('click', function () { setOpen(false); });
+  if (backdrop) backdrop.addEventListener('click', function () { setOpen(false); });
+  if (sidebar) {
+    sidebar.addEventListener('click', function (e) {
+      if (isDrawerMode() && e.target.closest('a')) setOpen(false);
+    });
+  }
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && sidebar && sidebar.classList.contains('open')) setOpen(false);
+  });
+  document.addEventListener('click', function (e) {
+    if (!sidebar || !sidebar.classList.contains('open')) return;
+    if (sidebar.contains(e.target)) return;
+    var onOpener = false;
+    openBtns.forEach(function (b) { if (b.contains(e.target)) onOpener = true; });
+    if (!onOpener) setOpen(false);
+  });
+  /* focus trap: Tab/Shift+Tab cycles within the drawer while it's open */
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Tab' || !sidebar || !sidebar.classList.contains('open')) return;
+    var items = sidebar.querySelectorAll('a, button');
+    if (!items.length) return;
+    var first = items[0], last = items[items.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  });
+  /* crossing the breakpoint on resize should never leave the drawer stuck open */
+  window.addEventListener('resize', function () {
+    if (!isDrawerMode()) setOpen(false);
+  });
+
+  if (collapseBtn) {
+    collapseBtn.addEventListener('click', function () {
+      var collapsed = !html.classList.contains('sidebar-collapsed');
+      html.classList.toggle('sidebar-collapsed', collapsed);
+      try { localStorage.setItem('cirvia:sidebar:collapsed', collapsed ? '1' : '0'); }
+      catch (e) { /* storage unavailable */ }
+    });
+  }
+});
+"""
+
 _NAV_LINKS = (
     ("how", "/#how", "How it works"),
     ("screener", "/screener", "Screener"),
@@ -803,29 +1081,111 @@ _NAV_LINKS = (
     ("contact", "/contact", "Contact"),
 )
 
+# Small hand-rolled 20x20 stroke icons, same weight/style as the dahlia
+# wordmark. Structural ones (chevron, close) are used by the sidebar shell
+# itself; the rest label the marketing nav's own links. app/webapp.py keeps
+# its own icon set for the app-shell links (dashboard/picks/risk/etc.).
+_ICONS = {
+    "chevron": (
+        '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"'
+        ' stroke-linecap="round" stroke-linejoin="round"><path d="M12.5 4.5 6 10l6.5 5.5"/></svg>'
+    ),
+    "close": (
+        '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"'
+        ' stroke-linecap="round"><path d="M5 5l10 10M15 5 5 15"/></svg>'
+    ),
+    "how": (
+        '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"'
+        ' stroke-linecap="round" stroke-linejoin="round">'
+        '<path d="M10 2.5a5 5 0 0 0-3 9c.6.5 1 1.2 1 2v.5h4V13.5c0-.8.4-1.5 1-2a5 5 0 0 0-3-9Z"/>'
+        '<path d="M8 17.5h4M8.5 15.5h3"/></svg>'
+    ),
+    "screener": (
+        '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"'
+        ' stroke-linecap="round" stroke-linejoin="round">'
+        '<path d="M3 4h14l-5.5 6.5v5L8.5 17v-6.5L3 4Z"/></svg>'
+    ),
+    "track": (
+        '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"'
+        ' stroke-linecap="round" stroke-linejoin="round">'
+        '<path d="M3 15 8 9l3.5 3L17 5"/><path d="M12.5 5H17v4.5"/></svg>'
+    ),
+    "pricing": (
+        '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"'
+        ' stroke-linecap="round" stroke-linejoin="round">'
+        '<path d="M10.5 3H4v6.5L11 16l6-6-6.5-7Z"/>'
+        '<circle cx="7.2" cy="6.2" r="1" fill="currentColor" stroke="none"/></svg>'
+    ),
+    "contact": (
+        '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"'
+        ' stroke-linecap="round" stroke-linejoin="round">'
+        '<rect x="3" y="5" width="14" height="10" rx="1.5"/>'
+        '<path d="m3.5 5.5 6.5 5.5 6.5-5.5"/></svg>'
+    ),
+    "signin": (
+        '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"'
+        ' stroke-linecap="round" stroke-linejoin="round">'
+        '<path d="M8 3.5H4.5v13H8"/><path d="M12 6.5 16 10l-4 3.5M16 10H8"/></svg>'
+    ),
+    "cta": (
+        '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"'
+        ' stroke-linecap="round" stroke-linejoin="round"><path d="M4 10h11M11 5.5 16 10l-5 4.5"/></svg>'
+    ),
+}
+
+
+def _sidebar_shell(
+    *,
+    nav_links_html: str,
+    foot_html: str = "",
+    topbar_extra: str = "",
+    mobile_bar_class: str = "marketing-bar",
+) -> str:
+    """Backdrop + off-canvas/rail <aside> + sticky top strip.
+
+    Shared by the marketing site and the signed-in app shell (imported into
+    app/webapp.py) — each caller supplies its own link list, icons, and
+    footer content. The drawer/rail mechanics (breakpoint, collapse, focus
+    handling) live once, in _SIDEBAR_CSS/_SIDEBAR_JS."""
+    return (
+        '<div class="sidebar-backdrop" data-sidebar-backdrop></div>'
+        f'<div class="sidebar-topbar {mobile_bar_class}">'
+        '<button class="sidebar-hamburger" type="button" aria-label="Menu"'
+        ' aria-expanded="false" aria-controls="sidebar" data-sidebar-open>'
+        "<span></span><span></span></button>"
+        '<a class="logo" href="/">Cir<span>via</span></a>'
+        + (f'<div class="topbar-extra">{topbar_extra}</div>' if topbar_extra else "")
+        + "</div>"
+        '<aside class="sidebar" id="sidebar">'
+        '<div class="sidebar-head">'
+        '<a class="logo sidebar-logo" href="/"><span class="word">Cir<span>via</span></span></a>'
+        '<button class="sidebar-collapse" type="button" aria-label="Collapse sidebar"'
+        f' data-sidebar-collapse>{_ICONS["chevron"]}</button>'
+        '<button class="sidebar-close" type="button" aria-label="Close menu"'
+        f' data-sidebar-close>{_ICONS["close"]}</button>'
+        "</div>"
+        f'<nav class="sidebar-nav">{nav_links_html}</nav>'
+        f'<div class="sidebar-foot">{foot_html}</div>'
+        "</aside>"
+    )
+
 
 def _nav(active: str) -> str:
     links = ""
     for key, href, label in _NAV_LINKS:
-        cls = ' class="active"' if key == active else ""
-        links += f'<a href="{href}"{cls}>{label}</a>'
-    return (
-        '<nav><div class="nav-inner">'
-        '<a class="logo" href="/">Cir<span>via</span></a>'
-        f'<div class="nav-links">{links}'
-        '<a class="keep" href="/app" data-auth="signin">Sign in</a>'
-        '<a class="btn" href="/app#signup" data-auth="cta">Get started</a>'
-        "</div>"
-        '<button class="nav-toggle" type="button" aria-label="Menu"'
-        ' aria-expanded="false" aria-controls="nav-menu">'
-        "<span></span><span></span></button>"
-        "</div>"
-        # Phone dropdown: same marketing links again, plus Sign in (the inline
-        # one hides <=660px). _auth_nav_js removes every [data-auth=signin].
-        f'<div class="nav-menu" id="nav-menu">{links}'
-        '<a href="/app" data-auth="signin">Sign in</a></div>'
-        "</nav>"
+        cls = " active" if key == active else ""
+        icon = _ICONS.get(key, "")
+        links += (
+            f'<a class="side-link{cls}" href="{href}" data-label="{label}">'
+            f'<span class="ico">{icon}</span><span class="lbl">{label}</span></a>'
+        )
+    foot = (
+        '<a class="side-link" href="/app" data-auth="signin" data-label="Sign in">'
+        f'<span class="ico">{_ICONS["signin"]}</span><span class="lbl">Sign in</span></a>'
+        '<a class="side-link btn-cta" href="/app#signup" data-auth="cta" data-label="Get started">'
+        f'<span class="ico">{_ICONS["cta"]}</span><span class="lbl">Get started</span></a>'
     )
+    return _sidebar_shell(nav_links_html=links, foot_html=foot)
 
 
 def _auth_nav_js() -> str:
@@ -912,25 +1272,39 @@ _FOOTER = (
 )
 
 
-def _layout(title: str, description: str, body: str, active: str = "", path: str = "/") -> str:
+def _layout(
+    title: str,
+    description: str,
+    body: str,
+    active: str = "",
+    path: str = "/",
+    extra_jsonld: str = "",
+) -> str:
     base = _public_base_url()
     og_image = f"{base}/static/og.png"
     redirect_js = _auth_redirect_js() if path == "/" else ""
     return (
         '<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n'
         '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+        + f"<script>{_SIDEBAR_PRECOLLAPSE_JS}</script>\n"
         + (f"<script>{redirect_js}</script>\n" if redirect_js else "")
         + f"<title>{title}</title>\n"
         f'<meta name="description" content="{description}">\n'
         + ICON_LINKS
+        + f'<link rel="canonical" href="{base}{path}">\n'
         + f'<meta property="og:title" content="{title}">\n'
         + f'<meta property="og:description" content="{description}">\n'
         + '<meta property="og:type" content="website">\n'
         + '<meta property="og:site_name" content="Cirvia">\n'
         + f'<meta property="og:url" content="{base}{path}">\n'
         + f'<meta property="og:image" content="{og_image}">\n'
+        + '<meta property="og:image:width" content="1200">\n'
+        + '<meta property="og:image:height" content="630">\n'
+        + '<meta property="og:image:type" content="image/png">\n'
         + '<meta name="twitter:card" content="summary_large_image">\n'
         + f'<meta name="twitter:image" content="{og_image}">\n'
+        + _site_jsonld(base)
+        + extra_jsonld
         + _FONT_LINKS
         + "<style>"
         + _CSS
@@ -941,6 +1315,9 @@ def _layout(title: str, description: str, body: str, active: str = "", path: str
         + "\n</main>\n"
         + _FOOTER
         + f'\n<script defer src="{MOTION_CDN}"></script>\n'
+        + "<script>"
+        + _SIDEBAR_JS
+        + "</script>\n"
         + "<script>"
         + _REVEAL_JS
         + "</script>\n"
@@ -955,6 +1332,47 @@ def _layout(title: str, description: str, body: str, active: str = "", path: str
 # --------------------------------------------------------------------------
 # Home
 # --------------------------------------------------------------------------
+
+# Verbatim source for both the visible #faq <details> markup and the
+# FAQPage JSON-LD emitted on LANDING_HTML — one list, so they can't drift.
+_HOME_FAQ: list[tuple[str, str]] = [
+    (
+        "Can Cirvia trade for me?",
+        "No. Access is strictly read-only. Cirvia cannot place orders or move funds "
+        "under any circumstances.",
+    ),
+    (
+        "Is this financial advice?",
+        "No. Cirvia is informational only. It explains and contextualizes; it does not "
+        "tell you to buy or sell.",
+    ),
+    (
+        "Do the picks actually work?",
+        "Judge for yourself. Every daily pick&rsquo;s entry price is frozen at "
+        "publication and scored against the S&amp;P 500 on a "
+        '<a href="/track-record">public track record</a>, misses stay on the '
+        "board. Picks are research with receipts, not recommendations.",
+    ),
+    (
+        "How do I know the AI isn&rsquo;t making things up?",
+        "Every number is computed from market data in code: the AI is never "
+        "allowed to assert one. Written claims are re-checked by an adversarial "
+        "verifier with its own live tools, and anything challenged is demoted or "
+        "flagged before you see it.",
+    ),
+    (
+        "Which brokerages work?",
+        "Wealthsimple, Questrade, and most major North American brokerages. Connections "
+        "are handled by SnapTrade, a trusted service that links millions of brokerage "
+        "accounts.",
+    ),
+    (
+        "How is my data protected?",
+        "Your password stays with your brokerage, your data is encrypted, and your "
+        "information is completely separate from every other user&rsquo;s. See our "
+        '<a href="/privacy">Privacy Policy</a>.',
+    ),
+]
 
 _HOME_BODY = """
 <section class="hero">
@@ -1147,33 +1565,45 @@ _HOME_BODY = """
   </div>
 </section>
 
+<section id="pricing-teaser">
+  <h2 data-reveal>Start with a week of Pro, free.</h2>
+  <p class="sect-lead" data-reveal>Every new account gets the full Pro experience for
+  7 days, no card required. Read-only on every plan; your brokerage
+  password never leaves your bank.</p>
+  <div class="plans" style="margin-left:auto;margin-right:auto;" data-reveal-group>
+    <div class="plan" data-reveal-item>
+      <div class="plan-tag">Free</div>
+      <div class="price">$0<span class="per"> /mo</span></div>
+      <ul>
+        <li>1 connected account</li>
+        <li>Weekly digest on up to 3 holdings</li>
+        <li>3 chat questions per week</li>
+      </ul>
+      <a class="btn ghost" href="/app#signup">Start free</a>
+    </div>
+    <div class="plan featured" data-reveal-item>
+      <div class="plan-tag">Pro</div>
+      <div class="price">$20<span class="per"> /mo CAD</span></div>
+      <p class="price-note">or $160/yr CAD, 4 months free.</p>
+      <ul>
+        <li>Daily weekday digest across all holdings</li>
+        <li>Top Picks: the daily verified board, with its
+        <a href="/track-record">public track record</a></li>
+        <li>Risk Lab: Monte Carlo, risk contribution, correlation</li>
+        <li>Macro alerts when the world moves</li>
+      </ul>
+      <a class="btn ghost" href="/app#signup" data-auth="cta">Get started free</a>
+      <p class="price-note" style="margin-top:0.75rem;">New here? Signing up
+      starts a 7-day Pro trial, no card required.</p>
+    </div>
+  </div>
+  <p data-reveal style="margin-top:1.4rem;"><a class="quiet" href="/pricing">Pricing</a></p>
+</section>
+
 <section id="faq">
   <h2 data-reveal>Questions</h2>
   <div class="faq" data-reveal-group>
-    <details data-reveal-item><summary>Can Cirvia trade for me?</summary>
-    <p>No. Access is strictly read-only. Cirvia cannot place orders or move funds
-    under any circumstances.</p></details>
-    <details data-reveal-item><summary>Is this financial advice?</summary>
-    <p>No. Cirvia is informational only. It explains and contextualizes; it does not
-    tell you to buy or sell.</p></details>
-    <details data-reveal-item><summary>Do the picks actually work?</summary>
-    <p>Judge for yourself. Every daily pick&rsquo;s entry price is frozen at
-    publication and scored against the S&amp;P 500 on a
-    <a href="/track-record">public track record</a>, misses stay on the
-    board. Picks are research with receipts, not recommendations.</p></details>
-    <details data-reveal-item><summary>How do I know the AI isn&rsquo;t making things up?</summary>
-    <p>Every number is computed from market data in code: the AI is never
-    allowed to assert one. Written claims are re-checked by an adversarial
-    verifier with its own live tools, and anything challenged is demoted or
-    flagged before you see it.</p></details>
-    <details data-reveal-item><summary>Which brokerages work?</summary>
-    <p>Wealthsimple, Questrade, and most major North American brokerages. Connections
-    are handled by SnapTrade, a trusted service that links millions of brokerage
-    accounts.</p></details>
-    <details data-reveal-item><summary>How is my data protected?</summary>
-    <p>Your password stays with your brokerage, your data is encrypted, and your
-    information is completely separate from every other user&rsquo;s. See our
-    <a href="/privacy">Privacy Policy</a>.</p></details>
+%%HOME_FAQ%%
   </div>
 </section>
 
@@ -1184,6 +1614,10 @@ _HOME_BODY = """
   <a class="btn lg" href="/app#signup" data-auth="cta">Get started free</a>
 </div>
 """
+# _HOME_BODY is a plain (non-f) string because #proof embeds a <script> full
+# of JS braces that an f-string would need double-escaped; a placeholder +
+# .replace() sidesteps that entirely for the one spot that needs interpolation.
+_HOME_BODY = _HOME_BODY.replace("%%HOME_FAQ%%", _faq_html(_HOME_FAQ))
 
 # --------------------------------------------------------------------------
 # Contact
@@ -1255,9 +1689,11 @@ _METHODOLOGY_BODY = """
   <p><strong>2. Quantitative screen.</strong> A pure-math factor screen ranks the
   universe before any AI is involved: value, quality, growth, momentum (12-months
   skipping the last month), analyst upside (shrunk toward zero when coverage is
-  thin), and low risk. Metrics are scored relative to each stock's sector using
-  robust statistics (median and MAD, not mean and standard deviation, because
-  financial ratios have fat tails). Names with stale prices or missing data are
+  thin), and low risk. Metrics are scored relative to each stock's industry
+  peers — falling back to its sector, then the full tracked universe, when
+  there aren't enough industry peers — using robust statistics (median and
+  MAD, not mean and standard deviation, because financial ratios have fat
+  tails). Names with stale prices or missing data are
   excluded with a recorded reason; nothing is imputed.</p>
   <p><strong>3. AI analysts, on a leash.</strong> Each top candidate gets an AI
   analyst that may only cite numbers from a fact sheet computed in step 2. Its
@@ -1312,26 +1748,28 @@ _METHODOLOGY_BODY = """
   <p>Every stock Cirvia tracks gets a plain verdict: <strong>Undervalued</strong>,
   <strong>Fairly Valued</strong>, or <strong>Expensive</strong>. Here is exactly what
   that measures, and what it deliberately doesn't claim yet.</p>
-  <p><strong>It compares a stock to its sector peers, today.</strong> Each verdict is
+  <p><strong>It compares a stock to its closest peers, today.</strong> Each verdict is
   built from the same value factor the daily screen uses above: trailing/forward P/E,
   PEG, price/sales, price/book, EV/EBITDA, and price/FCF, each normalized against the
-  stock's GICS sector using the same robust (median/MAD) statistics, then averaged into
+  stock's industry peers — a narrower, more like-for-like group than its broad GICS
+  sector — using the same robust (median/MAD) statistics, then averaged into
   one score. A stock needs at least two of those seven metrics to be scored at all;
   fewer than that, and the verdict reads &ldquo;Not enough data&rdquo; rather than
-  guessing. When a sector has too few scored peers to compare against reliably, the
-  comparison quietly widens to the whole tracked universe instead, and the
-  evidence table says so.</p>
+  guessing. When a stock's industry doesn't have enough scored peers to compare
+  against reliably, the comparison widens to its sector, and if even that's too
+  thin, to the whole tracked universe; the evidence table always says which lens
+  was used.</p>
   <p><strong>It does not yet compare a stock to its own history.</strong> A "is this
   cheap for <em>this stock</em>, historically" verdict needs years of point-in-time
   valuation snapshots. Cirvia only started archiving those nightly snapshots recently,
   so there isn't yet a decade (or even a full year) of a stock's own
   history to compare against. Rather than fabricate that comparison, today's verdict
-  only measures the sector-relative lens. Once enough snapshot history accrues, a
+  only measures the peer-relative lens. Once enough snapshot history accrues, a
   second "vs. its own history" lens will be added and disclosed with the exact window
   it's built from, not a fixed claim we can't back up.</p>
   <p><strong>The verdict is free; the numbers behind it are Pro.</strong> Anyone can
   browse the <a href="/screener">full grid</a> with no account. On a stock's own page,
-  the per-metric evidence (this stock's ratio vs. its sector median) is part of
+  the per-metric evidence (this stock's ratio vs. its peer median) is part of
   Cirvia&nbsp;Pro, the same as the rest of the fact sheet it's built from.</p>
 
   <h2>Limitations, honestly</h2>
@@ -1637,6 +2075,73 @@ _TERMS_BODY = f"""
 # Pricing
 # --------------------------------------------------------------------------
 
+# Verbatim source for both the visible #pricing-faq <details> markup and the
+# FAQPage JSON-LD emitted on PRICING_HTML — one list, so they can't drift.
+_PRICING_FAQ: list[tuple[str, str]] = [
+    (
+        "Can I cancel anytime?",
+        "Yes. Cancel whenever you like from Settings &rarr; Manage billing; your Pro "
+        "features stay active until the end of the current billing period.",
+    ),
+    (
+        "Is there a yearly option?",
+        "Yes. Pro is $20/mo CAD or $160/yr CAD, which works out to four months free "
+        "versus paying monthly.",
+    ),
+    (
+        "How does the free trial work?",
+        "Every new account gets 7 days of full Pro (daily digests, macro "
+        "alerts, and Pro chat limits) with no card on file. When it ends, your "
+        "digests pause until you choose: upgrade to Pro, or continue on Free. Nothing "
+        "is ever charged automatically.",
+    ),
+    (
+        "What happens on the Free plan?",
+        "You keep one connected account, a weekly digest on up to three holdings, and "
+        "three chat questions a week. Free, indefinitely.",
+    ),
+    (
+        "Do you offer refunds?",
+        "Reach out and we'll make it right. Email us at "
+        f'<a href="mailto:{CONTACT_EMAIL}">{CONTACT_EMAIL}</a>.',
+    ),
+]
+
+
+def _pricing_product_jsonld(base: str) -> dict:
+    """Product/Offer schema for the Pro plan. Deliberately no aggregateRating
+    or review: there are no testimonials on this site to source one from, and
+    fabricating one would break the same honesty posture the product sells."""
+    return {
+        "@context": "https://schema.org",
+        "@type": "Product",
+        "name": "Cirvia Pro",
+        "description": (
+            "Daily verified portfolio digest, Top Picks with a public track "
+            "record, Deep Dive research, Risk Lab, and macro alerts."
+        ),
+        "brand": {"@type": "Brand", "name": "Cirvia"},
+        "offers": [
+            {
+                "@type": "Offer",
+                "name": "Cirvia Pro Monthly",
+                "price": "20.00",
+                "priceCurrency": "CAD",
+                "url": f"{base}/pricing",
+                "availability": "https://schema.org/InStock",
+            },
+            {
+                "@type": "Offer",
+                "name": "Cirvia Pro Annual",
+                "price": "160.00",
+                "priceCurrency": "CAD",
+                "url": f"{base}/pricing",
+                "availability": "https://schema.org/InStock",
+            },
+        ],
+    }
+
+
 _PRICING_BODY = f"""
 <section class="hero" style="padding-bottom:0;">
   <div class="hero-copy">
@@ -1688,23 +2193,7 @@ _PRICING_BODY = f"""
 <section id="pricing-faq">
   <h2 data-reveal>Questions about plans</h2>
   <div class="faq" data-reveal-group>
-    <details data-reveal-item><summary>Can I cancel anytime?</summary>
-    <p>Yes. Cancel whenever you like from Settings &rarr; Manage billing; your Pro
-    features stay active until the end of the current billing period.</p></details>
-    <details data-reveal-item><summary>Is there a yearly option?</summary>
-    <p>Yes. Pro is $20/mo CAD or $160/yr CAD, which works out to four months free
-    versus paying monthly.</p></details>
-    <details data-reveal-item><summary>How does the free trial work?</summary>
-    <p>Every new account gets 7 days of full Pro (daily digests, macro
-    alerts, and Pro chat limits) with no card on file. When it ends, your
-    digests pause until you choose: upgrade to Pro, or continue on Free. Nothing
-    is ever charged automatically.</p></details>
-    <details data-reveal-item><summary>What happens on the Free plan?</summary>
-    <p>You keep one connected account, a weekly digest on up to three holdings, and
-    three chat questions a week. Free, indefinitely.</p></details>
-    <details data-reveal-item><summary>Do you offer refunds?</summary>
-    <p>Reach out and we'll make it right. Email us at
-    <a href="mailto:{CONTACT_EMAIL}">{CONTACT_EMAIL}</a>.</p></details>
+{_faq_html(_PRICING_FAQ)}
   </div>
 </section>
 
@@ -1878,8 +2367,9 @@ def track_record_html(payload: dict) -> str:
 # no-signup browse hook. Server-rendered from the same JSON
 # /stocks/valuations returns; sort/search run client-side over the ~560
 # already-rendered rows, no second request. See app/quant/valuation.py for
-# what "verdict" actually measures (sector-relative only, deliberately not
-# claiming a 10-year history Cirvia doesn't have yet).
+# what "verdict" actually measures (industry-relative, falling back to
+# sector then the whole universe — deliberately not claiming a 10-year
+# history Cirvia doesn't have yet).
 # --------------------------------------------------------------------------
 
 _SCREENER_INTRO = """
@@ -1887,8 +2377,9 @@ _SCREENER_INTRO = """
   <div class="hero-copy" style="max-width:52rem;">
     <h1 data-hero>Is this stock cheap or expensive?</h1>
     <p class="lead" data-hero>A verdict for every stock Cirvia tracks, computed against
-    its sector peers today, not a vague label. Every verdict comes with the
-    numbers behind it: <a href="/methodology">see the methodology</a>, sector-relative
+    its closest industry peers today (falling back to sector, then the market, when
+    there aren't enough industry peers), not a vague label. Every verdict comes with
+    the numbers behind it: <a href="/methodology">see the methodology</a>,
     limitations included.</p>
   </div>
 </section>
@@ -1898,12 +2389,16 @@ _SCREENER_METHOD = """
 <section id="screener-method" style="padding-top:0.5rem;">
   <div class="callout" data-reveal>
   <strong>What this measures today:</strong> each verdict compares a stock's valuation
-  multiples (P/E, P/S, P/B, EV/EBITDA, price/FCF, PEG) to its GICS sector peers, using a
-  robust (outlier-resistant) statistical comparison, not a raw average. It does
-  <strong>not</strong> yet compare a stock to its own history: that needs years of daily
-  snapshots Cirvia only started collecting recently, and a verdict here will say so
-  honestly rather than fake a decade it doesn't have. <a href="/methodology">Full
-  methodology</a>.
+  multiples (P/E, P/S, P/B, EV/EBITDA, price/FCF, PEG) to its industry peers (falling
+  back to sector, then the whole tracked universe, when there aren't enough
+  industry-level peers), using a robust (outlier-resistant) statistical comparison, not
+  a raw average. The Sector column below is general company info, not the peer group
+  used — verdicts are computed against each stock's narrower industry, so two stocks in
+  the same broad sector can get different verdicts; see a stock's own page for the exact
+  peer group. It does <strong>not</strong> yet compare a stock to its own history: that
+  needs years of daily snapshots Cirvia only started collecting recently, and a verdict
+  here will say so honestly rather than fake a decade it doesn't have.
+  <a href="/methodology">Full methodology</a>.
   </div>
 </section>
 """
@@ -2002,7 +2497,7 @@ def screener_html(payload: dict) -> str:
 """ + _SCREENER_METHOD
         return _layout(
             "Stock valuation screener | Cirvia",
-            "Is this stock cheap or expensive? A sector-relative verdict, with the "
+            "Is this stock cheap or expensive? A peer-relative verdict, with the "
             "numbers behind it, for every stock Cirvia tracks.",
             body,
             active="screener",
@@ -2056,7 +2551,7 @@ def screener_html(payload: dict) -> str:
 <script>{_SCREENER_JS}</script>"""
     return _layout(
         "Stock valuation screener | Cirvia",
-        "Is this stock cheap or expensive? A sector-relative verdict, with the "
+        "Is this stock cheap or expensive? A peer-relative verdict, with the "
         "numbers behind it, for every stock Cirvia tracks.",
         body,
         active="screener",
@@ -2162,6 +2657,7 @@ LANDING_HTML = _layout(
     _HOME_BODY,
     active="home",
     path="/",
+    extra_jsonld=_jsonld_script(_faq_jsonld(_HOME_FAQ)),
 )
 
 PRICING_HTML = _layout(
@@ -2172,6 +2668,10 @@ PRICING_HTML = _layout(
     _PRICING_BODY,
     active="pricing",
     path="/pricing",
+    extra_jsonld=(
+        _jsonld_script(_faq_jsonld(_PRICING_FAQ))
+        + _jsonld_script(_pricing_product_jsonld(_public_base_url()))
+    ),
 )
 
 CONTACT_HTML = _layout(

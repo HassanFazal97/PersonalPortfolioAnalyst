@@ -27,7 +27,7 @@ def client(monkeypatch):
 @pytest.mark.parametrize(
     "path",
     ["/app", "/app/onboarding", "/app/dashboard", "/app/risk",
-     "/app/settings", "/app/settings/delivery", "/app/reset"],
+     "/app/settings", "/app/reset"],
 )
 def test_app_pages_render_without_token(client, path):
     resp = client.get(path)
@@ -108,6 +108,15 @@ def test_settings_has_account_sections(client):
     assert 'id="delete-confirm"' in resp.text
 
 
+def test_settings_has_sidebar_rail(client):
+    resp = client.get("/app/settings")
+    assert resp.status_code == 200
+    for section in ("account", "brokerage", "delivery", "profile", "plan", "danger"):
+        assert f'data-section="{section}"' in resp.text
+    assert 'class="settings-rail"' in resp.text
+    assert 'role="tablist"' in resp.text
+
+
 def test_dashboard_nav_links_to_settings(client):
     resp = client.get("/app/dashboard")
     assert 'href="/app/settings"' in resp.text
@@ -133,7 +142,7 @@ def test_reset_page_has_password_form(client):
 def test_dashboard_has_delivery_setup_banner(client):
     resp = client.get("/app/dashboard")
     assert 'id="delivery-banner"' in resp.text
-    assert 'href="/app/settings/delivery"' in resp.text
+    assert 'href="/app/settings#section-delivery"' in resp.text
     assert 'id="delivery-banner-dismiss"' in resp.text
     # Hidden until /me/notifications says no working channel exists.
     assert 'id="delivery-banner" style="display:none;"' in resp.text
@@ -142,20 +151,23 @@ def test_dashboard_has_delivery_setup_banner(client):
     assert 'id="schedule-editor"' not in resp.text
 
 
-def test_delivery_settings_page_has_picker_and_schedule(client):
-    resp = client.get("/app/settings/delivery")
+def test_settings_delivery_page_redirects_to_settings_section(client):
+    resp = client.get("/app/settings/delivery", follow_redirects=False)
+    assert resp.status_code == 307
+    assert resp.headers["location"] == "/app/settings#section-delivery"
+    # Query string (e.g. the Discord OAuth callback's ?discord=...) survives.
+    resp = client.get("/app/settings/delivery?discord=cancelled", follow_redirects=False)
+    assert resp.headers["location"] == "/app/settings?discord=cancelled#section-delivery"
+
+
+def test_settings_has_delivery_picker_and_schedule_inline(client):
+    # Delivery is now a section of /app/settings itself, not a separate page.
+    resp = client.get("/app/settings")
     assert resp.status_code == 200
     assert 'id="delivery-summary"' in resp.text
     assert 'id="channel-options"' in resp.text
     assert 'id="schedule-editor"' in resp.text
     assert 'id="dash-send-time"' in resp.text
-    assert 'href="/app/settings"' in resp.text
-
-
-def test_settings_links_to_delivery_page(client):
-    resp = client.get("/app/settings")
-    assert 'href="/app/settings/delivery"' in resp.text
-    assert 'id="delivery-overview"' in resp.text
 
 
 def test_dashboard_has_connection_banner(client):
@@ -175,7 +187,7 @@ def test_app_pages_noindex(client):
 @pytest.mark.parametrize(
     "path",
     ["/app", "/app/onboarding", "/app/dashboard", "/app/risk",
-     "/app/settings", "/app/settings/delivery", "/app/reset"],
+     "/app/settings", "/app/reset"],
 )
 def test_app_pages_503_when_supabase_not_configured(monkeypatch, path):
     monkeypatch.setenv("API_TOKEN", "test-token")

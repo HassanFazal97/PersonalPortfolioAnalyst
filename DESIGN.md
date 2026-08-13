@@ -54,9 +54,10 @@ mark, and selected states. Never decoration, never gradients, never text fills.
 
 ## Typography
 
-**One family: Schibsted Grotesk** (Google Fonts, 400–900 + italics). A
-newspaper-lineage grotesque; fits the "morning brief" brand without the
-saturated defaults (Inter / Space Grotesk / etc.). Weight contrast carries
+**One family: Inter** (Google Fonts variable font, weights 400–800 +
+italics). A neutral, highly legible humanist sans with proper tabular/
+lining figures, chosen after Libre Baskerville's old-style serif numerals
+proved a poor fit for data-dense tables. Weight contrast carries
 hierarchy. Numbers in data displays use `font-variant-numeric: tabular-nums`.
 
 - Marketing scale (fluid): h1 `clamp(2.5rem, 6vw, 4.4rem)` w800 ls-0.035em;

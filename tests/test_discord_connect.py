@@ -55,7 +55,7 @@ def test_state_roundtrip():
     state = discord_connect.sign_state(_SECRET, _OWNER, return_to="settings")
     assert discord_connect.verify_state(_SECRET, state) == (
         _OWNER,
-        "/app/settings/delivery",
+        "/app/settings",
     )
 
 
@@ -195,7 +195,7 @@ def test_connect_url_mints_signed_state(monkeypatch):
     assert query["client_id"] == ["client-123"]
     assert query["redirect_uri"] == ["https://app.test" + CALLBACK]
     parsed = discord_connect.verify_state(_SECRET, query["state"][0])
-    assert parsed == (_OWNER, "/app/settings/delivery")
+    assert parsed == (_OWNER, "/app/settings")
 
 
 def test_notifications_payload_advertises_discord_oauth(monkeypatch):
@@ -241,7 +241,7 @@ def test_callback_stores_verified_preferred_channel(monkeypatch):
         CALLBACK, params={"code": "abc", "state": state}, follow_redirects=False
     )
     assert resp.status_code == 303
-    assert resp.headers["location"] == "/app/settings/delivery?discord=connected"
+    assert resp.headers["location"] == "/app/settings?discord=connected"
     assert calls[0]["code"] == "abc"
     assert calls[0]["redirect_uri"] == "https://app.test" + CALLBACK
     row = repo._notification_channels[(_OWNER, "discord")]
@@ -270,7 +270,7 @@ def test_callback_invalid_state_redirects_error(monkeypatch):
         CALLBACK, params={"code": "abc", "state": "forged"}, follow_redirects=False
     )
     assert resp.status_code == 303
-    assert resp.headers["location"] == "/app/settings/delivery?discord=error"
+    assert resp.headers["location"] == "/app/settings?discord=error"
     assert (_OWNER, "discord") not in repo._notification_channels
 
 
@@ -284,7 +284,7 @@ def test_callback_user_cancelled(monkeypatch):
         params={"error": "access_denied", "state": state},
         follow_redirects=False,
     )
-    assert resp.headers["location"] == "/app/settings/delivery?discord=cancelled"
+    assert resp.headers["location"] == "/app/settings?discord=cancelled"
     assert (_OWNER, "discord") not in repo._notification_channels
 
 
@@ -297,5 +297,5 @@ def test_callback_exchange_failure_redirects_error(monkeypatch):
     resp = client.get(
         CALLBACK, params={"code": "abc", "state": state}, follow_redirects=False
     )
-    assert resp.headers["location"] == "/app/settings/delivery?discord=error"
+    assert resp.headers["location"] == "/app/settings?discord=error"
     assert (_OWNER, "discord") not in repo._notification_channels

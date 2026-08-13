@@ -33,7 +33,7 @@ STATE_TTL_SECONDS = 600
 # name the UI passes to connect-url. An allowlist — never a raw URL — so a
 # forged state can't turn the callback into an open redirect.
 RETURN_PATHS: dict[str, str] = {
-    "settings": "/app/settings/delivery",
+    "settings": "/app/settings",
     "onboarding": "/app/onboarding",
 }
 

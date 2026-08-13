@@ -1,10 +1,13 @@
 """Per-ticker "cheap or expensive" verdict. Pure functions, no I/O.
 
 Built on top of ``screener.score_universe()``'s ``value_evidence`` — the
-sector-relative robust z of a ticker's valuation multiples (trailing/forward
-P/E, PEG, P/S, P/B, EV/EBITDA, P/FCF) against its GICS-sector peers. This is
-a *sector-relative* verdict only: "cheap vs. its sector today," not "cheap
-vs. its own 10-year history." ``fundamentals_snapshots`` (migration 026,
+peer-relative robust z of a ticker's valuation multiples (trailing/forward
+P/E, PEG, P/S, P/B, EV/EBITDA, P/FCF) against its closest peer group: its
+industry when there are enough scored industry peers, falling back to its
+(coarser) sector, then to the whole tracked universe, when there aren't
+(see ``screener.MIN_INDUSTRY_SIZE``/``MIN_SECTOR_SIZE``). This is a
+*peer-relative* verdict only: "cheap vs. peers today," not "cheap vs. its
+own 10-year history." ``fundamentals_snapshots`` (migration 026,
 2026-07-30) hasn't accumulated the years of point-in-time history a real
 own-ticker time-series percentile would need, so this module doesn't fake
 one — see ``own_history_percentile`` below, which is unused by
@@ -49,7 +52,7 @@ SECTOR_WEIGHT = 0.6
 
 
 def verdict_from_z(z: float | None) -> str:
-    """Classify a sector-relative value z-score into a verdict label.
+    """Classify a peer-relative value z-score into a verdict label.
 
     ``z is None`` (no scored value factor) is always "Not enough data" --
     never fabricate a mid-pack verdict for a ticker with too few metrics.
@@ -114,7 +117,8 @@ def compute_valuations(
 
     ``screen`` is a ``score_universe()`` result over the same universe
     ``fundamentals``/``last_price`` were built from. ``fundamentals`` and
-    ``last_price`` supply display fields (name/sector/market cap/price) even
+    ``last_price`` supply display fields (name/sector/industry/market cap/
+    price) even
     for tickers ``screen`` couldn't score at all (e.g. "no fundamentals",
     "not an equity") -- mirroring valucurve's "Not scored" cards, which
     still show the ticker and price.
@@ -139,6 +143,7 @@ def compute_valuations(
             "ticker": ticker,
             "name": profile.get("name"),
             "sector": profile.get("sector"),
+            "industry": profile.get("industry"),
             "market_cap": profile.get("market_cap"),
             "last_price": last_price.get(ticker),
         }
@@ -160,15 +165,17 @@ def compute_valuations(
             )
             continue
         z = ve["value_z"]
+        industry = ve.get("industry") or base["industry"]
         out.append(
             {
                 **base,
                 "sector": ve["sector"] or base["sector"],
+                "industry": industry,
                 "verdict": verdict_from_z(z),
                 "sector_z": z,
                 "metrics_used": ve["metrics_used"],
                 "sector_comparison": ve["sector_comparison"],
-                "evidence": {"metrics": ve["metrics"]},
+                "evidence": {"metrics": ve["metrics"], "industry": industry},
                 "not_scored_reason": None,
             }
         )

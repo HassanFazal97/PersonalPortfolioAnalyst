@@ -174,7 +174,7 @@ def test_thin_sector_disclosed_as_universe_comparison():
     closes["BANK"] = _closes(seed=70.0)
     screen = screener.score_universe(funds, closes, as_of=AS_OF)
     rows = {r["ticker"]: r for r in valuation.compute_valuations(screen, funds, _last_price(closes))}
-    assert rows["BANK"]["sector_comparison"] == "universe (sector too small)"
+    assert rows["BANK"]["sector_comparison"] == "universe (too small)"
     tech_row = next(r for t, r in rows.items() if r["sector"] == "Technology")
     assert tech_row["sector_comparison"] == "sector"
 

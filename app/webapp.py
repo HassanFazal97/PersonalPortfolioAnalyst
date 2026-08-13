@@ -10,7 +10,17 @@ from __future__ import annotations
 
 import json
 
-from app.landing import _CSS, _FONT_LINKS, CONTACT_EMAIL, ICON_LINKS, MOTION_CDN
+from app.landing import (
+    _CSS,
+    _FONT_LINKS,
+    _ICONS,
+    _SIDEBAR_JS,
+    _SIDEBAR_PRECOLLAPSE_JS,
+    _sidebar_shell,
+    CONTACT_EMAIL,
+    ICON_LINKS,
+    MOTION_CDN,
+)
 
 _APP_CSS = """
 /* app footer: hairline, quiet, single row (wraps on narrow screens) */
@@ -21,11 +31,6 @@ _APP_CSS = """
 .app-foot a { color: var(--ink-3); text-decoration: none; }
 .app-foot a:hover { color: var(--ink); }
 /* app register: fixed rem type scale, quieter headings, denser rhythm */
-/* app nav is always opaque (the marketing nav is transparent until scroll) */
-nav {
-  background: oklch(97.5% 0.01 305 / 0.88); backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px); border-bottom: 1px solid var(--line);
-}
 .app-wrap { max-width: 880px; margin: 0 auto; padding: 2.25rem 1.5rem 4rem; }
 .app-wrap h1 { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.015em;
   line-height: 1.25; max-width: none; margin: 0; }
@@ -544,16 +549,41 @@ tr:last-child td { border-bottom: none; }
   transform: translate(-50%, -50%); }
 .range-ends { display: flex; justify-content: space-between; color: var(--ink-3);
   font-size: 0.78rem; font-variant-numeric: tabular-nums; }
-/* settings: single quiet column of cards */
-.settings-wrap { max-width: 640px; }
-.settings-wrap .dash-card { margin-top: 1rem; }
+/* settings: sidebar rail + section panels (adapted from the onboarding
+   rail's grid/collapse — no numbered-circle/done-state, sections aren't
+   sequential steps) */
+.settings-wrap { max-width: 900px; }
+.settings-layout { display: grid; grid-template-columns: 220px 1fr; gap: 2.5rem;
+  align-items: start; margin-top: 1.75rem; }
+.settings-rail { display: flex; flex-direction: column; gap: 0.15rem; }
+.settings-rail-item { display: block; width: 100%; text-align: left;
+  background: none; border: 1px solid transparent; border-radius: var(--r-m);
+  padding: 0.65rem 0.9rem; font-family: var(--font); font-size: 0.93rem;
+  font-weight: 600; color: var(--ink-3); cursor: pointer;
+  transition: background 0.15s var(--ease), color 0.15s var(--ease); }
+.settings-rail-item:hover { color: var(--ink); background: var(--surface-2); }
+.settings-rail-item[aria-selected="true"] { color: var(--ink);
+  background: var(--surface-1); border-color: var(--line); }
+.settings-panels { min-width: 0; }
+.settings-panel { display: none; flex-direction: column; gap: 1rem; }
+.settings-panel.active { display: flex; }
+.settings-panel .dash-card { margin-top: 0; }
+@media (max-width: 800px) {
+  .settings-layout { grid-template-columns: 1fr; gap: 1.25rem; }
+  .settings-rail { flex-direction: row; gap: 0.35rem; overflow-x: auto;
+    scrollbar-width: none; }
+  .settings-rail::-webkit-scrollbar { display: none; }
+  .settings-rail-item { flex: none; white-space: nowrap; padding: 0.5rem 0.8rem; }
+}
 .plan-limits { margin: 0.75rem 0 0; padding-left: 1.15rem; color: var(--ink-2);
   font-size: 0.92rem; }
 .plan-limits li { margin: 0.3rem 0; }
 .danger-card { border-color: oklch(50% 0.15 25 / 0.4); }
 .danger-card h3 { color: var(--loss); }
-/* nav stock search: inline input between logo and links, absolute dropdown */
-.nav-search { position: relative; flex: 1; max-width: 300px; margin: 0 1.25rem; }
+/* stock search: centered atop the main content column, above the page body */
+.app-topsearch { display: flex; justify-content: center; margin: 0 0 1.5rem; }
+.nav-search { position: relative; flex: 1; max-width: 300px; }
+.app-topsearch .nav-search { width: 100%; max-width: 420px; }
 .nav-search input[type=search] { width: 100%; padding: 0.42rem 0.75rem;
   border-radius: var(--r-s); border: 1px solid var(--line);
   background: var(--surface-2); color: var(--ink); font-family: var(--font);
@@ -580,10 +610,8 @@ tr:last-child td { border-bottom: none; }
    focus-zoom), and >=44px tap targets */
 @media (max-width: 640px) {
   .app-wrap { padding: 1.4rem 1rem 3rem; }
-  .nav-search { margin: 0 0.7rem; min-width: 0; }
+  .nav-search { min-width: 0; }
   .nav-search input[type=search] { font-size: 1rem; }
-  .nav-links { gap: 0.9rem; font-size: 0.88rem; }
-  .nav-links a.keep, .nav-links .link-btn { padding: 0.6rem 0.1rem; }
   .topbar { flex-wrap: wrap; gap: 0.25rem 1rem; }
   .dash-card { padding: 0.95rem 1rem 1.1rem; }
   .dash-card h3 { flex-wrap: wrap; row-gap: 0.35rem; }
@@ -727,6 +755,90 @@ function staggerIn(els, duration = 0.25, gap = 0.04) {
 """
 
 
+_APP_NAV_LINKS = (
+    ("dashboard", "/app/dashboard", "Dashboard"),
+    ("picks", "/app/picks", "Top Picks"),
+    ("risk", "/app/risk", "Risk Lab"),
+    ("deep-dives", "/app/deep-dives", "Deep Dives"),
+    ("settings", "/app/settings", "Settings"),
+)
+
+# App-only icons (dashboard/picks/risk/deep-dives/settings + sign out); the
+# structural chevron/close icons and the marketing link icons live in
+# app.landing._ICONS, shared via _sidebar_shell().
+_APP_ICONS = {
+    "dashboard": (
+        '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"'
+        ' stroke-linecap="round" stroke-linejoin="round">'
+        '<rect x="3" y="3" width="6" height="6" rx="1"/><rect x="11" y="3" width="6" height="6" rx="1"/>'
+        '<rect x="3" y="11" width="6" height="6" rx="1"/><rect x="11" y="11" width="6" height="6" rx="1"/>'
+        "</svg>"
+    ),
+    "picks": (
+        '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"'
+        ' stroke-linejoin="round">'
+        '<path d="M10 2.8l2.15 4.5 4.85.6-3.55 3.4.9 4.9L10 13.9l-4.35 2.3.9-4.9L3 7.9l4.85-.6L10 2.8Z"/></svg>'
+    ),
+    "risk": (
+        '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"'
+        ' stroke-linecap="round" stroke-linejoin="round">'
+        '<path d="M2.5 10.5h3l1.8-5 2.8 9 1.8-6.5 1.4 2.5h3.2"/></svg>'
+    ),
+    "deep-dives": (
+        '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"'
+        ' stroke-linecap="round" stroke-linejoin="round">'
+        '<path d="M5 2.5h6l3 3v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-13a1 1 0 0 1 1-1Z"/>'
+        '<circle cx="9.3" cy="12" r="2"/><path d="m12 14.5 1.8 1.8"/></svg>'
+    ),
+    "settings": (
+        '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"'
+        ' stroke-linecap="round" stroke-linejoin="round">'
+        '<circle cx="10" cy="10" r="2.6"/>'
+        '<path d="M10 2.8v2M10 15.2v2M17.2 10h-2M4.8 10h-2M15.1 4.9l-1.4 1.4'
+        'M6.3 13.7l-1.4 1.4M15.1 15.1l-1.4-1.4M6.3 6.3 4.9 4.9"/></svg>'
+    ),
+    "signout": (
+        '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"'
+        ' stroke-linecap="round" stroke-linejoin="round">'
+        '<path d="M12 3.5h3.5v13H12"/><path d="M8 6.5 4 10l4 3.5M4 10h8"/></svg>'
+    ),
+}
+
+
+def _app_sidebar(active: str) -> str:
+    links = ""
+    for key, href, label in _APP_NAV_LINKS:
+        cls = " active" if key == active else ""
+        icon = _APP_ICONS.get(key, "")
+        links += (
+            f'<a class="side-link{cls}" href="{href}" data-label="{label}">'
+            f'<span class="ico">{icon}</span><span class="lbl">{label}</span></a>'
+        )
+    foot = (
+        '<button class="side-link" type="button" onclick="signOut()" data-label="Sign out">'
+        f'<span class="ico">{_APP_ICONS["signout"]}</span><span class="lbl">Sign out</span></button>'
+    )
+    return _sidebar_shell(
+        nav_links_html=links,
+        foot_html=foot,
+        mobile_bar_class="app-bar",
+    )
+
+
+# Ticker search: centered at the top of the main content, above the page
+# body. Previously lived in the sidebar's sticky top strip (.topbar-extra),
+# but that strip renders full-width and sits over the persistent desktop
+# rail, so it now lives in the content column instead (which already has
+# margin-left clearing the sidebar).
+_APP_TOP_SEARCH = (
+    '<div class="app-topsearch"><div class="nav-search">'
+    '<input id="nav-search" type="search" placeholder="Search stocks…" autocomplete="off"'
+    ' spellcheck="false" aria-label="Search stocks">'
+    '<div class="search-results" id="nav-search-results" role="listbox"></div>'
+    "</div></div>"
+)
+
+
 def _page(
     title: str,
     body: str,
@@ -737,6 +849,7 @@ def _page(
     chrome: bool = True,
     wrap_class: str = "app-wrap",
     extra_config: dict | None = None,
+    active: str = "",
 ) -> str:
     # Page parameters (e.g. the stock page's ticker) travel through the JSON
     # config blob — never interpolated into markup or script text.
@@ -744,21 +857,9 @@ def _page(
         {"supabaseUrl": supabase_url, "supabaseAnonKey": anon_key, **(extra_config or {})}
     )
     if chrome:
-        shell = f"""<nav><div class="nav-inner">
-<a class="logo" href="/">Cir<span>via</span></a>
-<div class="nav-search">
-<input id="nav-search" type="search" placeholder="Search stocks…" autocomplete="off"
- spellcheck="false" aria-label="Search stocks">
-<div class="search-results" id="nav-search-results" role="listbox"></div>
-</div>
-<div class="nav-links"><a class="keep" href="/app/dashboard">Dashboard</a>
-<a class="keep" href="/app/picks">Top Picks</a>
-<a class="keep" href="/app/risk">Risk Lab</a>
-<a class="keep" href="/app/deep-dives">Deep Dives</a>
-<a class="keep" href="/app/settings">Settings</a>
-<button class="link-btn" onclick="signOut()">Sign out</button></div>
-</div></nav>
+        shell = f"""{_app_sidebar(active)}
 <main class="{wrap_class}">
+{_APP_TOP_SEARCH}
 {body}
 </main>
 <footer class="app-foot">
@@ -774,6 +875,7 @@ def _page(
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<script>{_SIDEBAR_PRECOLLAPSE_JS}</script>
 <title>{title}</title>
 <meta name="robots" content="noindex">
 {ICON_LINKS}{_FONT_LINKS}<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
@@ -785,6 +887,7 @@ def _page(
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="{MOTION_CDN}"></script>
 <script>{_SHELL_JS}</script>
+<script>{_SIDEBAR_JS}</script>
 <script>{extra_js}</script>
 </body>
 </html>"""
@@ -2270,7 +2373,7 @@ _DASHBOARD_BODY = """
     <span><strong>Get your digest delivered.</strong> Add text, email, or Discord
     and your morning brief reaches you before the market opens.</span>
     <span class="actions">
-      <a class="btn" href="/app/settings/delivery">Set up delivery</a>
+      <a class="btn" href="/app/settings#section-delivery">Set up delivery</a>
       <button class="link-btn" id="delivery-banner-dismiss">Dismiss</button>
     </span>
   </div>
@@ -3469,7 +3572,7 @@ async function initDeepDive() {
 // --- delivery-setup nudge ----------------------------------------------------
 // Shown when no verified, non-opted-out channel is active: the digest only
 // lands on this dashboard until the user adds text/email/Discord delivery.
-// Managed on /app/settings/delivery; this banner just points there.
+// Managed on /app/settings#section-delivery; this banner just points there.
 const DELIVERY_BANNER_KEY = 'cirvia-delivery-banner-dismissed';
 
 async function checkDeliverySetup(data) {
@@ -3827,7 +3930,7 @@ function gradePE(v, text) {
 
 function fillHeader(d) {
   const p = d.profile || {};
-  const sub = [p.name, p.sector || (d.etf ? 'ETF' : null)].filter(Boolean).join(' · ');
+  const sub = [p.name, p.industry || p.sector || (d.etf ? 'ETF' : null)].filter(Boolean).join(' · ');
   document.getElementById('stock-sub').textContent = sub;
   if (d.quote && d.quote.last_price != null) {
     document.getElementById('stock-price').textContent =
@@ -3903,11 +4006,12 @@ function fillEquityCards(d) {
   ]);
 }
 
-// "Cheap or expensive" verdict (app/quant/valuation.py): a sector-relative
-// comparison, computed nightly and cached — not a live score. The badge is
-// free for every plan (same tier as the /screener grid); the evidence table
-// (per-metric sector-median comparisons) is Pro-gated inline, same
-// effective_plan() field carried on the API response.
+// "Cheap or expensive" verdict (app/quant/valuation.py): an industry-relative
+// comparison (falling back to sector, then the whole tracked universe, when
+// there aren't enough industry peers), computed nightly and cached — not a
+// live score. The badge is free for every plan (same tier as the /screener
+// grid); the evidence table (per-metric peer-median comparisons) is
+// Pro-gated inline, same effective_plan() field carried on the API response.
 const VERDICT_CLASS = {
   'Undervalued': 'vd-under', 'Expensive': 'vd-over', 'Fairly Valued': 'vd-fair',
 };
@@ -3925,7 +4029,7 @@ function valuationEvidenceTable(metrics) {
       '<td>' + (m.sector_median ?? '–') + '</td></tr>';
   }).join('');
   return '<table class="ev-table"><thead><tr><th>metric</th><th>this stock</th>' +
-    '<th>sector median</th></tr></thead><tbody>' + body + '</tbody></table>';
+    '<th>peer median</th></tr></thead><tbody>' + body + '</tbody></table>';
 }
 function fillVerdict(d) {
   const v = d.verdict;
@@ -3939,16 +4043,23 @@ function fillVerdict(d) {
     return;
   }
   if (v.evidence_gated) {
-    evEl.innerHTML = '<div class="vd-evidence-gate">Compared against sector peers today ' +
-      '(<a href="/methodology">methodology</a>). ' +
+    evEl.innerHTML = '<div class="vd-evidence-gate">Compared against industry peers today ' +
+      '(falling back to sector, then the market, when there aren\'t enough industry peers — ' +
+      '<a href="/methodology">methodology</a>). ' +
       '<a href="/app/settings?billing=upgrade">Upgrade to Pro</a> to see the numbers ' +
       'behind this verdict.</div>';
     return;
   }
   const ev = v.evidence || {};
+  const tier = ev.sector_comparison;
+  const note = tier === 'industry'
+    ? 'Vs. industry peers' + (ev.industry ? ' (' + esc(ev.industry) + ')' : '')
+    : tier === 'sector'
+      ? 'Vs. sector peers' + (ev.sector ? ' (' + esc(ev.sector) + ')' : '') +
+        ' — its industry group was too small to compare against alone'
+      : 'Vs. the broader market — both its industry and sector groups were too small to compare against alone';
   evEl.innerHTML = valuationEvidenceTable(ev.metrics) +
-    '<p class="vd-note">Vs. ' + (ev.sector_comparison === 'sector' ? 'sector peers'
-      : 'the broader market (its sector is too small to compare against alone)') +
+    '<p class="vd-note">' + note +
     ', ' + (ev.metrics_used || 0) + ' metrics. <a href="/methodology">Methodology</a>.</p>';
 }
 
@@ -4281,89 +4392,146 @@ _SETTINGS_BODY = """
   <span class="who" id="who"></span>
 </div>
 
-<div class="dash-card">
-  <h3>Account</h3>
-  <p class="muted-note" style="margin-top:0.5rem;">Signed in as
-    <strong id="account-email">&hellip;</strong></p>
-  <form id="pw-form">
-    <label for="new-password">New password</label>
-    <input type="password" id="new-password" autocomplete="new-password"
-      minlength="8" required>
-    <label for="confirm-password">Confirm new password</label>
-    <input type="password" id="confirm-password" autocomplete="new-password"
-      minlength="8" required>
-    <button class="btn" id="pw-btn" type="submit"
-      style="margin-top:1rem;">Change password</button>
-  </form>
-  <div class="error-box" id="pw-error"></div>
-  <div class="notice-box" id="pw-notice"></div>
-</div>
+<div class="settings-layout">
+  <nav class="settings-rail" role="tablist" aria-orientation="vertical" aria-label="Settings sections">
+    <button class="settings-rail-item" role="tab" data-section="account"
+      id="rail-account" aria-controls="section-account" aria-selected="true">Account</button>
+    <button class="settings-rail-item" role="tab" data-section="brokerage"
+      id="rail-brokerage" aria-controls="section-brokerage" aria-selected="false">Brokerage</button>
+    <button class="settings-rail-item" role="tab" data-section="delivery"
+      id="rail-delivery" aria-controls="section-delivery" aria-selected="false">Delivery</button>
+    <button class="settings-rail-item" role="tab" data-section="profile"
+      id="rail-profile" aria-controls="section-profile" aria-selected="false">Investor profile</button>
+    <button class="settings-rail-item" role="tab" data-section="plan"
+      id="rail-plan" aria-controls="section-plan" aria-selected="false">Plan</button>
+    <button class="settings-rail-item" role="tab" data-section="danger"
+      id="rail-danger" aria-controls="section-danger" aria-selected="false">Danger zone</button>
+  </nav>
 
-<div class="dash-card">
-  <h3>Brokerage connection <span class="tag" id="conn-chip"></span></h3>
-  <div id="conn-summary"><div aria-hidden="true">
-    <div class="skl"></div><div class="skl short"></div>
-  </div></div>
-  <div id="conn-actions" style="display:none;">
-    <button class="btn ghost" id="disconnect-btn"
-      style="margin-top:0.75rem;">Disconnect brokerage</button>
-    <div id="disconnect-confirm" style="display:none;">
-      <p class="muted-note">Disconnect brokerage? Your holdings stop syncing.</p>
-      <button class="btn" id="disconnect-yes">Yes, disconnect</button>
-      <button class="link-btn" id="disconnect-no"
-        style="margin-left:0.75rem;">Cancel</button>
+  <div class="settings-panels">
+    <div class="settings-panel active" data-section="account" id="section-account"
+      role="tabpanel" aria-labelledby="rail-account">
+      <div class="dash-card">
+        <h3>Account</h3>
+        <p class="muted-note" style="margin-top:0.5rem;">Signed in as
+          <strong id="account-email">&hellip;</strong></p>
+        <form id="pw-form">
+          <label for="new-password">New password</label>
+          <input type="password" id="new-password" autocomplete="new-password"
+            minlength="8" required>
+          <label for="confirm-password">Confirm new password</label>
+          <input type="password" id="confirm-password" autocomplete="new-password"
+            minlength="8" required>
+          <button class="btn" id="pw-btn" type="submit"
+            style="margin-top:1rem;">Change password</button>
+        </form>
+        <div class="error-box" id="pw-error"></div>
+        <div class="notice-box" id="pw-notice"></div>
+      </div>
+    </div>
+
+    <div class="settings-panel" data-section="brokerage" id="section-brokerage"
+      role="tabpanel" aria-labelledby="rail-brokerage">
+      <div class="dash-card">
+        <h3>Brokerage connection <span class="tag" id="conn-chip"></span></h3>
+        <div id="conn-summary"><div aria-hidden="true">
+          <div class="skl"></div><div class="skl short"></div>
+        </div></div>
+        <div id="conn-actions" style="display:none;">
+          <button class="btn ghost" id="disconnect-btn"
+            style="margin-top:0.75rem;">Disconnect brokerage</button>
+          <div id="disconnect-confirm" style="display:none;">
+            <p class="muted-note">Disconnect brokerage? Your holdings stop syncing.</p>
+            <button class="btn" id="disconnect-yes">Yes, disconnect</button>
+            <button class="link-btn" id="disconnect-no"
+              style="margin-left:0.75rem;">Cancel</button>
+          </div>
+        </div>
+        <div class="error-box" id="conn-error"></div>
+        <div class="notice-box" id="conn-notice"></div>
+      </div>
+    </div>
+
+    <div class="settings-panel" data-section="delivery" id="section-delivery"
+      role="tabpanel" aria-labelledby="rail-delivery">
+      <div class="dash-card">
+        <h3>Channel <button class="link-btn" id="delivery-change-btn"
+          style="display:none;">Change</button></h3>
+        <div id="delivery-summary"><div aria-hidden="true">
+          <div class="skl"></div><div class="skl short"></div>
+        </div></div>
+        <div id="delivery-editor" style="display:none;">
+""" + _DELIVERY_PICKER_HTML + """
+        </div>
+      </div>
+      <div class="dash-card">
+        <h3>Schedule <button class="link-btn" id="schedule-edit-btn">Edit</button></h3>
+        <p id="schedule-row" style="display:none;"><span id="schedule-text"></span></p>
+        <div id="schedule-editor" style="display:none;">
+          <label for="dash-tz">Timezone</label>
+          <select id="dash-tz"></select>
+          <label for="dash-send-time">Send time</label>
+          <input type="time" id="dash-send-time">
+          <button class="btn" id="save-schedule-btn" style="margin-top:0.9rem;">Save schedule</button>
+          <div class="error-box" id="schedule-error"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="settings-panel" data-section="profile" id="section-profile"
+      role="tabpanel" aria-labelledby="rail-profile">
+      <div class="dash-card">
+        <h3>Investor profile <span class="tag" id="profile-chip"></span>
+          <a class="link-btn" href="/app/onboarding?personalize=1">Update</a></h3>
+        <div id="profile-overview"><div aria-hidden="true">
+          <div class="skl short"></div>
+        </div></div>
+      </div>
+    </div>
+
+    <div class="settings-panel" data-section="plan" id="section-plan"
+      role="tabpanel" aria-labelledby="rail-plan">
+      <div class="dash-card" id="plan-card">
+        <h3>Plan <span class="tag" id="plan-chip"></span></h3>
+        <ul class="plan-limits" id="plan-limits"></ul>
+        <div id="billing-actions" style="margin-top:0.75rem;"></div>
+        <p class="muted-note" id="plan-note" style="display:none;">Pro billing is coming
+        soon. Until then every account stays on the Free plan.</p>
+        <div class="error-box" id="billing-error"></div>
+        <div class="notice-box" id="billing-notice"></div>
+      </div>
+    </div>
+
+    <div class="settings-panel" data-section="danger" id="section-danger"
+      role="tabpanel" aria-labelledby="rail-danger">
+      <div class="dash-card danger-card">
+        <h3>Danger zone</h3>
+        <p class="muted-note" id="danger-warning" style="margin-top:0.5rem;">Deleting your
+        account removes your holdings, digests, alerts, chat history, and notification
+        settings from Cirvia. This cannot be undone.</p>
+        <button class="btn ghost" id="delete-btn"
+          style="margin-top:0.75rem;">Delete account</button>
+        <div id="delete-confirm" style="display:none;" role="alertdialog" aria-modal="false">
+          <label for="delete-input">Type DELETE to confirm</label>
+          <input type="text" id="delete-input" autocomplete="off" placeholder="DELETE"
+            aria-describedby="danger-warning">
+          <button class="btn" id="delete-yes" disabled
+            style="margin-top:0.9rem;">Permanently delete my account</button>
+          <button class="link-btn" id="delete-no"
+            style="margin-left:0.75rem;">Cancel</button>
+        </div>
+        <div class="error-box" id="delete-error"></div>
+      </div>
     </div>
   </div>
-  <div class="error-box" id="conn-error"></div>
-  <div class="notice-box" id="conn-notice"></div>
-</div>
-
-<div class="dash-card">
-  <h3>Delivery <a class="link-btn" href="/app/settings/delivery">Manage</a></h3>
-  <div id="delivery-overview"><div aria-hidden="true">
-    <div class="skl short"></div>
-  </div></div>
-</div>
-
-<div class="dash-card">
-  <h3>Investor profile <span class="tag" id="profile-chip"></span>
-    <a class="link-btn" href="/app/onboarding?personalize=1">Update</a></h3>
-  <div id="profile-overview"><div aria-hidden="true">
-    <div class="skl short"></div>
-  </div></div>
-</div>
-
-<div class="dash-card" id="plan-card">
-  <h3>Plan <span class="tag" id="plan-chip"></span></h3>
-  <ul class="plan-limits" id="plan-limits"></ul>
-  <div id="billing-actions" style="margin-top:0.75rem;"></div>
-  <p class="muted-note" id="plan-note" style="display:none;">Pro billing is coming
-  soon. Until then every account stays on the Free plan.</p>
-  <div class="error-box" id="billing-error"></div>
-  <div class="notice-box" id="billing-notice"></div>
-</div>
-
-<div class="dash-card danger-card">
-  <h3>Danger zone</h3>
-  <p class="muted-note" style="margin-top:0.5rem;">Deleting your account removes
-  your holdings, digests, alerts, chat history, and notification settings from
-  Cirvia. This cannot be undone.</p>
-  <button class="btn ghost" id="delete-btn"
-    style="margin-top:0.75rem;">Delete account</button>
-  <div id="delete-confirm" style="display:none;">
-    <label for="delete-input">Type DELETE to confirm</label>
-    <input type="text" id="delete-input" autocomplete="off" placeholder="DELETE">
-    <button class="btn" id="delete-yes" disabled
-      style="margin-top:0.9rem;">Permanently delete my account</button>
-    <button class="link-btn" id="delete-no"
-      style="margin-left:0.75rem;">Cancel</button>
-  </div>
-  <div class="error-box" id="delete-error"></div>
 </div>
 """
 
 _SETTINGS_JS = """
 requireSession();
+
+let meProfile = null;
+const CHANNEL_NAMES = { sms: 'Text message', email: 'Email', discord: 'Discord' };
 
 function setBox(id, msg) {
   const box = document.getElementById(id);
@@ -4371,11 +4539,32 @@ function setBox(id, msg) {
   else { box.style.display = 'none'; }
 }
 
+// ---- sections: rail nav, hash-restorable (mirrors the dashboard's tabs) ----
+
+const SECTION_NAMES = ['account', 'brokerage', 'delivery', 'profile', 'plan', 'danger'];
+const SECTION_KEY = 'cirvia-settings-section';
+function hashSection() {
+  return location.hash.startsWith('#section-') ? location.hash.slice(9) : '';
+}
+function activateSection(name, save = true) {
+  if (!SECTION_NAMES.includes(name)) name = 'account';
+  document.querySelectorAll('.settings-rail-item').forEach((b) =>
+    b.setAttribute('aria-selected', String(b.dataset.section === name)));
+  document.querySelectorAll('.settings-panel').forEach((p) =>
+    p.classList.toggle('active', p.dataset.section === name));
+  if (save) localStorage.setItem(SECTION_KEY, name);
+  if ('#section-' + name !== location.hash) history.replaceState(null, '', '#section-' + name);
+}
+document.querySelectorAll('.settings-rail-item').forEach((b) =>
+  b.addEventListener('click', () => activateSection(b.dataset.section)));
+window.addEventListener('hashchange', () => activateSection(hashSection(), false));
+
 // ---- account + plan --------------------------------------------------------
 
 async function loadAccount() {
   try {
     const me = await (await api('/me')).json();
+    meProfile = me;
     const trial = me.trial || {};
     const eff = me.effective_plan || me.plan;
     const plan = trial.active ? 'Pro trial' : (eff === 'pro' ? 'Pro' : 'Free');
@@ -4395,6 +4584,7 @@ async function loadAccount() {
     limits.innerHTML = items.map((t) => '<li>' + esc(t) + '</li>').join('');
     renderProfileCard(me);
     renderBilling(me);
+    renderSchedule();
   } catch (e) { /* nav still works; cards degrade individually */ }
 }
 
@@ -4536,8 +4726,7 @@ async function handleBillingReturn() {
   if (!state) return;
   // Keep reloads from re-triggering the notice/polling.
   window.history.replaceState({}, '', '/app/settings');
-  const card = document.getElementById('plan-card');
-  if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  activateSection('plan');
   if (state === 'canceled') {
     setBox('billing-notice', 'Checkout canceled \\u2014 you were not charged.');
     return;
@@ -4700,32 +4889,127 @@ function esc(s) {
   return d.innerHTML.replaceAll('"', '&quot;').replaceAll("'", '&#39;');
 }
 
-async function loadDeliveryOverview() {
-  const el = document.getElementById('delivery-overview');
+// ---- delivery: channel picker + schedule ------------------------------------
+
+async function loadDelivery() {
+  const summary = document.getElementById('delivery-summary');
+  const changeBtn = document.getElementById('delivery-change-btn');
+  document.getElementById('delivery-editor').style.display = 'none';
+  let active = null;
   try {
     const info = await (await api('/me/notifications')).json();
-    const names = { sms: 'Text message', email: 'Email', discord: 'Discord' };
-    const active = (info.channels || []).find(
+    active = (info.channels || []).find(
       (c) => c.channel === info.preferred_channel);
     if (active && active.verified && !active.opted_out) {
-      el.innerHTML = '<p class="muted-note" style="margin-top:0.5rem;">' +
-        '<strong style="color:var(--ink);">' +
-        esc(names[active.channel] || active.channel) + '</strong> · ' +
-        esc(active.destination_masked) +
-        ' <span class="chip-ok">\\u2713 verified</span></p>';
+      summary.innerHTML =
+        '<p style="margin-top:0.75rem;">' +
+        '<strong>' + esc(CHANNEL_NAMES[active.channel] || active.channel) + '</strong>' +
+        ' · ' + esc(active.destination_masked) +
+        ' <span class="chip-ok">\\u2713 verified</span></p>' +
+        '<p class="muted-note">Your digest and alerts are delivered here.</p>';
+    } else if (active && active.opted_out) {
+      summary.innerHTML =
+        '<p class="muted-note"><span class="chip-warn">Delivery paused</span>. You ' +
+        'unsubscribed from ' + esc(CHANNEL_NAMES[active.channel] || active.channel) +
+        '. Set up a channel to resume delivery.</p>';
     } else {
-      el.innerHTML = '<p class="muted-note" style="margin-top:0.5rem;">' +
-        '<span class="chip-warn">Not set up</span>. Your digest only appears ' +
-        'in the app until you add text, email, or Discord delivery.</p>';
+      summary.innerHTML =
+        '<p class="muted-note"><span class="chip-warn">Not set up</span>. Your digest ' +
+        'only appears in the app. Add a channel to get it by text, email, or Discord.</p>';
     }
+    changeBtn.style.display = 'inline';
+    changeBtn.textContent = active && active.verified ? 'Change' : 'Set up';
   } catch (e) {
-    el.innerHTML = '<p class="muted-note">Could not load delivery settings.</p>';
+    summary.innerHTML = '<p class="muted-note">Could not load delivery settings.</p>';
   }
+  return active;
 }
 
-loadAccount().then(handleBillingReturn);
-loadConnection();
-loadDeliveryOverview();
+async function openEditor() {
+  const editor = document.getElementById('delivery-editor');
+  editor.style.display = 'block';
+  riseIn(editor);
+  await initDeliveryPicker(() => loadDelivery());
+}
+
+document.getElementById('delivery-change-btn').addEventListener('click', async () => {
+  const editor = document.getElementById('delivery-editor');
+  if (editor.style.display !== 'none') { editor.style.display = 'none'; return; }
+  await openEditor();
+});
+
+function renderSchedule() {
+  if (!meProfile) return;
+  document.getElementById('schedule-text').textContent =
+    'Digest at ' + (meProfile.digest_send_time || '09:00') +
+    ' · ' + (meProfile.timezone || 'America/Toronto');
+  document.getElementById('schedule-row').style.display = 'block';
+}
+
+document.getElementById('schedule-edit-btn').addEventListener('click', () => {
+  const editor = document.getElementById('schedule-editor');
+  if (editor.style.display !== 'none') { editor.style.display = 'none'; return; }
+  fillTzSelect(document.getElementById('dash-tz'), meProfile && meProfile.timezone);
+  document.getElementById('dash-send-time').value =
+    (meProfile && meProfile.digest_send_time) || '09:00';
+  editor.style.display = 'block';
+  riseIn(editor);
+});
+
+document.getElementById('save-schedule-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('save-schedule-btn');
+  const errBox = document.getElementById('schedule-error');
+  errBox.style.display = 'none';
+  btn.disabled = true;
+  try {
+    const resp = await api('/me', {
+      method: 'PATCH',
+      body: JSON.stringify({
+        timezone: document.getElementById('dash-tz').value,
+        digest_send_time: document.getElementById('dash-send-time').value,
+      }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || 'Could not save schedule');
+    }
+    meProfile = await resp.json();
+    document.getElementById('schedule-editor').style.display = 'none';
+    renderSchedule();
+  } catch (e) {
+    errBox.textContent = e.message;
+    errBox.style.display = 'block';
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+// ---- boot --------------------------------------------------------------------
+
+async function boot() {
+  // Back from the Discord OAuth connect flow: land on the Delivery section
+  // regardless of saved/hash section; on failure reopen the picker with an
+  // explanation. Strip the param so refresh doesn't repeat it.
+  const discordStatus = new URLSearchParams(location.search).get('discord');
+  if (discordStatus) history.replaceState(null, '', '/app/settings');
+  activateSection(discordStatus ? 'delivery'
+    : (hashSection() || localStorage.getItem(SECTION_KEY) || 'account'));
+  await loadAccount().then(handleBillingReturn);
+  loadConnection();
+  const active = await loadDelivery();
+  if (discordStatus && discordStatus !== 'connected') {
+    await openEditor();
+    dpError(discordStatus === 'cancelled'
+      ? 'Discord connection was cancelled. Try again, or paste a webhook URL instead.'
+      : 'Discord connection failed. Try again, or paste a webhook URL instead.');
+    return;
+  }
+  // Arriving without a working channel (e.g. from the dashboard nudge, whose
+  // link points straight at #section-delivery): open the picker right away.
+  if (!(active && active.verified && !active.opted_out) &&
+      hashSection() === 'delivery') await openEditor();
+}
+boot();
 """
 
 
@@ -4770,6 +5054,7 @@ def dashboard_page(supabase_url: str, anon_key: str) -> str:
         anon_key=anon_key,
         extra_js=_DASHBOARD_JS,
         wrap_class="app-wrap dash-wrap",
+        active="dashboard",
     )
 
 
@@ -5224,6 +5509,7 @@ def risk_lab_page(supabase_url: str, anon_key: str) -> str:
         anon_key=anon_key,
         extra_js=_RISK_JS,
         wrap_class="app-wrap risk-wrap",
+        active="risk",
     )
 
 
@@ -5274,7 +5560,8 @@ _PICKS_BODY = """
   <details class="picks-method">
     <summary>How this is built</summary>
     <p>An evening job stores adjusted prices and fundamentals for the S&amp;P&nbsp;500 and
-    TSX&nbsp;60. Pre-market, a factor model scores every eligible name against its sector on
+    TSX&nbsp;60. Pre-market, a factor model scores every eligible name against its closest
+    peer group — its industry when there are enough peers, its sector otherwise — on
     value, quality, growth, momentum, analyst upside, and risk: pure math, no AI.
     Only the top-ranked names go to analyst agents, which must ground every figure in the
     computed fact sheet. A verifier then re-checks the numbers deterministically and an
@@ -5307,7 +5594,7 @@ function evidenceTable(ev) {
     '<td>' + (e.value ?? '–') + '</td>' +
     '<td>' + (e.sector_median ?? '–') + '</td></tr>').join('');
   return '<table class="ev-table"><thead><tr><th>metric</th><th>this stock</th>' +
-    '<th>sector median</th></tr></thead><tbody>' + rows + '</tbody></table>';
+    '<th>peer median</th></tr></thead><tbody>' + rows + '</tbody></table>';
 }
 
 function verifyBadge(v, demoted) {
@@ -5346,7 +5633,8 @@ function pickCard(p, i) {
     '<div class="pick-top">' +
       '<span class="pick-rank">#' + (i + 1) + '</span>' +
       '<span class="pick-id"><span class="pick-ticker">' + esc(p.ticker) + '</span>' +
-        '<span class="pick-name">' + esc(p.name || '') + (p.sector ? ' · ' + esc(p.sector) : '') + '</span></span>' +
+        '<span class="pick-name">' + esc(p.name || '') +
+          ((p.industry || p.sector) ? ' · ' + esc(p.industry || p.sector) : '') + '</span></span>' +
       confMeter(p.confidence) +
     '</div>' +
     (p.demoted ? '<p class="demote-note">The verifier challenged parts of this analysis; ranked down and shown for transparency.</p>' : '') +
@@ -5521,6 +5809,7 @@ def picks_page(supabase_url: str, anon_key: str) -> str:
         anon_key=anon_key,
         extra_js=_PICKS_JS,
         wrap_class="app-wrap picks-wrap",
+        active="picks",
     )
 
 
@@ -5707,6 +5996,7 @@ def deep_dives_page(supabase_url: str, anon_key: str) -> str:
         anon_key=anon_key,
         extra_js=_DEEP_DIVES_JS,
         wrap_class="app-wrap dash-wrap",
+        active="deep-dives",
     )
 
 
@@ -5716,189 +6006,9 @@ def settings_page(supabase_url: str, anon_key: str) -> str:
         _SETTINGS_BODY,
         supabase_url=supabase_url,
         anon_key=anon_key,
-        extra_js=_SETTINGS_JS,
+        extra_js=_DELIVERY_JS + _SETTINGS_JS,
         wrap_class="app-wrap settings-wrap",
-    )
-
-
-# --------------------------------------------------------------------------
-# /app/settings/delivery — digest channel + schedule management
-# --------------------------------------------------------------------------
-
-_DELIVERY_SETTINGS_BODY = """
-<div class="topbar">
-  <h1 style="font-size:1.5rem;">Delivery</h1>
-  <span class="who" id="who"></span>
-</div>
-<p class="muted-note" style="margin:-0.5rem 0 1rem;">
-  <a href="/app/settings">&larr; Back to settings</a></p>
-
-<div class="dash-card">
-  <h3>Channel <button class="link-btn" id="delivery-change-btn"
-    style="display:none;">Change</button></h3>
-  <div id="delivery-summary"><div aria-hidden="true">
-    <div class="skl"></div><div class="skl short"></div>
-  </div></div>
-  <div id="delivery-editor" style="display:none;">
-""" + _DELIVERY_PICKER_HTML + """
-  </div>
-</div>
-
-<div class="dash-card">
-  <h3>Schedule <button class="link-btn" id="schedule-edit-btn">Edit</button></h3>
-  <p id="schedule-row" style="display:none;"><span id="schedule-text"></span></p>
-  <div id="schedule-editor" style="display:none;">
-    <label for="dash-tz">Timezone</label>
-    <select id="dash-tz"></select>
-    <label for="dash-send-time">Send time</label>
-    <input type="time" id="dash-send-time">
-    <button class="btn" id="save-schedule-btn" style="margin-top:0.9rem;">Save schedule</button>
-    <div class="error-box" id="schedule-error"></div>
-  </div>
-</div>
-"""
-
-_DELIVERY_SETTINGS_JS = """
-requireSession();
-
-let meProfile = null;
-const CHANNEL_NAMES = { sms: 'Text message', email: 'Email', discord: 'Discord' };
-
-function esc(s) {
-  // Quotes must be escaped too: values land inside HTML attributes.
-  const d = document.createElement('div'); d.textContent = s ?? '';
-  return d.innerHTML.replaceAll('"', '&quot;').replaceAll("'", '&#39;');
-}
-
-async function loadDelivery() {
-  const summary = document.getElementById('delivery-summary');
-  const changeBtn = document.getElementById('delivery-change-btn');
-  document.getElementById('delivery-editor').style.display = 'none';
-  let active = null;
-  try {
-    const info = await (await api('/me/notifications')).json();
-    active = (info.channels || []).find(
-      (c) => c.channel === info.preferred_channel);
-    if (active && active.verified && !active.opted_out) {
-      summary.innerHTML =
-        '<p style="margin-top:0.75rem;">' +
-        '<strong>' + esc(CHANNEL_NAMES[active.channel] || active.channel) + '</strong>' +
-        ' · ' + esc(active.destination_masked) +
-        ' <span class="chip-ok">\\u2713 verified</span></p>' +
-        '<p class="muted-note">Your digest and alerts are delivered here.</p>';
-    } else if (active && active.opted_out) {
-      summary.innerHTML =
-        '<p class="muted-note"><span class="chip-warn">Delivery paused</span>. You ' +
-        'unsubscribed from ' + esc(CHANNEL_NAMES[active.channel] || active.channel) +
-        '. Set up a channel to resume delivery.</p>';
-    } else {
-      summary.innerHTML =
-        '<p class="muted-note"><span class="chip-warn">Not set up</span>. Your digest ' +
-        'only appears in the app. Add a channel to get it by text, email, or Discord.</p>';
-    }
-    changeBtn.style.display = 'inline';
-    changeBtn.textContent = active && active.verified ? 'Change' : 'Set up';
-  } catch (e) {
-    summary.innerHTML = '<p class="muted-note">Could not load delivery settings.</p>';
-  }
-  return active;
-}
-
-async function openEditor() {
-  const editor = document.getElementById('delivery-editor');
-  editor.style.display = 'block';
-  riseIn(editor);
-  await initDeliveryPicker(() => loadDelivery());
-}
-
-document.getElementById('delivery-change-btn').addEventListener('click', async () => {
-  const editor = document.getElementById('delivery-editor');
-  if (editor.style.display !== 'none') { editor.style.display = 'none'; return; }
-  await openEditor();
-});
-
-function renderSchedule() {
-  if (!meProfile) return;
-  document.getElementById('schedule-text').textContent =
-    'Digest at ' + (meProfile.digest_send_time || '09:00') +
-    ' · ' + (meProfile.timezone || 'America/Toronto');
-  document.getElementById('schedule-row').style.display = 'block';
-}
-
-document.getElementById('schedule-edit-btn').addEventListener('click', () => {
-  const editor = document.getElementById('schedule-editor');
-  if (editor.style.display !== 'none') { editor.style.display = 'none'; return; }
-  fillTzSelect(document.getElementById('dash-tz'), meProfile && meProfile.timezone);
-  document.getElementById('dash-send-time').value =
-    (meProfile && meProfile.digest_send_time) || '09:00';
-  editor.style.display = 'block';
-  riseIn(editor);
-});
-
-document.getElementById('save-schedule-btn').addEventListener('click', async () => {
-  const btn = document.getElementById('save-schedule-btn');
-  const errBox = document.getElementById('schedule-error');
-  errBox.style.display = 'none';
-  btn.disabled = true;
-  try {
-    const resp = await api('/me', {
-      method: 'PATCH',
-      body: JSON.stringify({
-        timezone: document.getElementById('dash-tz').value,
-        digest_send_time: document.getElementById('dash-send-time').value,
-      }),
-    });
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => ({}));
-      throw new Error(err.detail || 'Could not save schedule');
-    }
-    meProfile = await resp.json();
-    document.getElementById('schedule-editor').style.display = 'none';
-    renderSchedule();
-  } catch (e) {
-    errBox.textContent = e.message;
-    errBox.style.display = 'block';
-  } finally {
-    btn.disabled = false;
-  }
-});
-
-async function init() {
-  // Back from the Discord OAuth connect flow: connected needs no action
-  // (the summary below shows the verified channel); on failure reopen the
-  // picker with an explanation. Strip the param so refresh doesn't repeat it.
-  const discordStatus = new URLSearchParams(window.location.search).get('discord');
-  if (discordStatus) history.replaceState(null, '', window.location.pathname);
-  try {
-    meProfile = await (await api('/me')).json();
-    document.getElementById('who').textContent =
-      (meProfile.email || '') + ' \\u00b7 ' + (meProfile.plan === 'pro' ? 'Pro' : 'Free');
-  } catch (e) { /* who line is cosmetic */ }
-  renderSchedule();
-  const active = await loadDelivery();
-  if (discordStatus && discordStatus !== 'connected') {
-    await openEditor();
-    dpError(discordStatus === 'cancelled'
-      ? 'Discord connection was cancelled. Try again, or paste a webhook URL instead.'
-      : 'Discord connection failed. Try again, or paste a webhook URL instead.');
-    return;
-  }
-  // Arriving without a working channel (e.g. from the dashboard nudge):
-  // open the picker right away instead of making the user click Set up.
-  if (!(active && active.verified && !active.opted_out)) await openEditor();
-}
-init();
-"""
-
-
-def delivery_settings_page(supabase_url: str, anon_key: str) -> str:
-    return _page(
-        "Delivery | Cirvia",
-        _DELIVERY_SETTINGS_BODY,
-        supabase_url=supabase_url,
-        anon_key=anon_key,
-        extra_js=_DELIVERY_JS + _DELIVERY_SETTINGS_JS,
-        wrap_class="app-wrap settings-wrap",
+        active="settings",
     )
 
 

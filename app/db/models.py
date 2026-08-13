@@ -510,7 +510,19 @@ class TickerValuation(Base):
     ``app/tools/valuation_refresh.py`` from
     ``app/quant/valuation.py::compute_valuations()``; read as a flat row by
     both ``GET /stocks/valuations`` (public) and the ``verdict`` block on
-    ``GET /stocks/{ticker}`` (evidence field-gated to Pro plans)."""
+    ``GET /stocks/{ticker}`` (evidence field-gated to Pro plans).
+
+    ``sector`` is always the ticker's actual GICS sector -- shown as company
+    metadata on the free grid -- and is *not* necessarily the group the
+    verdict was computed against, since scoring is industry-first (see
+    ``app/quant/screener.py``'s ``MIN_INDUSTRY_SIZE``/``MIN_SECTOR_SIZE``
+    fallback chain). ``sector_comparison`` says which tier actually fired
+    ("industry" / "sector" / "universe (too small)"); the actual industry
+    label used, when that tier is "industry", lives in
+    ``evidence["industry"]`` rather than a dedicated column -- no migration
+    needed, same JSONB-extensibility posture as ``TickerFundamentals.data``.
+    ``sector_z`` is named for history but is the peer-relative z regardless
+    of which tier produced it."""
 
     __tablename__ = "ticker_valuations"
 

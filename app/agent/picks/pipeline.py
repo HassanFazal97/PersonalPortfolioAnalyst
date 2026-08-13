@@ -224,6 +224,7 @@ def _fact_sheet_message(row: dict[str, Any], as_of: str) -> str:
         "ticker": row["ticker"],
         "name": row.get("name"),
         "sector": row.get("sector"),
+        "industry": row.get("industry"),
         "last_price": row.get("last_price"),
         "screen_rank": row.get("rank"),
         "composite_score": row.get("composite"),
@@ -426,6 +427,7 @@ async def _synthesize_overview(
                 {
                     "ticker": p["ticker"],
                     "sector": p.get("sector"),
+                    "industry": p.get("industry"),
                     "composite": p.get("composite"),
                     "thesis": p.get("thesis"),
                 }
@@ -612,6 +614,7 @@ async def run_stock_picks(
                 "ticker": row["ticker"],
                 "name": row.get("name"),
                 "sector": row.get("sector"),
+                "industry": row.get("industry"),
                 "rank": row["rank"],
                 "last_price": row.get("last_price"),
                 "composite": row.get("composite"),

@@ -76,7 +76,9 @@ from app.landing import (
     PRIVACY_HTML,
     SAMPLE_DIGEST_HTML,
     TERMS_HTML,
+    robots_txt,
     screener_html,
+    sitemap_xml,
     track_record_html,
 )
 from app.memory import ingest as memory_ingest
@@ -127,7 +129,6 @@ from app.webapp import (
     NOT_CONFIGURED_HTML,
     dashboard_page,
     deep_dives_page,
-    delivery_settings_page,
     login_page,
     onboarding_page,
     picks_page,
@@ -501,6 +502,8 @@ _bearer = HTTPBearer(auto_error=False)
 _AUTH_EXEMPT_PATHS = {
     "/",
     "/health",
+    "/robots.txt",
+    "/sitemap.xml",
     "/contact",
     "/privacy",
     "/terms",
@@ -1240,13 +1243,36 @@ def create_app() -> FastAPI:
             and request.url.path in _FUNNEL_PATHS
             and response.status_code == 200
         ):
-            _funnel_logger.info("funnel.page_view path=%s", request.url.path)
+            # Referrer + UTM capture (marketing.md backlog #2): the only way
+            # to tell which channel/SEO surface actually drove a visit, with
+            # no cookies and no third-party service — just more fields on
+            # the same structured log line.
+            qp = request.query_params
+            _funnel_logger.info(
+                "funnel.page_view path=%s referer=%s utm_source=%s utm_medium=%s "
+                "utm_campaign=%s utm_term=%s utm_content=%s",
+                request.url.path,
+                request.headers.get("referer", "-"),
+                qp.get("utm_source", "-"),
+                qp.get("utm_medium", "-"),
+                qp.get("utm_campaign", "-"),
+                qp.get("utm_term", "-"),
+                qp.get("utm_content", "-"),
+            )
         return response
 
     @app.get("/", response_class=HTMLResponse)
     async def landing() -> HTMLResponse:
         """Public marketing page (also used for SnapTrade / partner review)."""
         return HTMLResponse(LANDING_HTML)
+
+    @app.get("/robots.txt", response_class=Response)
+    async def robots() -> Response:
+        return Response(content=robots_txt(), media_type="text/plain")
+
+    @app.get("/sitemap.xml", response_class=Response)
+    async def sitemap() -> Response:
+        return Response(content=sitemap_xml(), media_type="application/xml")
 
     @app.get("/contact", response_class=HTMLResponse)
     async def contact_page() -> HTMLResponse:
@@ -1348,10 +1374,12 @@ def create_app() -> FastAPI:
         """Account, brokerage connection, plan, and account deletion."""
         return _webapp_html(settings_page)
 
-    @app.get("/app/settings/delivery", response_class=HTMLResponse)
-    async def app_settings_delivery() -> HTMLResponse:
-        """Digest delivery channel and schedule management."""
-        return _webapp_html(delivery_settings_page)
+    @app.get("/app/settings/delivery")
+    async def app_settings_delivery(request: Request) -> RedirectResponse:
+        """Delivery now lives inside /app/settings as a section; old links
+        and bookmarks (and the Discord OAuth callback) land on it directly."""
+        qs = f"?{request.url.query}" if request.url.query else ""
+        return RedirectResponse(f"/app/settings{qs}#section-delivery", status_code=307)
 
     @app.get("/app/reset", response_class=HTMLResponse)
     async def app_reset() -> HTMLResponse:
@@ -2527,7 +2555,7 @@ def create_app() -> FastAPI:
         if parsed is None:
             # No trusted user/return target; land somewhere sensible and let
             # the page offer the manual webhook fallback.
-            return _discord_redirect("/app/settings/delivery", "error")
+            return _discord_redirect("/app/settings", "error")
         user_id, return_path = parsed
         if error or not code:
             status = "cancelled" if error == "access_denied" else "error"
@@ -2949,7 +2977,7 @@ def create_app() -> FastAPI:
         # "Cheap or expensive" verdict (app/quant/valuation.py), written
         # nightly by valuation_refresh — a flat cache read, not live scoring.
         # The label is free (same tier as the /stocks/valuations grid); the
-        # evidence (sector-median comparisons) is Pro-gated, field-level,
+        # evidence (peer-median comparisons) is Pro-gated, field-level,
         # same effective_plan() check used for whole-endpoint 402s elsewhere
         # in this file.
         val = val_rows.get(t)
@@ -2966,6 +2994,8 @@ def create_app() -> FastAPI:
                         "sector_z": float(val.sector_z) if val.sector_z is not None else None,
                         "metrics_used": val.metrics_used,
                         "sector_comparison": val.sector_comparison,
+                        "sector": val.sector,
+                        "industry": (val.evidence or {}).get("industry"),
                         "metrics": (val.evidence or {}).get("metrics"),
                     }
                     if is_pro

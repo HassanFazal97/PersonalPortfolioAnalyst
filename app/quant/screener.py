@@ -8,12 +8,15 @@ of here in each row's ``evidence`` dict.
 
 Methodology (constants below are the calibration surface):
 
-- **Robust sector-relative z-scores.** Each metric is normalized within its
-  GICS sector as ``clip((x - median) / (1.4826 * MAD + eps), -3, 3)`` — median
-  and MAD, not mean and stdev, because valuation ratios are fat-tailed and a
-  single 400x P/E would drag a sector's whole distribution. Sectors with fewer
-  than ``MIN_SECTOR_SIZE`` scored names fall back to universe-wide stats.
-  Signs are flipped so higher z always means more attractive.
+- **Robust peer-relative z-scores, industry-first.** Each metric is
+  normalized within the tightest peer group with enough scored members:
+  industry (``MIN_INDUSTRY_SIZE``) -> sector (``MIN_SECTOR_SIZE``) ->
+  the whole universe, as ``clip((x - median) / (1.4826 * MAD + eps), -3, 3)``
+  — median and MAD, not mean and stdev, because valuation ratios are
+  fat-tailed and a single 400x P/E would drag a group's whole distribution.
+  A ticker with no/undersized industry falls straight through to the sector
+  tier; missing sector falls through to the universe tier. Signs are flipped
+  so higher z always means more attractive.
 - **Factors renormalize over what's available** rather than imputing missing
   data (imputation would fabricate mid-pack scores for the least-covered
   names, which skews TSX). A name must have the value factor and at least
@@ -48,7 +51,12 @@ FACTOR_WEIGHTS: dict[str, float] = {
 }
 # A name needs the value factor plus at least this many others to be ranked.
 MIN_OTHER_FACTORS = 3
-# Sector groups smaller than this use universe-wide normalization stats.
+# Industry groups smaller than this fall back to the sector tier. Lower than
+# MIN_SECTOR_SIZE on purpose: industries are much narrower than sectors (the
+# tracked universe spans ~150 industry labels vs. ~11 sectors), so reusing
+# the sector threshold here would almost never let the industry tier fire.
+MIN_INDUSTRY_SIZE = 5
+# Sector groups smaller than this fall back to universe-wide normalization.
 MIN_SECTOR_SIZE = 8
 # Robust-z winsorization bound.
 Z_CLIP = 3.0
@@ -139,42 +147,65 @@ def robust_z(values: np.ndarray) -> np.ndarray:
     return out
 
 
-def _sector_relative_z(values: np.ndarray, sectors: list[str | None]) -> np.ndarray:
-    """Robust z within each sector; small/missing sectors fall back to the
-    universe-wide cross-section."""
-    out = np.full(values.shape, np.nan)
-    universe_z = robust_z(values)
-    by_sector: dict[str, list[int]] = {}
-    for i, s in enumerate(sectors):
-        by_sector.setdefault(s or "", []).append(i)
-    for sector, idxs in by_sector.items():
-        idx = np.array(idxs)
-        scored = np.isfinite(values[idx]).sum()
-        if not sector or scored < MIN_SECTOR_SIZE:
-            out[idx] = universe_z[idx]
-        else:
-            out[idx] = robust_z(values[idx])
-    return out
-
-
-def _sector_medians(values: np.ndarray, sectors: list[str | None]) -> np.ndarray:
-    """Per-row median of the row's own sector (universe median for small or
-    missing sectors) — the comparison number shown as evidence."""
-    out = np.full(values.shape, np.nan)
-    finite = values[np.isfinite(values)]
-    universe_med = float(np.median(finite)) if finite.size else np.nan
-    by_sector: dict[str, list[int]] = {}
-    for i, s in enumerate(sectors):
-        by_sector.setdefault(s or "", []).append(i)
-    for sector, idxs in by_sector.items():
+def _group_z_and_median(
+    values: np.ndarray, groups: list[str | None], min_size: int
+) -> tuple[np.ndarray, np.ndarray]:
+    """Robust z and median within each group that has >= min_size scored
+    members. Positions whose own group is missing or undersized get NaN in
+    both outputs — the caller decides what to fall back to next. A None/""
+    group never enters a bucket, so it's indistinguishable from "undersized"
+    and falls through the same way, with no special-casing needed."""
+    z = np.full(values.shape, np.nan)
+    med = np.full(values.shape, np.nan)
+    by_group: dict[str, list[int]] = {}
+    for i, g in enumerate(groups):
+        if g:
+            by_group.setdefault(g, []).append(i)
+    for _group, idxs in by_group.items():
         idx = np.array(idxs)
         vals = values[idx]
-        scored = vals[np.isfinite(vals)]
-        if not sector or scored.size < MIN_SECTOR_SIZE:
-            out[idx] = universe_med
-        else:
-            out[idx] = float(np.median(scored))
-    return out
+        if np.isfinite(vals).sum() >= min_size:
+            z[idx] = robust_z(vals)
+            med[idx] = float(np.median(vals[np.isfinite(vals)]))
+    return z, med
+
+
+def _peer_relative_z(
+    values: np.ndarray, industries: list[str | None], sectors: list[str | None]
+) -> tuple[np.ndarray, np.ndarray]:
+    """Robust z against the finest peer group with enough scored members:
+    industry -> sector -> the whole universe. Returns ``(z, tier)`` where
+    ``tier`` is a per-row array of "industry"/"sector"/"universe" naming
+    which level actually fired."""
+    industry_z, _ = _group_z_and_median(values, industries, MIN_INDUSTRY_SIZE)
+    sector_z, _ = _group_z_and_median(values, sectors, MIN_SECTOR_SIZE)
+    universe_z = robust_z(values)
+    z = np.where(
+        np.isfinite(industry_z), industry_z, np.where(np.isfinite(sector_z), sector_z, universe_z)
+    )
+    tier = np.where(
+        np.isfinite(industry_z), "industry", np.where(np.isfinite(sector_z), "sector", "universe")
+    )
+    return z, tier
+
+
+def _peer_medians(
+    values: np.ndarray, industries: list[str | None], sectors: list[str | None]
+) -> np.ndarray:
+    """Per-row median of the row's own peer group (industry, falling back to
+    sector, falling back to the universe) — the comparison number shown as
+    evidence. Sector-tier medians come from the *full* sector bucket, not
+    just the industry tier's leftovers, so a sector-tier fallback still
+    compares against a legitimate full cross-section."""
+    _, industry_med = _group_z_and_median(values, industries, MIN_INDUSTRY_SIZE)
+    _, sector_med = _group_z_and_median(values, sectors, MIN_SECTOR_SIZE)
+    finite = values[np.isfinite(values)]
+    universe_med = float(np.median(finite)) if finite.size else np.nan
+    return np.where(
+        np.isfinite(industry_med),
+        industry_med,
+        np.where(np.isfinite(sector_med), sector_med, universe_med),
+    )
 
 
 def _get(payload: dict[str, Any], section: str, key: str) -> float | None:
@@ -290,6 +321,7 @@ def score_universe(
     payloads = [fundamentals[t] for t in eligible]
     close_vals = [[r["adj_close"] for r in closes[t]] for t in eligible]
     sectors = [(p.get("profile") or {}).get("sector") for p in payloads]
+    industries = [(p.get("profile") or {}).get("industry") for p in payloads]
 
     # ---- collect raw metric columns -------------------------------------
     raw: dict[str, np.ndarray] = {}
@@ -341,7 +373,7 @@ def score_universe(
 
     def metric_z(key: str, sign: int, *, sector_relative: bool) -> np.ndarray:
         z = (
-            _sector_relative_z(raw[key], sectors)
+            _peer_relative_z(raw[key], industries, sectors)[0]
             if sector_relative
             else robust_z(raw[key])
         )
@@ -396,9 +428,9 @@ def score_universe(
     ).sum(axis=0)
     rankable = value_present & (others_present >= MIN_OTHER_FACTORS)
 
-    # ---- evidence: sector medians of the raw valuation/quality metrics ---
+    # ---- evidence: peer medians of the raw valuation/quality metrics -----
     medians = {
-        key: _sector_medians(raw[key], sectors)
+        key: _peer_medians(raw[key], industries, sectors)
         for _, key, _s, _p in [*_VALUE_METRICS, *_QUALITY_METRICS, *_GROWTH_METRICS]
     }
 
@@ -407,9 +439,28 @@ def score_universe(
 
     # ---- value-only evidence, independent of the composite's rankable gate
     value_metric_keys = [key for _, key, _s, _p in _VALUE_METRICS]
+    industry_counts: dict[str, int] = {}
+    for ind in industries:
+        if ind:
+            industry_counts[ind] = industry_counts.get(ind, 0) + 1
     sector_counts: dict[str, int] = {}
     for s in sectors:
-        sector_counts[s or ""] = sector_counts.get(s or "", 0) + 1
+        if s:
+            sector_counts[s] = sector_counts.get(s, 0) + 1
+
+    def _comparison_tier(i: int) -> str:
+        # Approximate: whether this ticker's *industry*/*sector* had enough
+        # scored peers overall to normalize against, vs. falling back to a
+        # broader tier (mirrors MIN_INDUSTRY_SIZE/MIN_SECTOR_SIZE, but per
+        # metric the real fallback can vary slightly — this is the
+        # disclosed, honest approximation, not a per-metric audit).
+        ind, sec = industries[i], sectors[i]
+        if ind and industry_counts.get(ind, 0) >= MIN_INDUSTRY_SIZE:
+            return "industry"
+        if sec and sector_counts.get(sec, 0) >= MIN_SECTOR_SIZE:
+            return "sector"
+        return "universe (too small)"
+
     for i, t in enumerate(eligible):
         vz = factors["value"][i]
         if not np.isfinite(vz):
@@ -421,19 +472,11 @@ def score_universe(
         }
         result.value_evidence[t] = {
             "sector": sectors[i],
+            "industry": industries[i],
             "value_z": _r(vz),
             "metrics_used": len(metrics),
             "metrics": metrics,
-            # Approximate: whether this ticker's *sector* had enough scored
-            # peers overall to normalize against, vs. falling back to the
-            # universe-wide cross-section (mirrors MIN_SECTOR_SIZE, but per
-            # metric the real fallback can vary slightly — this is the
-            # disclosed, honest approximation, not a per-metric audit).
-            "sector_comparison": (
-                "sector"
-                if sectors[i] and sector_counts.get(sectors[i], 0) >= MIN_SECTOR_SIZE
-                else "universe (sector too small)"
-            ),
+            "sector_comparison": _comparison_tier(i),
         }
 
     rows: list[dict[str, Any]] = []
@@ -453,6 +496,7 @@ def score_universe(
                 "ticker": t,
                 "name": (p.get("profile") or {}).get("name"),
                 "sector": sectors[i],
+                "industry": industries[i],
                 "last_price": _r(last_price[i]),
                 "factors": {f: _r(factors[f][i]) for f in names},
                 "composite": _r(composite[i]),
