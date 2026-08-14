@@ -13,3 +13,9 @@ scripts/.calib_cache/
 .claude/settings.local.json
 build/
 evals/results/
+# Higgsfield skills, installed with `npx skills add higgsfield-ai/skills`.
+# Reinstallable, so not committed. The pattern is scoped to higgsfield-* on
+# purpose: .claude/skills/verify is this project's own skill and is tracked.
+.agents/
+.claude/skills/higgsfield-*
+skills-lock.json
