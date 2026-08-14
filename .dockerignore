@@ -12,3 +12,10 @@ __pycache__
 tests
 macworker
 PROJECT_SPEC.md
+# Non-Python trees. The Dockerfile copies `app` and `scripts` explicitly, so
+# none of these could reach the image anyway — but node_modules in the build
+# context makes every Railway deploy upload them.
+mobile
+ad
+docs
+evals
