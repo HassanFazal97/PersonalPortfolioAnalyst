@@ -329,6 +329,10 @@ async def _deliver_alerts(
             user_id=user_id,
             kind="alert",
             subject=f"Portfolio alert: {alert['headline'][:80]}",
+            push=True,
+            push_title=alert["headline"][:60],
+            push_body=alert["body"],
+            deep_link="cirvia://news",
         )
         await db.mark_alert_delivered(alert_id)
         delivered.append({**alert, "id": str(alert_id)})

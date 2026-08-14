@@ -15,6 +15,7 @@ from app.config import Settings
 from app.delivery.adapters.base import ChannelAdapter, SendResult
 from app.delivery.adapters.discord import DiscordAdapter
 from app.delivery.adapters.email_resend import ResendEmailAdapter
+from app.delivery.adapters.expo_push import ExpoPushAdapter
 from app.delivery.adapters.twilio_sms import TwilioSMSAdapter
 
 __all__ = ["ChannelAdapter", "SendResult", "build_adapters"]
@@ -62,4 +63,18 @@ def build_adapters(settings: Settings) -> dict[str, ChannelAdapter]:
             auth_token=settings.twilio_auth_token,
             from_number=settings.twilio_from_number,
         )
+    if settings.push_enabled:
+        # Registered under "push", which is deliberately not in CHANNELS — the
+        # delivery picker filters it out, so it can never become a user's one
+        # preferred destination. See app/delivery/channels.py.
+        adapters["push"] = ExpoPushAdapter(
+            access_token=settings.expo_access_token,
+            dry_run=settings.push_dry_run,
+        )
+        if settings.push_dry_run:
+            _logger.warning(
+                "PUSH_ENABLED with PUSH_DRY_RUN — push rows will be queued and "
+                "logged but no notification will reach a device. Unset "
+                "PUSH_DRY_RUN once the fan-out has been observed in production."
+            )
     return adapters

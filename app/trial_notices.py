@@ -115,6 +115,14 @@ async def run_trial_notices(repo: Any, settings: Any) -> dict[str, Any]:
                     kind=notice["kind"],
                     subject=notice["subject"],
                     sms_body=notice["sms"],
+                    # Trial notices are time-sensitive and short — exactly the
+                    # shape push is good at. The kind here is the notice's own
+                    # ("trial_ending" etc.), which no device subscribes to by
+                    # default, so this is opt-in via /me/devices/kinds.
+                    push=True,
+                    push_title="Cirvia",
+                    push_body=notice["sms"],
+                    deep_link="cirvia://settings/plan",
                 )
                 queued += 1
             except Exception:  # noqa: BLE001 - one bad user never aborts the scan

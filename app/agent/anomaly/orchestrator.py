@@ -231,6 +231,14 @@ async def synthesize_anomalies_for_user(
                 user_id=user_id,
                 kind="alert",
                 subject=f"Price alert: {alert['headline'][:80]}",
+                push=True,
+                push_title=alert["headline"][:60],
+                push_body=alert["body"],
+                deep_link=(
+                    f"cirvia://stock/{alert['tickers'][0]}"
+                    if alert.get("tickers")
+                    else "cirvia://news"
+                ),
             )
             await db.mark_alert_delivered(alert_id)
             delivered.append({**alert, "id": str(alert_id)})

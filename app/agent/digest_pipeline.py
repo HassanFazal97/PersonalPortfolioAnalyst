@@ -618,6 +618,9 @@ async def _deliver_fallback(
             user_id=getattr(ctx, "user_id", None),
             kind="digest",
             subject="Your morning digest",
+            push=True,
+            push_title="Your morning digest",
+            deep_link="cirvia://digest",
         )
     except Exception:  # noqa: BLE001 - fallback delivery is best-effort
         pass

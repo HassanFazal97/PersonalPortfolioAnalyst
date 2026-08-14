@@ -128,6 +128,36 @@ class StripeEvent(Base):
     )
 
 
+class PushDevice(Base):
+    """One registered device token for native push (migration 030).
+
+    ``expo_token`` is unique on its own, not per user: a device that signs
+    into a second account moves rather than duplicates, so one phone can never
+    receive two accounts' notifications.
+    """
+
+    __tablename__ = "push_devices"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    user_id: Mapped[uuid.UUID] = _user_id_column()
+    expo_token: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    platform: Mapped[str] = mapped_column(Text, nullable=False, default="ios")
+    # JSONB rather than text[], matching users.digest_tickers — the fan-out
+    # filters in Python, so array containment buys nothing here.
+    kinds: Mapped[list] = mapped_column(
+        JSONB, nullable=False, server_default=text('\'["digest","alert","deep_dive"]\'')
+    )
+    disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_seen_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    created_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class NotificationChannel(Base):
     """A user's registered destination for one channel (migration 007)."""
 

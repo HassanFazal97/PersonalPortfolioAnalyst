@@ -470,6 +470,26 @@ class ChannelRegisterRequest(BaseModel):
     consent: bool = False  # required True for sms (TCPA opt-in)
 
 
+# Notification kinds a device can subscribe to. These are the `kind` values
+# the fan-out matches against, so they must stay in step with the kinds passed
+# to enqueue_outbound at its call sites.
+_PUSH_KINDS: tuple[str, ...] = ("digest", "alert", "deep_dive", "trial")
+
+
+class DeviceRegisterRequest(BaseModel):
+    expo_token: str
+    platform: str = "ios"
+    kinds: list[str] = ["digest", "alert", "deep_dive"]
+
+
+class DeviceUnregisterRequest(BaseModel):
+    expo_token: str
+
+
+class DeviceKindsRequest(BaseModel):
+    kinds: list[str]
+
+
 class ChannelVerifyRequest(BaseModel):
     channel: str
     code: str
@@ -2600,10 +2620,30 @@ def create_app() -> FastAPI:
         settings = get_settings()
         user = await repo.get_user(user_id)
         rows = await repo.get_notification_channels(user_id)
+        devices = await repo.list_push_devices(user_id)
         return {
             "preferred_channel": getattr(user, "preferred_channel", None),
-            # Channels this deployment can send (creds configured) — drives the UI picker.
-            "available_channels": sorted(app.state.delivery_adapters.keys()),
+            # Channels this deployment can send (creds configured) — drives the
+            # UI picker. Push is filtered out on purpose: it is an additive
+            # fan-out, not a destination a user can choose instead of email,
+            # and offering it in the picker would let them lose their digest.
+            "available_channels": sorted(
+                c for c in app.state.delivery_adapters if c != PUSH_CHANNEL
+            ),
+            # Read-only for the web settings page, so web and native agree on
+            # which devices are registered.
+            "devices": [
+                {
+                    "id": str(d.id),
+                    "platform": d.platform,
+                    "kinds": list(d.kinds or []),
+                    "masked": mask_destination(PUSH_CHANNEL, d.expo_token),
+                    "last_seen_at": (
+                        d.last_seen_at.isoformat() if d.last_seen_at else None
+                    ),
+                }
+                for d in devices
+            ],
             # One-click Discord connect (OAuth webhook.incoming) is offered
             # when the app creds + a state-signing secret are configured.
             "discord_oauth": bool(
@@ -2628,6 +2668,64 @@ def create_app() -> FastAPI:
         """The user's registered channels + which channels are available."""
         repo = _require_repo(app)
         return await _notifications_payload(repo, _user_id(request))
+
+    # ---- Push devices (native app) ---------------------------------------
+
+    @app.post("/me/devices", status_code=201)
+    async def register_device(req: DeviceRegisterRequest, request: Request) -> dict:
+        """Register this device's Expo push token (idempotent).
+
+        Called after the OS permission prompt is granted, and again on every
+        launch — the token can rotate, and re-registering is what revives one
+        that Expo previously reported dead.
+        """
+        repo = _require_repo(app)
+        user_id = _user_id(request)
+        token = req.expo_token.strip()
+        if not token.startswith(("ExponentPushToken[", "ExpoPushToken[")):
+            raise HTTPException(status_code=400, detail="not an Expo push token")
+        if req.platform not in ("ios", "android"):
+            raise HTTPException(status_code=400, detail="unknown platform")
+        bad = [k for k in req.kinds if k not in _PUSH_KINDS]
+        if bad:
+            raise HTTPException(
+                status_code=400, detail=f"unknown notification kinds: {', '.join(bad)}"
+            )
+        await repo.upsert_push_device(
+            user_id,
+            expo_token=token,
+            platform=req.platform,
+            kinds=list(req.kinds) or list(_PUSH_KINDS),
+        )
+        snapshot.store.invalidate(user_id, "notifications")
+        return await _notifications_payload(repo, user_id)
+
+    @app.delete("/me/devices")
+    async def unregister_device(req: DeviceUnregisterRequest, request: Request) -> dict:
+        """Stop pushing to a device — sign-out, or the user turning push off."""
+        repo = _require_repo(app)
+        user_id = _user_id(request)
+        # Ownership: only disable a token that belongs to the caller, so a
+        # leaked token can't be used to silence someone else's device.
+        owned = {d.expo_token for d in await repo.list_push_devices(user_id)}
+        if req.expo_token.strip() in owned:
+            await repo.disable_push_device(req.expo_token.strip())
+        snapshot.store.invalidate(user_id, "notifications")
+        return await _notifications_payload(repo, user_id)
+
+    @app.patch("/me/devices/kinds")
+    async def set_device_kinds(req: DeviceKindsRequest, request: Request) -> dict:
+        """Which notifications this account's devices want."""
+        repo = _require_repo(app)
+        user_id = _user_id(request)
+        bad = [k for k in req.kinds if k not in _PUSH_KINDS]
+        if bad:
+            raise HTTPException(
+                status_code=400, detail=f"unknown notification kinds: {', '.join(bad)}"
+            )
+        await repo.set_push_device_kinds(user_id, kinds=list(req.kinds))
+        snapshot.store.invalidate(user_id, "notifications")
+        return await _notifications_payload(repo, user_id)
 
     @app.post("/me/notifications/channel", status_code=202)
     async def register_channel(req: ChannelRegisterRequest, request: Request) -> dict:

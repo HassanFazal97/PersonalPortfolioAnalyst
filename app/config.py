@@ -382,6 +382,17 @@ class Settings(BaseSettings):
     # the redirect URI matches what's registered in the Discord app.
     discord_client_id: str = Field(default="", alias="DISCORD_CLIENT_ID")
     discord_client_secret: str = Field(default="", alias="DISCORD_CLIENT_SECRET")
+    # Expo Push Service — one HTTP call covers both APNs and FCM, and the
+    # APNs key / FCM service account live in EAS rather than this container.
+    # The access token is optional (Expo accepts unauthenticated sends unless
+    # the project enforces it); push_enabled is what registers the adapter.
+    expo_access_token: str = Field(default="", alias="EXPO_ACCESS_TOKEN")
+    push_enabled: bool = Field(default=False, alias="PUSH_ENABLED")
+    # Dry run: fan out and queue push rows, but have the adapter log instead
+    # of calling Expo. The fan-out edits enqueue_outbound, which is the one
+    # function whose failure mode is "nobody gets their digest, silently" —
+    # so the first week of it runs where a bug is visible but harmless.
+    push_dry_run: bool = Field(default=True, alias="PUSH_DRY_RUN")
 
     # ---- Stripe billing (Checkout + Customer Portal + webhook) ------------
     # Billing is off until secret key, monthly price, and PUBLIC_BASE_URL are

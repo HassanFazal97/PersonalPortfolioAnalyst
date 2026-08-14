@@ -138,6 +138,9 @@ async def send_digest(payload: dict[str, Any], ctx: Any = None) -> dict[str, Any
         kind="digest",
         subject=f"Your morning digest, {digest_date.strftime('%b %d')}",
         sms_body=body,
+        push=True,
+        push_title="Your morning digest",
+        deep_link="cirvia://digest",
     )
 
     return {

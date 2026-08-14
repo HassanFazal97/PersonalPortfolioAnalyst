@@ -8,8 +8,18 @@ from __future__ import annotations
 
 import re
 
-# Channels the in-process dispatcher delivers.
+# Channels a user can choose as their ONE preferred destination.
 CHANNELS: tuple[str, ...] = ("sms", "email", "discord")
+
+# Push is deliberately NOT in CHANNELS.
+#
+# `preferred_channel` resolves a single destination, so adding push here would
+# let a user select it and thereby lose their email digest — and a ~4KB push
+# payload cannot carry a digest anyway. Push is an additive fan-out: a pointer
+# to content that rides alongside whatever the preferred channel does. It is
+# still a valid `outbound_messages.channel` value, which is why the dispatcher
+# and the adapter registry know the name even though the picker never shows it.
+PUSH_CHANNEL = "push"
 
 _E164_RE = re.compile(r"^\+[1-9]\d{7,14}$")
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -43,4 +53,8 @@ def mask_destination(channel: str, destination: str) -> str:
         return (local[:1] or "•") + "•••@" + domain
     if channel == "discord":
         return "discord webhook •••" + destination[-4:]
+    if channel == PUSH_CHANNEL:
+        # ExponentPushToken[xxxxxxxxxxxxxxxxxxxxxx] — show only the tail so a
+        # device is identifiable in a list without exposing a sendable token.
+        return "device •••" + destination.rstrip("]")[-4:]
     return "•••"

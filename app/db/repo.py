@@ -44,6 +44,7 @@ from app.db.models import (
     NotificationChannel,
     OutboundMessage,
     Position,
+    PushDevice,
     SnaptradeCredentials,
     StockPickEntry,
     StockPicksRun,
@@ -57,7 +58,7 @@ from app.db.models import (
     VerificationCode,
     WatchlistItem,
 )
-from app.delivery.channels import CHANNELS
+from app.delivery.channels import CHANNELS, PUSH_CHANNEL
 
 # Owner (user #1) attribution until per-user auth lands. Every tenant-scoped
 # read/write defaults to this user; pass user_id to scope to another.
@@ -1403,6 +1404,96 @@ class Repo:
 
     # ---- outbound messages (delivery queue) ------------------------------
 
+    # ---- Push devices (migration 030) ------------------------------------
+
+    async def upsert_push_device(
+        self,
+        user_id: uuid.UUID,
+        *,
+        expo_token: str,
+        platform: str = "ios",
+        kinds: list[str] | None = None,
+    ) -> uuid.UUID:
+        """Register (or re-register) a device token for this user.
+
+        The token is unique across the table, so a device that signs into a
+        second account is MOVED: the existing row is re-pointed rather than
+        duplicated, and one phone can never receive two accounts' pushes.
+        Re-registering also clears ``disabled_at`` — a reinstall is exactly
+        how a token that Expo once rejected comes back to life.
+        """
+        async with self._session() as s:
+            existing = await s.execute(
+                select(PushDevice).where(PushDevice.expo_token == expo_token)
+            )
+            row = existing.scalar_one_or_none()
+            now = datetime.now(timezone.utc)
+            if row is None:
+                row = PushDevice(
+                    user_id=user_id,
+                    expo_token=expo_token,
+                    platform=platform,
+                    kinds=kinds or ["digest", "alert", "deep_dive"],
+                    last_seen_at=now,
+                )
+                s.add(row)
+            else:
+                row.user_id = user_id
+                row.platform = platform
+                row.disabled_at = None
+                row.last_seen_at = now
+                if kinds is not None:
+                    row.kinds = kinds
+            await s.commit()
+            return row.id
+
+    async def list_push_devices(
+        self, user_id: uuid.UUID, *, kind: str | None = None
+    ) -> list[PushDevice]:
+        """Active devices for a user, optionally filtered to one kind."""
+        async with self._session() as s:
+            result = await s.execute(
+                select(PushDevice).where(
+                    PushDevice.user_id == user_id,
+                    PushDevice.disabled_at.is_(None),
+                )
+            )
+            rows = list(result.scalars())
+        if kind is None:
+            return rows
+        return [r for r in rows if kind in (r.kinds or [])]
+
+    async def disable_push_device(self, expo_token: str) -> bool:
+        """Mark a token dead (Expo's DeviceNotRegistered, or an explicit
+        sign-out). Kept rather than deleted so a reinstall reactivates it."""
+        async with self._session() as s:
+            result = await s.execute(
+                select(PushDevice).where(PushDevice.expo_token == expo_token)
+            )
+            row = result.scalar_one_or_none()
+            if row is None:
+                return False
+            row.disabled_at = datetime.now(timezone.utc)
+            await s.commit()
+            return True
+
+    async def set_push_device_kinds(
+        self, user_id: uuid.UUID, *, kinds: list[str]
+    ) -> int:
+        """Set the notification kinds for all of a user's active devices."""
+        async with self._session() as s:
+            result = await s.execute(
+                select(PushDevice).where(
+                    PushDevice.user_id == user_id,
+                    PushDevice.disabled_at.is_(None),
+                )
+            )
+            rows = list(result.scalars())
+            for row in rows:
+                row.kinds = kinds
+            await s.commit()
+            return len(rows)
+
     async def enqueue_outbound(
         self,
         body: str,
@@ -1411,6 +1502,10 @@ class Repo:
         kind: str = "message",
         subject: str | None = None,
         sms_body: str | None = None,
+        push: bool = False,
+        push_title: str | None = None,
+        push_body: str | None = None,
+        deep_link: str | None = None,
     ) -> uuid.UUID:
         """Queue a message for delivery, resolving the user's preferred channel
         now (destination snapshot). No verified, opted-in channel -> the row is
@@ -1420,7 +1515,15 @@ class Repo:
         ``sms_body`` is a channel-aware override: when the resolved channel is
         SMS, the shorter ``sms_body`` is delivered instead of ``body`` (which is
         the richer version kept for email/Discord/web). Skipped rows retain the
-        full ``body`` for the audit trail."""
+        full ``body`` for the audit trail.
+
+        ``push=True`` additionally fans out one row per registered device, with
+        ``channel='push'`` and the device token as the destination. This is
+        strictly additive: the preferred-channel row above is written exactly
+        as it would be otherwise, whether or not any device is registered and
+        whether or not the fan-out raises. Returns the preferred-channel row's
+        id — the push rows are fire-and-forget pointers, not the message.
+        """
         uid = user_id or _OWNER_USER_ID
         payload: dict[str, Any] = {"kind": kind}
         if subject:
@@ -1452,6 +1555,44 @@ class Repo:
                     if preferred == "sms" and sms_body:
                         msg.body = sms_body
             s.add(msg)
+
+            if push:
+                # Deliberately inside the same transaction and deliberately
+                # non-fatal: this function is the one whose silent failure
+                # means nobody gets their digest, so a fan-out that cannot
+                # find devices, or blows up reading them, must never take the
+                # real message down with it.
+                try:
+                    devices = await s.execute(
+                        select(PushDevice).where(
+                            PushDevice.user_id == uid,
+                            PushDevice.disabled_at.is_(None),
+                        )
+                    )
+                    for device in devices.scalars():
+                        if kind not in (device.kinds or []):
+                            continue
+                        s.add(
+                            OutboundMessage(
+                                user_id=uid,
+                                channel=PUSH_CHANNEL,
+                                destination=device.expo_token,
+                                body=(push_body or sms_body or body)[:150],
+                                payload={
+                                    "kind": kind,
+                                    "title": push_title or "Cirvia",
+                                    "deep_link": deep_link,
+                                },
+                            )
+                        )
+                except Exception:
+                    logging.getLogger(__name__).exception(
+                        "push fan-out failed for user %s (kind=%s); the "
+                        "preferred-channel message is unaffected",
+                        uid,
+                        kind,
+                    )
+
             await s.commit()
             return msg.id
 

@@ -37,6 +37,9 @@ class FakeRepo:
             uuid.UUID, tuple[int, datetime | None]
         ] = {}
         self._notification_channels: dict[tuple[Any, str], SimpleNamespace] = {}
+        # Keyed by token, not (user, token): a token is unique table-wide, so
+        # signing in on a shared device moves it between accounts.
+        self._push_devices: dict[str, SimpleNamespace] = {}
         self._verification_codes: dict[uuid.UUID, SimpleNamespace] = {}
         self._news_items: list[SimpleNamespace] = []
         self._news_fingerprints: set[tuple] = set()
@@ -836,7 +839,8 @@ class FakeRepo:
                 a.delivered = True
 
     async def enqueue_outbound(self, body, *, user_id=None, kind="message",
-                               subject=None, sms_body=None):
+                               subject=None, sms_body=None, push=False,
+                               push_title=None, push_body=None, deep_link=None):
         # Mirror the real channel-aware routing: SMS gets the shorter sms_body,
         # other channels get the (possibly richer) body.
         user = self._users_by_id.get(user_id) if user_id is not None else None
@@ -854,7 +858,83 @@ class FakeRepo:
             destination=None,
             payload={"kind": kind, **({"subject": subject} if subject else {})},
         )
+        # Additive fan-out: one extra row per subscribed device, never in
+        # place of the row above. Mirrors the real repo, including that the
+        # returned id is always the preferred-channel row's.
+        if push:
+            for device in self._push_devices.values():
+                if device.user_id != user_id or device.disabled_at is not None:
+                    continue
+                if kind not in (device.kinds or []):
+                    continue
+                push_id = uuid.uuid4()
+                self._outbox[push_id] = SimpleNamespace(
+                    id=push_id,
+                    user_id=user_id,
+                    body=(push_body or sms_body or body)[:150],
+                    status="queued",
+                    attempts=0,
+                    channel="push",
+                    destination=device.expo_token,
+                    payload={
+                        "kind": kind,
+                        "title": push_title or "Cirvia",
+                        "deep_link": deep_link,
+                    },
+                )
         return msg_id
+
+    # ---- push devices (migration 030) ------------------------------------
+
+    async def upsert_push_device(self, user_id, *, expo_token, platform="ios",
+                                 kinds=None):
+        existing = self._push_devices.get(expo_token)
+        if existing is None:
+            existing = SimpleNamespace(
+                id=uuid.uuid4(),
+                user_id=user_id,
+                expo_token=expo_token,
+                platform=platform,
+                kinds=kinds or ["digest", "alert", "deep_dive"],
+                disabled_at=None,
+                last_seen_at=datetime.now(timezone.utc),
+            )
+            self._push_devices[expo_token] = existing
+        else:
+            # A token is unique across users: signing in on a shared device
+            # MOVES it rather than duplicating it.
+            existing.user_id = user_id
+            existing.platform = platform
+            existing.disabled_at = None
+            existing.last_seen_at = datetime.now(timezone.utc)
+            if kinds is not None:
+                existing.kinds = kinds
+        return existing.id
+
+    async def list_push_devices(self, user_id, *, kind=None):
+        rows = [
+            d for d in self._push_devices.values()
+            if d.user_id == user_id and d.disabled_at is None
+        ]
+        if kind is None:
+            return rows
+        return [d for d in rows if kind in (d.kinds or [])]
+
+    async def disable_push_device(self, expo_token):
+        row = self._push_devices.get(expo_token)
+        if row is None:
+            return False
+        row.disabled_at = datetime.now(timezone.utc)
+        return True
+
+    async def set_push_device_kinds(self, user_id, *, kinds):
+        rows = [
+            d for d in self._push_devices.values()
+            if d.user_id == user_id and d.disabled_at is None
+        ]
+        for row in rows:
+            row.kinds = kinds
+        return len(rows)
 
     async def has_outbound_of_kind(self, user_id, kind):
         return any(

@@ -272,6 +272,9 @@ async def run_deep_dive(
                     user_id=user_id,
                     kind="deep_dive",
                     subject="Your portfolio deep dive",
+                    push=True,
+                    push_title="Your deep dive is ready",
+                    deep_link=f"cirvia://dives/{report_id}",
                 )
             except Exception:  # noqa: BLE001 - delivery is best-effort
                 pass
