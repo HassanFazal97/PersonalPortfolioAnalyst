@@ -3939,32 +3939,32 @@ _TUTORIAL_JS = r"""
     { centered: true, title: 'Welcome to Cirvia',
       body: 'Cirvia is your analyst: it reads your actual portfolio, writes ' +
         'you a brief every morning, and shows its work. Here’s a quick ' +
-        'tour of where everything lives — about two minutes.' },
+        'tour of where everything lives. It takes about two minutes.' },
     { target: () => document.getElementById('dash-summary'),
       title: 'Your portfolio at a glance',
-      body: 'Portfolio value, today’s move, and total return — ' +
-        'synced from your brokerage, no manual entry. It updates every time ' +
+      body: 'Portfolio value, today’s move, and total return, synced from ' +
+        'your brokerage with no manual entry. It updates every time ' +
         'your holdings do.' },
     { tab: 'digest', target: () => panel('digest'), title: 'Your morning digest',
       body: () => WELCOME
         ? 'Every morning before the open, Cirvia writes a plain-English brief ' +
           'on your holdings: what moved, why it matters, and what to watch. ' +
-          'Your first one is being written right now — it lands on this ' +
+          'Your first one is being written right now, and it lands on this ' +
           'tab in a minute or two.'
         : 'Every morning before the open, Cirvia writes a plain-English brief ' +
           'on your holdings: what moved, why it matters, and what to watch. ' +
-          'It lands here — and on your phone or inbox if you set up delivery.' },
-    { tab: 'deep-dive', target: () => panel('deep-dive'), title: 'Deep Dive — Pro',
-      body: () => 'Four research agents — fundamentals, technicals, risk, ' +
-        'and news — investigate your portfolio in parallel, then a ' +
+          'It lands here, and on your phone or inbox if you set up delivery.' },
+    { tab: 'deep-dive', target: () => panel('deep-dive'), title: 'Deep Dive (Pro)',
+      body: () => 'Four research agents (fundamentals, technicals, risk, ' +
+        'and news) investigate your portfolio in parallel, then a ' +
         'verifier re-checks their claims against live data before you see ' +
-        'the report.' + (WELCOME ? ' It’s included in your trial — run one any time.' : '') },
+        'the report.' + (WELCOME ? ' It’s included in your trial, so run one any time.' : '') },
     { tab: 'news', target: () => panel('news'), title: 'News that concerns you',
       body: 'Digests, alerts, and articles about your holdings in one feed. ' +
         'Filter by period, kind, severity, or category so only what moves ' +
         'your money surfaces.' },
     { tab: 'holdings', target: () => panel('holdings'), title: 'Your holdings',
-      body: 'Every synced position with returns and allocation — the ' +
+      body: 'Every synced position with returns and allocation. This is the ' +
         'same book Cirvia reads when it writes about you. Open any ticker ' +
         'for charts, fundamentals, and its news.' },
     { tab: 'watching', target: () => panel('watching'), title: 'Watching',
@@ -3974,28 +3974,28 @@ _TUTORIAL_JS = r"""
     { tab: 'digest', target: () => document.getElementById('chat-fab'),
       title: 'Ask Cirvia anything',
       body: 'Chat with the analyst about your holdings or the market. Answers ' +
-        'use your real positions — and Cirvia never tells you to buy or sell.' },
-    { desktop: true, target: () => sideLink('/app/picks'), title: 'Model Picks — Pro',
+        'use your real positions, and Cirvia never tells you to buy or sell.' },
+    { desktop: true, target: () => sideLink('/app/picks'), title: 'Model Picks (Pro)',
       body: 'The model’s highest-conviction stock ideas, refreshed daily, ' +
         'each with its reasoning. Every pick is logged to a public track ' +
-        'record — nothing to take on faith.' },
-    { desktop: true, target: () => sideLink('/app/risk'), title: 'Risk Lab — Pro',
+        'record, so there’s nothing to take on faith.' },
+    { desktop: true, target: () => sideLink('/app/risk'), title: 'Risk Lab (Pro)',
       body: 'Volatility, worst-day estimates, diversification, and a Monte ' +
-        'Carlo view of the year ahead — how your portfolio could behave, ' +
+        'Carlo view of the year ahead: how your portfolio could behave, ' +
         'before the market shows you.' },
-    { desktop: true, target: () => sideLink('/app/deep-dives'), title: 'Deep Dives — Pro',
+    { desktop: true, target: () => sideLink('/app/deep-dives'), title: 'Deep Dives (Pro)',
       body: 'Every report you run is kept here, so you can go back and check ' +
-        'what the analysis said — and whether it held up.' },
+        'what the analysis said, and whether it held up.' },
     { desktop: true, target: () => sideLink('/app/settings'), title: 'Settings',
       body: 'Delivery channels and timing, your brokerage connection, your ' +
         'investor profile, and your plan all live here.' },
     { drawer: true, target: () => document.querySelector('.sidebar-hamburger'),
       title: 'The rest of Cirvia',
-      body: 'This menu holds Model Picks, Risk Lab, Deep Dives, and Settings ' +
-        '— delivery, your investor profile, and the Pro tools all live there.' },
+      body: 'This menu holds Model Picks, Risk Lab, Deep Dives, and Settings. ' +
+        'Delivery, your investor profile, and the Pro tools all live there.' },
     { centered: true, last: true, title: 'That’s Cirvia',
       body: () => (WELCOME
-        ? 'Your first briefing lands on this page shortly — and ' +
+        ? 'Your first briefing lands on this page shortly, and ' +
           'tomorrow’s arrives before the open, wherever you want it. '
         : '') + 'You can replay this tour anytime from Settings.' },
   ];
