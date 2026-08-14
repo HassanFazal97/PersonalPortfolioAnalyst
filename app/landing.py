@@ -706,6 +706,14 @@ html.sidebar-collapsed .side-link:focus-visible::after { opacity: 1; }
   }
   .wrap { --content-w: var(--maxw); }
   .app-wrap { --content-w: 880px; }
+  /* Pages that render with no sidebar at all (onboarding: _page(..,
+     show_sidebar=False)) get a "no-sidebar" body class — same specificity
+     trick as above, just resetting the margins the rules right above this
+     one would otherwise still reserve for a sidebar that isn't in the DOM. */
+  body.no-sidebar footer, body.no-sidebar .app-foot { margin-left: 0; }
+  body.no-sidebar .wrap, body.no-sidebar .app-wrap {
+    margin-left: auto; margin-right: auto;
+  }
 }
 
 @media (max-width: 900px) {

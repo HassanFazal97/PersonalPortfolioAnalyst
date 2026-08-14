@@ -879,6 +879,7 @@ def _page(
     anon_key: str,
     extra_js: str,
     chrome: bool = True,
+    show_sidebar: bool = True,
     wrap_class: str = "app-wrap",
     extra_config: dict | None = None,
     active: str = "",
@@ -889,7 +890,12 @@ def _page(
         {"supabaseUrl": supabase_url, "supabaseAnonKey": anon_key, **(extra_config or {})}
     )
     if chrome:
-        shell = f"""{_app_sidebar(active)}
+        # show_sidebar=False (onboarding) drops the nav rail/drawer entirely —
+        # .app-wrap/footer would otherwise still reserve its width via the
+        # body-scoped margin-left rule in _SIDEBAR_CSS, so the "no-sidebar"
+        # body class there resets it back to centered.
+        sidebar_html = _app_sidebar(active) if show_sidebar else ""
+        shell = f"""{sidebar_html}
 <main class="{wrap_class}">
 {_APP_TOP_SEARCH}
 {body}
@@ -902,6 +908,7 @@ def _page(
 </footer>"""
     else:
         shell = body
+    body_class = "" if show_sidebar else ' class="no-sidebar"'
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -913,7 +920,7 @@ def _page(
 {ICON_LINKS}{_FONT_LINKS}<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <style>{_CSS}{_APP_CSS}{_TUTORIAL_CSS}</style>
 </head>
-<body>
+<body{body_class}>
 {shell}
 <script>window.CIRVIA_CONFIG = {config};</script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
@@ -3047,33 +3054,43 @@ function renderHoldingsPie(groups, totals) {
   if (priced.length > MAX_SLICES) {
     slices.push({ t: 'Other', v: priced.slice(MAX_SLICES).reduce((s, x) => s + x.v, 0), other: true });
   }
+  // Petal ring (echoes the dahlia brand mark): each slice is a round-capped
+  // stroked arc on one shared center circle rather than a hard-edged wedge —
+  // the same construction as an iOS-style activity ring — positioned via
+  // rotate + stroke-dasharray/-dashoffset. A real angular gap (not just a
+  // divider stroke) separates neighbors so they read as distinct rounded
+  // petals blooming around the center, not one ring cut into wedges.
   const R = 80, RI = 48, C = 100;
-  const pt = (r, frac) => {
-    const a = frac * 2 * Math.PI - Math.PI / 2;  // start at 12 o'clock, clockwise
-    return (C + r * Math.cos(a)).toFixed(2) + ' ' + (C + r * Math.sin(a)).toFixed(2);
-  };
+  const meanR = (R + RI) / 2, strokeW = R - RI;
+  const circumference = 2 * Math.PI * meanR;
+  const GAP = 6;  // px of visible background gap between rendered petals
   let paths = '', legend = '', acc = 0;
   slices.forEach((s, i) => {
     const frac = s.v / total;
     const pctTxt = (frac * 100).toFixed(1) + '%';
     const color = s.other ? PIE_OTHER : PIE_COLORS[i % PIE_COLORS.length];
     const label = esc(s.t) + ' ' + pctTxt;
+    const mid = acc + frac / 2;
     if (slices.length === 1) {
-      // A 360-degree arc has coincident endpoints and renders nothing.
+      // A full ring: no neighbor to gap against, no rounding needed.
       paths += '<circle class="pie-slice" data-idx="0" cx="' + C + '" cy="' + C +
-        '" r="' + ((R + RI) / 2) + '" fill="none" stroke="' + color +
-        '" stroke-width="' + (R - RI) + '"><title>' + label + '</title></circle>';
+        '" r="' + meanR + '" fill="none" stroke="' + color +
+        '" stroke-width="' + strokeW + '"><title>' + label + '</title></circle>';
     } else {
-      const a0 = acc, a1 = acc + frac;
-      const large = frac > 0.5 ? 1 : 0;
-      // A thin stroke in the card's own surface color cuts a visible gap
-      // between touching slices, so neighbors read as distinct wedges
-      // rather than one flat-colored ring (see dataviz skill: surface gap).
-      paths += '<path class="pie-slice" data-idx="' + i + '" fill="' + color +
-        '" stroke="var(--surface-1)" stroke-width="2.5" stroke-linejoin="round" d="' +
-        'M ' + pt(R, a0) + ' A ' + R + ' ' + R + ' 0 ' + large + ' 1 ' + pt(R, a1) +
-        ' L ' + pt(RI, a1) + ' A ' + RI + ' ' + RI + ' 0 ' + large + ' 0 ' + pt(RI, a0) +
-        ' Z"><title>' + label + '</title></path>';
+      // A round linecap adds strokeW/2 of *visible* length past each end of
+      // the dash itself — so the dash has to be shrunk by a full strokeW
+      // (not just GAP), or the caps' overhang eats the gap and neighbors
+      // overlap instead of reading as separate petals. Floored at 0: a
+      // sliver holding then renders as a minimal round dot (a bare round
+      // cap) rather than a negative-length dash.
+      const dash = Math.max(0, frac * circumference - GAP - strokeW);
+      const rotate = (mid * 360 - 90).toFixed(3);  // start at 12 o'clock, clockwise
+      paths += '<circle class="pie-slice" data-idx="' + i + '" cx="' + C + '" cy="' + C +
+        '" r="' + meanR + '" fill="none" stroke="' + color + '" stroke-width="' + strokeW +
+        '" stroke-linecap="round" stroke-dasharray="' + dash.toFixed(2) + ' ' +
+        (circumference - dash).toFixed(2) + '" stroke-dashoffset="' + (dash / 2).toFixed(2) +
+        '" transform="rotate(' + rotate + ' ' + C + ' ' + C + ')">' +
+        '<title>' + label + '</title></circle>';
     }
     legend += '<div class="pie-leg-row" data-idx="' + i + '">' +
       '<span class="lg" style="background:' + color + '"' +
@@ -4481,7 +4498,7 @@ function fillVerdict(d) {
   }
   if (v.evidence_gated) {
     evEl.innerHTML = '<div class="vd-evidence-gate">Compared against industry peers today ' +
-      '(falling back to sector, then the market, when there aren\'t enough industry peers — ' +
+      '(falling back to sector, then the market, when there aren\\'t enough industry peers — ' +
       '<a href="/methodology">methodology</a>). ' +
       '<a href="/app/settings?billing=upgrade">Upgrade to Pro</a> to see the numbers ' +
       'behind this verdict.</div>';
@@ -5482,6 +5499,7 @@ def onboarding_page(supabase_url: str, anon_key: str) -> str:
         anon_key=anon_key,
         extra_js=_DELIVERY_JS + _ONBOARDING_JS,
         wrap_class="app-wrap ob-wrap",
+        show_sidebar=False,
     )
 
 
