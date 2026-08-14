@@ -50,5 +50,5 @@ export const rise = (
 export const DIGEST_ROWS = [
   { t: "VFV", n: "S&P 500 ETF", c: "+0.8%", gain: true },
   { t: "NVDA", n: "NVIDIA", c: "+2.1%", gain: true },
-  { t: "ENB", n: "Enbridge", c: "−1.2%", gain: false },
+  { t: "AVGO", n: "Broadcom", c: "−1.4%", gain: false },
 ] as const;

@@ -7,17 +7,25 @@
     "render": "remotion render src/index.ts CirviaAd out/cirvia-ad-16x9.mp4",
     "render:demo": "remotion render src/index.ts CirviaDemo out/cirvia-demo-16x9.mp4",
     "render:vertical": "remotion render src/index.ts CirviaAdVertical out/cirvia-ad-9x16.mp4",
-    "render:square": "remotion render src/index.ts CirviaAdSquare out/cirvia-ad-1x1.mp4"
+    "render:square": "remotion render src/index.ts CirviaAdSquare out/cirvia-ad-1x1.mp4",
+    "render:motion": "remotion render src/index.ts CirviaMotion out/cirvia-motion-9x16.mp4",
+    "render:walkthrough": "remotion render src/index.ts CirviaWalkthrough out/cirvia-walkthrough-16x9.mp4",
+    "voiceover:generate": "tsx scripts/generate-voiceover.mts",
+    "broll:conform": "tsx scripts/conform-broll.mts"
   },
   "dependencies": {
     "@remotion/cli": "^4.0.0",
     "@remotion/google-fonts": "^4.0.0",
+    "@remotion/transitions": "^4.0.485",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "remotion": "^4.0.0"
   },
   "devDependencies": {
     "@types/react": "^18.3.3",
+    "dotenv": "^16.4.5",
+    "music-metadata": "^10.5.1",
+    "tsx": "^4.19.0",
     "typescript": "^5.5.0"
   }
 }

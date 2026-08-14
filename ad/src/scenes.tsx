@@ -1,7 +1,11 @@
 import React from "react";
 import {
   AbsoluteFill,
+  Audio,
+  OffthreadVideo,
+  Sequence,
   interpolate,
+  staticFile,
   useCurrentFrame,
   useVideoConfig,
 } from "remotion";
@@ -14,13 +18,28 @@ import {
   PillButton,
   SceneFade,
   Screen,
+  TransitionOverlay,
   TypingDots,
   panelStyle,
 } from "./components";
 import { AppDashboard, NotificationPopup } from "./dashboard";
 import { C, ease, rise } from "./theme";
+import { VO_CUES } from "./audio";
+import { SHOT_A, SHOT_B, SHOT_C } from "./broll";
 
 type SceneProps = { dur: number };
+
+/** Mounts a scene's VO line at its cue's scene-local start frame. Silent
+ * no-op if a scene has no cue (shouldn't happen for Scenes 1-7). */
+const SceneVO: React.FC<{ scene: 1 | 2 | 3 | 4 | 5 | 6 | 7 }> = ({ scene }) => {
+  const cue = VO_CUES.find((c) => c.scene === scene);
+  if (!cue) return null;
+  return (
+    <Sequence from={cue.voStart} premountFor={15}>
+      <Audio src={staticFile(cue.file)} />
+    </Sequence>
+  );
+};
 
 const Center: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <AbsoluteFill
@@ -46,6 +65,15 @@ export const Scene1: React.FC<SceneProps> = ({ dur }) => {
   return (
     <SceneFade frame={frame} duration={dur}>
       <Screen glow={false}>
+        <AbsoluteFill>
+          <OffthreadVideo
+            src={staticFile(SHOT_A.file)}
+            muted
+            style={{ width: "100%", height: "100%", objectFit: "cover" }}
+          />
+          <AbsoluteFill style={{ background: SHOT_A.scrimColor }} />
+        </AbsoluteFill>
+        <SceneVO scene={1} />
         <div
           style={{
             position: "absolute",
@@ -105,7 +133,7 @@ export const Scene1: React.FC<SceneProps> = ({ dur }) => {
               Morning digest
             </div>
             <div style={{ fontSize: 18, color: C.ink2, marginTop: 3, lineHeight: 1.45 }}>
-              VFV +0.8 · NVDA +2.1 · ENB −1.2. One thing to watch today.
+              VFV +0.8 · NVDA +2.1 · AVGO −1.4. One thing to watch today.
             </div>
           </div>
           <MaskedHeadline
@@ -130,6 +158,7 @@ export const Scene2: React.FC<SceneProps> = ({ dur }) => {
   return (
     <SceneFade frame={frame} duration={dur}>
       <Screen>
+        <SceneVO scene={2} />
         <Center>
           <div style={{ ...rise(frame, 6, 22, 20), transform: `scale(${drift})` }}>
             <BrowserFrame width={1300} height={790}>
@@ -169,6 +198,7 @@ export const Scene3: React.FC<SceneProps> = ({ dur }) => {
   return (
     <SceneFade frame={frame} duration={dur}>
       <Screen>
+        <SceneVO scene={3} />
         <Center>
           <BrowserFrame width={1300} height={790}>
             <div
@@ -197,7 +227,7 @@ export const Scene3: React.FC<SceneProps> = ({ dur }) => {
             frame={frame}
             at={12}
             title="Macro alert"
-            body="OPEC+ signals higher August output. Crude down 3%; touches ENB and SU."
+            body="A hyperscaler flagged slower AI infrastructure spending growth. Chip demand concerns pulled AVGO and MU lower."
           />
         </div>
       </Screen>
@@ -211,7 +241,7 @@ export const Scene3: React.FC<SceneProps> = ({ dur }) => {
 
 export const Scene4: React.FC<SceneProps> = ({ dur }) => {
   const frame = useCurrentFrame();
-  const q = "Why is ENB down today?";
+  const q = "Why is AVGO down today?";
   const typed = q.slice(
     0,
     Math.round(interpolate(frame, [18, 48], [0, q.length], {
@@ -223,6 +253,7 @@ export const Scene4: React.FC<SceneProps> = ({ dur }) => {
   return (
     <SceneFade frame={frame} duration={dur}>
       <Screen>
+        <SceneVO scene={4} />
         <Center>
           <div
             style={{
@@ -269,7 +300,7 @@ export const Scene4: React.FC<SceneProps> = ({ dur }) => {
                     ...rise(frame, 92, 16, 10),
                   }}
                 >
-                  Crude fell 3% after OPEC+ signalled higher output. ENB is your
+                  A hyperscaler signaled slower AI spending growth. AVGO is your
                   third-largest holding.
                 </div>
               ) : null}
@@ -319,7 +350,7 @@ export const Scene4: React.FC<SceneProps> = ({ dur }) => {
 // Scene 5 — the signature shot: one brief fans out to four channels
 // ---------------------------------------------------------------------------
 
-const smsText = "Cirvia, 7:45 AM: VFV +0.8, NVDA +2.1, ENB −1.2. BoC decision lands Thursday.";
+const smsText = "Cirvia, 7:45 AM: VFV +0.8, NVDA +2.1, AVGO −1.4. BoC decision lands Thursday.";
 
 const PhoneSMS: React.FC<{ k: number }> = ({ k }) => (
   <div
@@ -381,7 +412,7 @@ const EmailCard: React.FC<{ k: number }> = ({ k }) => (
           Your morning digest, Jul 6
         </div>
         <div style={{ fontSize: 14 * k, color: C.ink3, marginTop: 2 * k }}>
-          VFV +0.8, NVDA +2.1, ENB −1.2. One thing to watch…
+          VFV +0.8, NVDA +2.1, AVGO −1.4. One thing to watch…
         </div>
       </div>
     </div>
@@ -433,7 +464,7 @@ const DiscordCard: React.FC<{ k: number }> = ({ k }) => (
         <div style={{ fontSize: 14.5 * k, color: C.ink2, marginTop: 6 * k, lineHeight: 1.55 }}>
           Morning digest, Jul 6
           <br />
-          VFV +0.8 · NVDA +2.1 · ENB −1.2. BoC decision lands Thursday.
+          VFV +0.8 · NVDA +2.1 · AVGO −1.4. BoC decision lands Thursday.
         </div>
       </div>
     </div>
@@ -487,6 +518,7 @@ export const Scene5: React.FC<SceneProps> = ({ dur }) => {
   return (
     <SceneFade frame={frame} duration={dur}>
       <Screen>
+        <SceneVO scene={5} />
         {/* center source card */}
         <div
           style={{
@@ -524,6 +556,14 @@ export const Scene5: React.FC<SceneProps> = ({ dur }) => {
           Delivered where you already are.{" "}
           <span style={{ color: C.ink, fontWeight: 700 }}>Text, email, Discord, web.</span>
         </Caption>
+        {/* Shot B transition motif, rising into the Scene5→Scene6 cut */}
+        {frame >= dur - 10 ? (
+          <TransitionOverlay
+            file={SHOT_B.file}
+            startFrom={SHOT_B.outStartFrom}
+            opacity={0.6 * ease(frame, dur - 10, 10)}
+          />
+        ) : null}
       </Screen>
     </SceneFade>
   );
@@ -544,6 +584,15 @@ export const Scene6: React.FC<SceneProps> = ({ dur }) => {
   return (
     <SceneFade frame={frame} duration={dur}>
       <Screen glow={false}>
+        <SceneVO scene={6} />
+        {/* Shot B transition motif, carried over from the Scene5 cut */}
+        {frame < 8 ? (
+          <TransitionOverlay
+            file={SHOT_B.file}
+            startFrom={SHOT_B.inStartFrom}
+            opacity={0.6 * (1 - ease(frame, 0, 8))}
+          />
+        ) : null}
         <Center>
           <div style={{ display: "flex", flexDirection: "column", gap: 42 }}>
             {TRUST.map((line, i) => (
@@ -598,6 +647,14 @@ export const Scene7: React.FC<SceneProps & { showUrl?: boolean }> = ({ dur, show
   return (
     <SceneFade frame={frame} duration={dur} outDur={2}>
       <Screen glow={false}>
+        <SceneVO scene={7} />
+        <AbsoluteFill style={{ opacity: SHOT_C.opacity, mixBlendMode: SHOT_C.blendMode }}>
+          <OffthreadVideo
+            src={staticFile(SHOT_C.file)}
+            muted
+            style={{ width: "100%", height: "100%", objectFit: "cover" }}
+          />
+        </AbsoluteFill>
         {/* rising silk glow */}
         <div
           style={{

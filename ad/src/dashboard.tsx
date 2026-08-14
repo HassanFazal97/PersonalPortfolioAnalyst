@@ -13,8 +13,8 @@ import { C, ease, rise } from "./theme";
 export const HOLDINGS = [
   { t: "VFV", qty: 159, val: "$22,451", day: "+0.8%", tot: "+21.4%", dGain: true, tGain: true, hit: false },
   { t: "NVDA", qty: 36, val: "$5,832", day: "+2.1%", tot: "+64.2%", dGain: true, tGain: true, hit: false },
-  { t: "ENB", qty: 210, val: "$11,378", day: "−1.2%", tot: "+8.9%", dGain: false, tGain: true, hit: true },
-  { t: "SU", qty: 95, val: "$4,982", day: "−2.4%", tot: "+12.1%", dGain: false, tGain: true, hit: true },
+  { t: "AVGO", qty: 55, val: "$11,378", day: "−1.4%", tot: "+8.9%", dGain: false, tGain: true, hit: true },
+  { t: "MU", qty: 95, val: "$4,982", day: "−2.4%", tot: "+12.1%", dGain: false, tGain: true, hit: true },
   { t: "T.TO", qty: 160, val: "$3,571", day: "+0.3%", tot: "−2.2%", dGain: true, tGain: false, hit: false },
 ] as const;
 
@@ -61,7 +61,7 @@ export const AppDashboard: React.FC<{
   rowsAt?: number;
   /** totals tag ticks up starting here */
   tickAt?: number;
-  /** ENB + SU rows tint amber starting here */
+  /** AVGO + MU rows tint amber starting here */
   highlightAt?: number;
   /** macro alert item appears at top of the news feed starting here */
   alertAt?: number;
@@ -180,11 +180,11 @@ export const AppDashboard: React.FC<{
                   opacity: alertT,
                   transform: `translateY(${(1 - alertT) * -10}px)`,
                 }}
-                head="OPEC+ signals higher August output"
-                body="Crude down 3%. Touches ENB and SU in your portfolio."
+                head="Hyperscaler flags slower AI capex growth"
+                body="Chip demand concerns cool the AI trade. Touches AVGO and MU in your portfolio."
                 meta={
                   <>
-                    alert · <span style={{ color: C.warn, fontWeight: 600 }}>medium</span> · energy
+                    alert · <span style={{ color: C.warn, fontWeight: 600 }}>medium</span> · tech
                     · just now
                   </>
                 }

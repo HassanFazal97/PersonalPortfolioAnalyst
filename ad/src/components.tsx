@@ -1,5 +1,5 @@
 import React from "react";
-import { AbsoluteFill, interpolate } from "remotion";
+import { AbsoluteFill, OffthreadVideo, interpolate, staticFile } from "remotion";
 import { C, DIGEST_ROWS, EASE, FONT, ease, rise } from "./theme";
 
 /** Page background: near-black violet with the site's soft top aurora tint. */
@@ -349,3 +349,19 @@ export const SceneFade: React.FC<{
     });
   return <AbsoluteFill style={{ opacity }}>{children}</AbsoluteFill>;
 };
+
+/**
+ * Shared Shot B (abstract particle/data-flow) transition motif, mounted once
+ * in Scene5's SceneFade `outDur` window and once in Scene6's `inDur` window
+ * with matching `startFrom` offsets, so it reads as one continuous move
+ * across the Scene5→Scene6 cut rather than two disconnected inserts.
+ */
+export const TransitionOverlay: React.FC<{
+  file: string;
+  startFrom: number;
+  opacity: number;
+}> = ({ file, startFrom, opacity }) => (
+  <AbsoluteFill style={{ opacity, mixBlendMode: "screen" }}>
+    <OffthreadVideo src={staticFile(file)} startFrom={startFrom} muted />
+  </AbsoluteFill>
+);
