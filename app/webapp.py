@@ -901,7 +901,7 @@ def _page(
 <title>{title}</title>
 <meta name="robots" content="noindex">
 {ICON_LINKS}{_FONT_LINKS}<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
-<style>{_CSS}{_APP_CSS}</style>
+<style>{_CSS}{_APP_CSS}{_TUTORIAL_CSS}</style>
 </head>
 <body>
 {shell}
@@ -3847,6 +3847,355 @@ async function fetchBootstrap(key) {
 
 
 # --------------------------------------------------------------------------
+# Product tour: a spotlight walkthrough of the dashboard shown once after
+# onboarding (?welcome=1) and replayable via /app/dashboard?tour=1. Pure
+# overlay — completion state (users.tutorial_completed_at, migration 031)
+# never influences routing, per the 1a2d393 login-trap guard. Markup and JS
+# ship only on the dashboard; the CSS rides in the shared style element.
+# --------------------------------------------------------------------------
+
+_TUTORIAL_CSS = """
+/* Layer order: the tour must clear the sidebar (80) and the collapsed-rail
+   label tooltips (90). Backdrop 98 < spot 99 < card 100. */
+.tour-backdrop { position: fixed; inset: 0; z-index: 98; }
+.tour-spot { position: fixed; z-index: 99; pointer-events: none;
+  border-radius: 12px;
+  box-shadow: 0 0 0 200vmax oklch(35% 0.05 300 / 0.45);
+  transition: top 0.25s var(--ease), left 0.25s var(--ease),
+    width 0.25s var(--ease), height 0.25s var(--ease); }
+.tour-spot.no-anim { transition: none; }
+.tour-card { position: fixed; z-index: 100; width: min(340px, calc(100vw - 24px));
+  background: var(--surface-1); border: 1px solid var(--line);
+  border-radius: var(--r-l); padding: 1.1rem 1.2rem;
+  box-shadow: 0 12px 34px oklch(35% 0.05 300 / 0.3); }
+.tour-card.centered { top: 50%; left: 50%; transform: translate(-50%, -50%); }
+.tour-progress { font-size: 0.78rem; color: var(--ink-3); margin: 0 0 0.35rem; }
+.tour-card h3 { font-size: 1.05rem; margin: 0 0 0.4rem; }
+.tour-card .tour-body { color: var(--ink-2); font-size: 0.92rem;
+  line-height: 1.5; margin: 0; }
+.tour-actions { display: flex; justify-content: space-between; align-items: center;
+  gap: 0.75rem; margin-top: 1rem; }
+.tour-nav { display: inline-flex; gap: 0.5rem; }
+/* Phone tier: the card docks as a sheet (top or bottom, opposite the
+   spotlighted element) instead of floating. !important beats the inline
+   coordinates the desktop placer sets. */
+@media (max-width: 640px) {
+  .tour-card { left: 0 !important; right: 0; top: auto !important; bottom: 0;
+    width: auto; max-width: none; transform: none;
+    border-radius: var(--r-l) var(--r-l) 0 0; border-bottom: none;
+    padding-bottom: max(1.1rem, env(safe-area-inset-bottom)); }
+  .tour-card.sheet-top { top: 0 !important; bottom: auto;
+    border-radius: 0 0 var(--r-l) var(--r-l); border-top: none;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 1.1rem; padding-top: max(1.1rem, env(safe-area-inset-top)); }
+  .tour-card.centered { top: auto !important; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tour-spot { transition: none; }
+}
+"""
+
+_TUTORIAL_HTML = """
+<div class="tour-backdrop" id="tour-backdrop" hidden></div>
+<div class="tour-spot" id="tour-spot" hidden></div>
+<div class="tour-card" id="tour-card" role="dialog" aria-modal="true"
+  aria-labelledby="tour-title" hidden>
+  <p class="tour-progress" id="tour-progress"></p>
+  <h3 id="tour-title"></h3>
+  <p class="tour-body" id="tour-body" aria-live="polite"></p>
+  <div class="tour-actions">
+    <button class="link-btn" id="tour-skip" type="button">Skip tour</button>
+    <span class="tour-nav">
+      <button class="btn ghost" id="tour-back" type="button">Back</button>
+      <button class="btn" id="tour-next" type="button">Next</button>
+    </span>
+  </div>
+</div>
+"""
+
+_TUTORIAL_JS = r"""
+// --- product tour (shares scope with the dashboard script above) -----------
+(function () {
+  const backdrop = document.getElementById('tour-backdrop');
+  const spot = document.getElementById('tour-spot');
+  const card = document.getElementById('tour-card');
+  if (!card) return;
+  const titleEl = document.getElementById('tour-title');
+  const bodyEl = document.getElementById('tour-body');
+  const progressEl = document.getElementById('tour-progress');
+  const skipBtn = document.getElementById('tour-skip');
+  const backBtn = document.getElementById('tour-back');
+  const nextBtn = document.getElementById('tour-next');
+
+  const isDrawer = () => matchMedia('(max-width: 900px)').matches;
+  const isPhone = () => matchMedia('(max-width: 640px)').matches;
+  const panel = (name) => document.querySelector('.dash-panel[data-panel="' + name + '"]');
+  const sideLink = (href) => document.querySelector('.sidebar-nav .side-link[href="' + href + '"]');
+
+  // Steps resolve targets lazily — dashboard content appears async, so an
+  // element is looked up when its step renders, never at tour start. A step
+  // whose target is missing renders as a centered card, never a dead stop.
+  const STEPS = [
+    { centered: true, title: 'Welcome to Cirvia',
+      body: 'Cirvia is your analyst: it reads your actual portfolio, writes ' +
+        'you a brief every morning, and shows its work. Here’s a quick ' +
+        'tour of where everything lives — about two minutes.' },
+    { target: () => document.getElementById('dash-summary'),
+      title: 'Your portfolio at a glance',
+      body: 'Portfolio value, today’s move, and total return — ' +
+        'synced from your brokerage, no manual entry. It updates every time ' +
+        'your holdings do.' },
+    { tab: 'digest', target: () => panel('digest'), title: 'Your morning digest',
+      body: () => WELCOME
+        ? 'Every morning before the open, Cirvia writes a plain-English brief ' +
+          'on your holdings: what moved, why it matters, and what to watch. ' +
+          'Your first one is being written right now — it lands on this ' +
+          'tab in a minute or two.'
+        : 'Every morning before the open, Cirvia writes a plain-English brief ' +
+          'on your holdings: what moved, why it matters, and what to watch. ' +
+          'It lands here — and on your phone or inbox if you set up delivery.' },
+    { tab: 'deep-dive', target: () => panel('deep-dive'), title: 'Deep Dive — Pro',
+      body: () => 'Four research agents — fundamentals, technicals, risk, ' +
+        'and news — investigate your portfolio in parallel, then a ' +
+        'verifier re-checks their claims against live data before you see ' +
+        'the report.' + (WELCOME ? ' It’s included in your trial — run one any time.' : '') },
+    { tab: 'news', target: () => panel('news'), title: 'News that concerns you',
+      body: 'Digests, alerts, and articles about your holdings in one feed. ' +
+        'Filter by period, kind, severity, or category so only what moves ' +
+        'your money surfaces.' },
+    { tab: 'holdings', target: () => panel('holdings'), title: 'Your holdings',
+      body: 'Every synced position with returns and allocation — the ' +
+        'same book Cirvia reads when it writes about you. Open any ticker ' +
+        'for charts, fundamentals, and its news.' },
+    { tab: 'watching', target: () => panel('watching'), title: 'Watching',
+      skip: () => { const b = tabBtn('watching'); return !b || b.style.display === 'none'; },
+      body: 'Stocks you follow but don’t own get the same treatment: ' +
+        'news coverage, a digest mention, and anomaly alerts.' },
+    { tab: 'digest', target: () => document.getElementById('chat-fab'),
+      title: 'Ask Cirvia anything',
+      body: 'Chat with the analyst about your holdings or the market. Answers ' +
+        'use your real positions — and Cirvia never tells you to buy or sell.' },
+    { desktop: true, target: () => sideLink('/app/picks'), title: 'Model Picks — Pro',
+      body: 'The model’s highest-conviction stock ideas, refreshed daily, ' +
+        'each with its reasoning. Every pick is logged to a public track ' +
+        'record — nothing to take on faith.' },
+    { desktop: true, target: () => sideLink('/app/risk'), title: 'Risk Lab — Pro',
+      body: 'Volatility, worst-day estimates, diversification, and a Monte ' +
+        'Carlo view of the year ahead — how your portfolio could behave, ' +
+        'before the market shows you.' },
+    { desktop: true, target: () => sideLink('/app/deep-dives'), title: 'Deep Dives — Pro',
+      body: 'Every report you run is kept here, so you can go back and check ' +
+        'what the analysis said — and whether it held up.' },
+    { desktop: true, target: () => sideLink('/app/settings'), title: 'Settings',
+      body: 'Delivery channels and timing, your brokerage connection, your ' +
+        'investor profile, and your plan all live here.' },
+    { drawer: true, target: () => document.querySelector('.sidebar-hamburger'),
+      title: 'The rest of Cirvia',
+      body: 'This menu holds Model Picks, Risk Lab, Deep Dives, and Settings ' +
+        '— delivery, your investor profile, and the Pro tools all live there.' },
+    { centered: true, last: true, title: 'That’s Cirvia',
+      body: () => (WELCOME
+        ? 'Your first briefing lands on this page shortly — and ' +
+          'tomorrow’s arrives before the open, wherever you want it. '
+        : '') + 'You can replay this tour anytime from Settings.' },
+  ];
+
+  function eligible(s) {
+    if (s.desktop && isDrawer()) return false;
+    if (s.drawer && !isDrawer()) return false;
+    if (s.skip && s.skip()) return false;
+    return true;
+  }
+
+  let open = false;
+  let index = -1;
+  let tourUid = null;
+  let prevFocus = null;
+  let raf = 0;
+  let ro = null;
+
+  function currentTarget() {
+    const s = STEPS[index];
+    if (!s || s.centered || !s.target) return null;
+    const t = s.target();
+    if (!t) return null;
+    const r = t.getBoundingClientRect();
+    return (r.width > 0 && r.height > 0) ? t : null;
+  }
+
+  function place() {
+    const t = currentTarget();
+    if (!t) {
+      spot.hidden = true;
+      card.classList.add('centered');
+      card.classList.remove('sheet-top');
+      card.style.top = ''; card.style.left = '';
+      return;
+    }
+    const r = t.getBoundingClientRect();
+    const pad = 6;
+    const firstShow = spot.hidden;
+    if (firstShow) spot.classList.add('no-anim');
+    spot.style.top = (r.top - pad) + 'px';
+    spot.style.left = (r.left - pad) + 'px';
+    spot.style.width = (r.width + pad * 2) + 'px';
+    spot.style.height = (r.height + pad * 2) + 'px';
+    spot.hidden = false;
+    if (firstShow && !REDUCED) {
+      spot.offsetHeight;  // flush so the next move animates
+      spot.classList.remove('no-anim');
+    }
+    card.classList.remove('centered');
+    // Phone: the CSS sheet wins over these coordinates; just pick which edge
+    // (opposite the target, so the sheet never covers what it describes).
+    card.classList.toggle('sheet-top',
+      isPhone() && (r.top + r.height / 2) > innerHeight / 2);
+    const gutter = 12, gap = 14;
+    const cw = card.offsetWidth, ch = card.offsetHeight;
+    let top;
+    if (r.bottom + gap + ch <= innerHeight - gutter) top = r.bottom + gap;
+    else if (r.top - gap - ch >= gutter) top = r.top - gap - ch;
+    else top = Math.max(gutter, (innerHeight - ch) / 2);
+    const left = Math.min(Math.max(gutter, r.left + r.width / 2 - cw / 2),
+      Math.max(gutter, innerWidth - cw - gutter));
+    card.style.top = top + 'px';
+    card.style.left = left + 'px';
+  }
+
+  function reposition() {
+    if (!open) return;
+    cancelAnimationFrame(raf);
+    raf = requestAnimationFrame(place);
+  }
+
+  function render() {
+    const s = STEPS[index];
+    const elig = STEPS.filter(eligible);
+    progressEl.textContent = (elig.indexOf(s) + 1) + ' of ' + elig.length;
+    titleEl.textContent = s.title;
+    bodyEl.textContent = typeof s.body === 'function' ? s.body() : s.body;
+    backBtn.style.visibility =
+      elig.indexOf(s) > 0 ? 'visible' : 'hidden';
+    nextBtn.textContent = s.last ? 'Start exploring' : 'Next';
+    skipBtn.style.visibility = s.last ? 'hidden' : 'visible';
+    if (s.tab) activateTab(s.tab, false);
+    const t = currentTarget();
+    if (t && !s.drawer) {
+      t.scrollIntoView({ block: 'center', behavior: REDUCED ? 'auto' : 'smooth' });
+    }
+    place();
+    nextBtn.focus();
+  }
+
+  function step(dir) {
+    let i = index + dir;
+    while (i >= 0 && i < STEPS.length && !eligible(STEPS[i])) i += dir;
+    if (i < 0) return;
+    if (i >= STEPS.length) { endTour('completed'); return; }
+    index = i;
+    render();
+  }
+
+  function onKey(e) {
+    if (!open) return;
+    if (e.key === 'Escape') {
+      e.preventDefault(); e.stopPropagation(); endTour('skipped');
+    } else if (e.key === 'ArrowRight' || e.key === 'Enter') {
+      if (e.key === 'Enter' && e.target === skipBtn) return;
+      if (e.key === 'Enter' && e.target === backBtn) return;
+      e.preventDefault(); e.stopPropagation(); step(1);
+    } else if (e.key === 'ArrowLeft') {
+      e.preventDefault(); e.stopPropagation(); step(-1);
+    } else if (e.key === 'Tab') {
+      // Focus trap: cycle within the card (same pattern as the nav drawer).
+      const items = card.querySelectorAll('button');
+      const vis = Array.prototype.filter.call(items,
+        (b) => b.style.visibility !== 'hidden');
+      if (!vis.length) return;
+      const first = vis[0], last = vis[vis.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault(); e.stopPropagation(); last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault(); e.stopPropagation(); first.focus();
+      }
+    }
+  }
+
+  function startTour() {
+    if (open) return;
+    open = true;
+    prevFocus = document.activeElement;
+    if (REDUCED) spot.classList.add('no-anim');
+    backdrop.hidden = false;
+    card.hidden = false;
+    window.addEventListener('resize', reposition);
+    window.addEventListener('scroll', reposition, true);
+    ro = new ResizeObserver(reposition);
+    ro.observe(document.body);
+    document.addEventListener('keydown', onKey, true);
+    riseIn(card);
+    index = -1;
+    step(1);
+  }
+
+  function endTour(outcome) {
+    if (!open) return;
+    open = false;
+    try { sessionStorage.setItem('cirvia-tour-shown', '1'); } catch (e) {}
+    try {
+      if (tourUid) localStorage.setItem('cirvia-tour-done:' + tourUid, '1');
+    } catch (e) {}
+    backdrop.hidden = true; spot.hidden = true; card.hidden = true;
+    window.removeEventListener('resize', reposition);
+    window.removeEventListener('scroll', reposition, true);
+    if (ro) { ro.disconnect(); ro = null; }
+    document.removeEventListener('keydown', onKey, true);
+    activateTab('digest');
+    if (prevFocus && prevFocus.focus) prevFocus.focus();
+    // Fire-and-forget: the local flags above already stop a re-show this
+    // session even if the write fails.
+    api('/me/tutorial/complete', {
+      method: 'POST', body: JSON.stringify({ outcome }),
+    }).catch(() => {});
+  }
+
+  nextBtn.addEventListener('click', () => step(1));
+  backBtn.addEventListener('click', () => step(-1));
+  skipBtn.addEventListener('click', () => endTour('skipped'));
+
+  // Start gate. Auto-start is welcome-flow only (?welcome=1 + server flag);
+  // ?tour=1 is the explicit replay and always starts. Existing users are
+  // never auto-toured — completion state must stay a pure overlay signal.
+  async function shouldStart() {
+    try {
+      const { data } = await sb.auth.getSession();
+      tourUid = data && data.session && data.session.user && data.session.user.id;
+    } catch (e) { /* signed-out users get redirected by requireSession */ }
+    if (new URLSearchParams(location.search).get('tour') === '1') return true;
+    if (!WELCOME) return false;
+    try { if (sessionStorage.getItem('cirvia-tour-shown')) return false; } catch (e) {}
+    try {
+      if (tourUid && localStorage.getItem('cirvia-tour-done:' + tourUid)) return false;
+    } catch (e) {}
+    // meProfile may still be riding the stale bootstrap cache; wait for the
+    // fresh /me from the fan-out before trusting tutorial.completed.
+    for (let i = 0; i < 50 && !meReady; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    if (meReady) { try { await meReady; } catch (e) {} }
+    return !(meProfile && meProfile.tutorial && meProfile.tutorial.completed);
+  }
+
+  shouldStart().then((go) => {
+    // The delay lets applyBootstrap paint and the first-briefing poll install
+    // its spinner copy before the overlay rises.
+    if (go) setTimeout(startTour, 800);
+  });
+})();
+"""
+
+
+# --------------------------------------------------------------------------
 # /app/stock/{ticker} — full-page holding detail
 # --------------------------------------------------------------------------
 
@@ -4481,6 +4830,8 @@ _SETTINGS_BODY = """
         </form>
         <div class="error-box" id="pw-error"></div>
         <div class="notice-box" id="pw-notice"></div>
+        <p class="muted-note" style="margin-top:0.9rem;">New here?
+          <a href="/app/dashboard?tour=1">Take the product tour</a>.</p>
       </div>
     </div>
 
@@ -5101,12 +5452,14 @@ def onboarding_page(supabase_url: str, anon_key: str) -> str:
 
 
 def dashboard_page(supabase_url: str, anon_key: str) -> str:
+    # The product-tour overlay ships only here: its markup rides at the end of
+    # the body and its script shares the dashboard scope (activateTab, meReady).
     return _page(
         "Dashboard | Cirvia",
-        _DASHBOARD_BODY,
+        _DASHBOARD_BODY + _TUTORIAL_HTML,
         supabase_url=supabase_url,
         anon_key=anon_key,
-        extra_js=_DASHBOARD_JS,
+        extra_js=_DASHBOARD_JS + _TUTORIAL_JS,
         wrap_class="app-wrap dash-wrap",
         active="dashboard",
     )

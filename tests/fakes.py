@@ -75,6 +75,7 @@ class FakeRepo:
             investing_horizon=None, investing_experience=None,
             investing_goals=[], profile_completed_at=None,
             profile_prompt_dismissed_at=None,
+            tutorial_completed_at=None,
         )
 
     async def create_run(self, *, trigger, user_message, model, prompt_version,
@@ -150,6 +151,7 @@ class FakeRepo:
                 investing_horizon=None, investing_experience=None,
                 investing_goals=[], profile_completed_at=None,
                 profile_prompt_dismissed_at=None,
+                tutorial_completed_at=None,
             )
             await self.record_funnel_event("signup", user_id=self._users_by_auth[auth_id])
         return self._users_by_auth[auth_id]
@@ -230,6 +232,12 @@ class FakeRepo:
         if user is None or user.profile_prompt_dismissed_at is not None:
             return
         user.profile_prompt_dismissed_at = datetime.now(timezone.utc)
+
+    async def set_tutorial_completed(self, user_id):
+        user = self._users_by_id.get(user_id)
+        if user is None or user.tutorial_completed_at is not None:
+            return
+        user.tutorial_completed_at = datetime.now(timezone.utc)
 
     async def get_digest_tickers(self, user_id):
         user = self._users_by_id.get(user_id)

@@ -211,6 +211,15 @@ class Repo:
             user.profile_prompt_dismissed_at = datetime.now(timezone.utc)
             await s.commit()
 
+    async def set_tutorial_completed(self, user_id: uuid.UUID) -> None:
+        """Record that the dashboard tour finished or was skipped (idempotent)."""
+        async with self._session() as s:
+            user = await s.get(User, user_id)
+            if user is None or user.tutorial_completed_at is not None:
+                return
+            user.tutorial_completed_at = datetime.now(timezone.utc)
+            await s.commit()
+
     async def get_digest_tickers(self, user_id: uuid.UUID) -> list[str]:
         user = await self.get_user(user_id)
         if user is None:

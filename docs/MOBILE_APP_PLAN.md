@@ -233,6 +233,14 @@ panel), `src/auth/supabase.ts` (SecureStore adapter — it holds a refresh token
 On sign-out: `queryClient.clear()` **and** wipe MMKV. Leftover portfolio data after logout is a
 legitimate store-review privacy finding.
 
+**TODO — post-onboarding product tour (web parity, M10):** the web dashboard now ships a
+coach-mark tour right after onboarding (`_TUTORIAL_*` in `app/webapp.py`), persisted server-side
+in `users.tutorial_completed_at` (migration 031) via `POST /me/tutorial/complete` and surfaced as
+`tutorial.completed` in `/me`. The native app should reuse that same endpoint and flag — one
+completion across platforms — with a native overlay walking the `(tabs)` shell, the chat modal,
+and the picks/dives/settings routes (the `push-priming.tsx` interstitial is the existing precedent
+for a post-onboarding teaching screen). Post-launch scope; not a store-submission blocker.
+
 ---
 
 ## Store submission
@@ -270,8 +278,9 @@ legitimate store-review privacy finding.
 | M7 | Deep dives + picks | 4–5 |
 | M8 | Universal links, icons/splash, dark mode, a11y, offline states, demo account, store listings | 6–8 |
 | M9 | Submission + rejection round-trips + Play testing wait | 5–10 |
+| M10 | TODO (post-launch): product tour after onboarding — native coach-marks over the tab shell, reusing `tutorial_completed_at` / `POST /me/tutorial/complete` from the web tour | 2–3 |
 
-**Total ≈ 10–13 weeks** to both stores, assuming no major rejection loop. Add ~40% if React
+**Total ≈ 10–13 weeks** to both stores (M10 excluded — post-launch), assuming no major rejection loop. Add ~40% if React
 Native itself is new to you.
 
 **First TestFlight build at end of M3 (~day 15–18):** sign-in, dashboard with all four tabs on

@@ -161,6 +161,12 @@ M8 is partly in: universal links / App Links (served from
 associated domains, offline states, the a11y sweep, and the review-account
 seeder (`scripts/seed_review_account.py`).
 
+Not started: the M10 post-onboarding product tour (post-launch scope — see
+`docs/MOBILE_APP_PLAN.md`). The web app shipped its tour; the completion flag
+(`users.tutorial_completed_at`, via `POST /me/tutorial/complete`) is shared, so
+a user who finished the tour on web won't be re-toured natively unless we
+decide otherwise.
+
 ### Icons
 
 `assets/*.png` are generated, not hand-drawn: run

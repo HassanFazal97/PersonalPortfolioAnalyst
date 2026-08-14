@@ -464,6 +464,10 @@ class ProfileRequest(BaseModel):
     chosen_posture: str | None = None  # 'defensive' | 'current' | 'aggressive'
 
 
+class TutorialCompleteRequest(BaseModel):
+    outcome: str = "completed"  # 'completed' | 'skipped'
+
+
 class ChannelRegisterRequest(BaseModel):
     channel: str  # 'sms' | 'email' | 'discord'
     destination: str
@@ -901,6 +905,7 @@ async def _me_payload(repo: Repo, user_id: uuid.UUID) -> dict:
             "digest_tickers_editable": False,
             "is_owner": is_owner,
             "profile": profile_payload(None),
+            "tutorial": {"completed": False},
             "trial": _trial_payload(None),
             "billing": _billing_payload(settings, None),
             "chat_quota": await _chat_quota_payload(repo, user_id, "free", settings),
@@ -933,6 +938,9 @@ async def _me_payload(repo: Repo, user_id: uuid.UUID) -> dict:
         "digest_tickers_editable": editable,
         "is_owner": is_owner,
         "profile": profile_payload(user),
+        "tutorial": {
+            "completed": getattr(user, "tutorial_completed_at", None) is not None
+        },
         "trial": _trial_payload(user),
         "billing": _billing_payload(settings, user),
         "chat_quota": await _chat_quota_payload(repo, user_id, plan, settings),
@@ -2437,6 +2445,22 @@ def create_app() -> FastAPI:
         repo = _require_repo(app)
         user_id = _user_id(request)
         await repo.set_profile_prompt_dismissed(user_id)
+        snapshot.store.invalidate(user_id, "me")
+        return await _me_payload(repo, user_id)
+
+    @app.post("/me/tutorial/complete")
+    async def complete_tutorial(req: TutorialCompleteRequest, request: Request) -> dict:
+        """Record that the dashboard product tour finished or was skipped
+        (idempotent, persisted so it auto-starts at most once per account).
+        Overlay state only — never consulted for routing."""
+        repo = _require_repo(app)
+        user_id = _user_id(request)
+        if req.outcome not in ("completed", "skipped"):
+            raise HTTPException(status_code=400, detail="unknown outcome")
+        await repo.set_tutorial_completed(user_id)
+        await repo.record_funnel_event(
+            "tutorial_completed", user_id=user_id, meta={"outcome": req.outcome}
+        )
         snapshot.store.invalidate(user_id, "me")
         return await _me_payload(repo, user_id)
 

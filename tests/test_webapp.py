@@ -179,6 +179,29 @@ def test_dashboard_has_connection_banner(client):
     assert 'id="connection-banner" style="display:none;"' in resp.text
 
 
+def test_dashboard_has_product_tour(client):
+    resp = client.get("/app/dashboard")
+    text = resp.text
+    assert 'id="tour-card"' in text
+    assert 'role="dialog"' in text
+    assert 'id="tour-skip"' in text
+    assert "/me/tutorial/complete" in text
+    # Auto-start is welcome-flow only; ?tour=1 is the explicit replay.
+    assert "cirvia-tour-shown" in text
+
+
+def test_settings_has_tour_replay_link(client):
+    resp = client.get("/app/settings")
+    assert 'href="/app/dashboard?tour=1"' in resp.text
+
+
+def test_tour_markup_only_on_dashboard(client):
+    # The overlay ships only with the dashboard; other pages carry just the
+    # shared CSS, never the dialog markup or its script.
+    for path in ("/app/risk", "/app/settings", "/app/onboarding"):
+        assert 'id="tour-card"' not in client.get(path).text
+
+
 def test_app_pages_noindex(client):
     resp = client.get("/app")
     assert '<meta name="robots" content="noindex">' in resp.text

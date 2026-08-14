@@ -92,6 +92,11 @@ class User(Base):
     profile_prompt_dismissed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True)
     )
+    # Dashboard product tour (migration 031). Set on finish or skip; NULL =
+    # never seen. Overlay state only — never consulted for routing.
+    tutorial_completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
     # No-card Pro trial (migration 017). Future = trial active (Pro
     # experience); past + plan 'free' = digests paused pending the user's
     # upgrade-or-free decision (bounded by the grace window in app/plans.py);
