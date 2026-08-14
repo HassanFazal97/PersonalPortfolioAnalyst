@@ -3,10 +3,16 @@
 Single source of truth for API keys, model name, budgets, and price
 constants. Loaded once via ``get_settings()`` (cached). Nothing else in the
 codebase should read ``os.environ`` directly.
+
+The env file defaults to ``.env`` (the local dev profile) and can be swapped
+with the ``ENV_FILE`` process variable — e.g. ``ENV_FILE=.env.prod`` for a
+deliberate operation against production. Process env vars always override
+the file (pydantic-settings precedence).
 """
 
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 
 from pydantic import Field
@@ -63,7 +69,7 @@ DEFAULT_USER_ID = "00000000-0000-0000-0000-000000000001"
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=os.environ.get("ENV_FILE", ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
     )

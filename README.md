@@ -57,6 +57,36 @@ cp .env.example .env
 # then edit .env — see Configuration below
 ```
 
+### Local dev environment (separate from prod)
+
+Local development runs against a **local Supabase stack** (Docker + the
+[Supabase CLI](https://supabase.com/docs/guides/cli)) — never against the
+production database:
+
+```bash
+supabase start                      # local Postgres :54322 + Auth/API :54321
+python scripts/migrate.py           # apply app/db/migrations/ to the local DB
+python scripts/seed_portfolio.py    # optional: seed a few positions
+```
+
+`.env` is the **dev profile**: it points `DATABASE_URL`/`SUPABASE_URL` at the
+local stack, sets `RUN_SCHEDULERS=0` (no digest sends, no delivery dispatcher),
+and leaves every outbound provider (Resend/Twilio/SnapTrade/Discord) blank.
+Stripe uses `sk_test_` keys. Local auth keys are the Supabase CLI's shared
+defaults — printed by `supabase status`.
+
+Production credentials live in a gitignored `.env.prod`. To run a script
+against prod **deliberately**, select it with `ENV_FILE`:
+
+```bash
+ENV_FILE=.env.prod python scripts/migrate.py
+```
+
+(Prod deploys are unaffected by either file — Railway injects env vars
+directly.) The test suite reads neither file: `tests/conftest.py` pins
+`ENV_FILE` to `tests/env.test` and scrubs inherited secrets, so `pytest` is
+always offline and credential-free.
+
 ### Configuration (`.env`)
 
 | Key | Purpose |

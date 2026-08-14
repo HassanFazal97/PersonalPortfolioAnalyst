@@ -3,6 +3,12 @@
 How to deploy **Cirvia** and turn on multi-user auth + RLS.
 Host is **Railway**. The image runs migrations, then serves.
 
+Prod env vars live in the **Railway dashboard** — local env files never reach
+a deploy. Locally, `.env` is the dev profile (local Supabase stack) and prod
+credentials sit in the gitignored `.env.prod`; run a script against prod
+deliberately with `ENV_FILE=.env.prod python scripts/<script>.py`
+(see README → "Local dev environment").
+
 ## Topology
 
 One image, two roles, selected by env (see `Dockerfile`):

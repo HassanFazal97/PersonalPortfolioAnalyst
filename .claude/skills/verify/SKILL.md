@@ -7,49 +7,57 @@ description: Launch and drive the Cirvia FastAPI app locally to verify changes e
 
 ## Launch
 
+`.env` is the **dev profile**: it points at the local Supabase stack, sets
+`RUN_SCHEDULERS=0` (no schedulers, no delivery dispatcher), and leaves all
+outbound providers (Twilio/Resend/SnapTrade/Discord) blank. Prod credentials
+live in `.env.prod` — never launch the app with `ENV_FILE=.env.prod`.
+
 ```bash
-DIGEST_CRON="59 23 31 12 *" NEWS_REFRESH_CRON="" ANOMALY_SCAN_CRON="" \
-FUNDAMENTALS_REFRESH_CRON="" DAILY_PRICES_CRON="" PICKS_SYNC_CRON="" PICKS_CRON="" \
-MACRO_SCAN_INTERVAL_MINUTES=0 DELIVERY_INTERVAL_SECONDS=0 \
-QUOTE_WARM_INTERVAL_SECONDS=0 POSITIONS_REFRESH_INTERVAL_MINUTES=0 \
+supabase start   # if not already running (local DB :54322, Auth/API :54321)
+SSL_CERT_FILE=$(.venv/bin/python -c 'import certifi; print(certifi.where())') \
 .venv/bin/python -m uvicorn app.main:app --port 8399 --log-level warning
 ```
+
+Confirm the startup log prints `RUN_SCHEDULERS=0 — serving requests only`.
 
 Always `.venv/bin/python -m uvicorn`, never `.venv/bin/uvicorn` — the venv
 carries both 3.12 and 3.13 trees and the uvicorn entry script's shebang points
 at 3.12, where nothing is installed (same reason as `python -m pytest`).
 
-Gotchas, in order of how much they hurt:
+Gotchas:
 
-- **`.env` points at the PRODUCTION Supabase DB and real delivery providers
-  (Twilio/Resend/Stripe/Anthropic).** Always disable the schedulers with the
-  env overrides above — a local `DELIVERY_INTERVAL_SECONDS` dispatcher will
-  drain the prod outbound queue and actually send SMS/email.
-- `DIGEST_CRON` cannot be empty (the digest scheduler always starts and
-  requires a valid 5-field cron); use a far-future cron like `59 23 31 12 *`.
-  The other crons accept `""` to disable.
-- If `app/db/models.py` has columns newer than the prod schema (unapplied
-  migrations), every user-row read 500s — authenticated routes are unusable
-  until `python scripts/migrate.py` runs (a deploy decision, don't run it
-  against prod casually).
-- No Docker/local Postgres on this machine as of 2026-07: DB-backed flows
-  can't be driven against a scratch DB.
+- `SSL_CERT_FILE` (above) is required for outbound HTTPS (Anthropic, quotes) —
+  the py3.13 system CA store on this machine is broken.
+- If `app/db/models.py` has columns newer than the local schema, run
+  `python scripts/migrate.py` (applies to the local stack; idempotent).
+- Fresh local DB? `python scripts/seed_portfolio.py` seeds positions.
+- To exercise scheduler behavior specifically, override per-run:
+  `RUN_SCHEDULERS=1 DIGEST_CRON="59 23 31 12 *" …` — deliveries then only go
+  to local adapters (none registered), so nothing real sends.
 
 ## Drive
 
-- Auth: `Authorization: Bearer $API_TOKEN` (from `.env`) resolves to the
-  owner (quota-exempt, always Pro). There is no HS256 `SUPABASE_JWT_SECRET`,
-  so a free/pro end-user JWT cannot be minted locally — end-user-only paths
-  (quota 402s, trial states) are exercised via TestClient tests instead.
+- Owner auth: `Authorization: Bearer $API_TOKEN` (from `.env`, value
+  `dev-local-token`) resolves to the owner (quota-exempt, always Pro).
+- End-user auth: sign up in the browser at `http://localhost:8399/app` — local
+  Supabase Auth has email confirmations disabled, so any fake email works.
+  Free/pro/trial states can be driven with real end-user JWTs now.
 - DB-free surfaces: `/`, `/pricing`, `/health`, and the `/app/*` HTML shells
-  (they're static shells; check for the expected elements/JS with grep).
+  (static shells; check for the expected elements/JS with grep).
 - `POST /chat` (owner) runs the real agent loop against Anthropic — costs
   real money; keep to 1–2 calls, then inspect `GET /runs/{run_id}` for the
   tool trajectory.
 
-## Test-suite env leakage
+## Test suite
 
-Tests read the developer `.env` through pydantic-settings. When simulating
-"unconfigured", monkeypatch env vars to `""` (which overrides the file), never
-`delenv`. og:url assertions need `PUBLIC_BASE_URL=https://...` and a module
-reload (see tests/test_head_meta.py's client fixture).
+Tests never read `.env`: `tests/conftest.py` pins `ENV_FILE=tests/env.test`
+(safe placeholders) and scrubs inherited secret env vars. To simulate
+"unconfigured", monkeypatch env vars to `""` (process env overrides the file).
+og:url assertions need `PUBLIC_BASE_URL=https://...` and a module reload (see
+tests/test_head_meta.py's client fixture). The live-DB tenant-isolation test
+is explicit opt-in:
+
+```bash
+TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@127.0.0.1:54322/postgres \
+.venv/bin/python -m pytest tests/test_tenant_isolation.py
+```

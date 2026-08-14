@@ -1,8 +1,12 @@
 """Multi-tenant isolation, verified against a real Postgres.
 
-Skipped unless ``DATABASE_URL`` is set and migrations (incl. 002_multi_tenant)
-have been applied — the rest of the suite runs fully offline. This proves the
-repo scopes reads by ``user_id`` so one user never sees another's positions.
+Skipped unless ``TEST_DATABASE_URL`` is set (explicit opt-in — point it at a
+scratch database, e.g. the local Supabase stack, with migrations applied) —
+the rest of the suite runs fully offline. This proves the repo scopes reads
+by ``user_id`` so one user never sees another's positions.
+
+    TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@127.0.0.1:54322/postgres \
+        pytest tests/test_tenant_isolation.py
 """
 
 from __future__ import annotations
@@ -14,18 +18,20 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import text
 
-from app.config import get_settings
 from app.db.repo import _OWNER_USER_ID, Repo
 
 pytestmark = pytest.mark.skipif(
-    not os.getenv("DATABASE_URL"), reason="no DATABASE_URL; live-DB isolation test"
+    not os.getenv("TEST_DATABASE_URL"),
+    reason="no TEST_DATABASE_URL; live-DB isolation test is explicit opt-in",
 )
 
 
 @pytest.fixture
 async def repo():
-    settings = get_settings()
-    r = Repo(settings.database_url, ssl=settings.db_ssl)
+    r = Repo(
+        os.environ["TEST_DATABASE_URL"],
+        ssl=os.getenv("TEST_DB_SSL", "").lower() in ("1", "true"),
+    )
     yield r
     await r.dispose()
 

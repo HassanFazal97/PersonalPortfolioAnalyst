@@ -19,3 +19,4 @@ evals/results/
 .agents/
 .claude/skills/higgsfield-*
 skills-lock.json
+.env.prod
