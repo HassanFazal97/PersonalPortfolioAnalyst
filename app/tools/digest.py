@@ -20,6 +20,9 @@ from app.memory.embeddings import memory_enabled
 
 DIGEST_MAX_CHARS = 1000
 
+# SMS teaser budget: 300 GSM-7 chars = 2 concatenated segments (2 x 153).
+DIGEST_SMS_TEASER_MAX_CHARS = 300
+
 SEND_DIGEST_SCHEMA = {
     "name": "send_digest",
     "description": (
@@ -30,7 +33,8 @@ SEND_DIGEST_SCHEMA = {
         "malformed you will be asked to fix it and try again. For a Pro digest, "
         "also pass 'holdings': the per-holding breakdown (plain text, no "
         "'HOLDINGS' label); it is shown on longer channels (email/Discord/web) "
-        "while 'body' alone is sent by text message."
+        "while text-message users receive a short teaser (portfolio line, top "
+        "risk, and a link to the full digest)."
     ),
     "input_schema": {
         "type": "object",
@@ -45,6 +49,83 @@ SEND_DIGEST_SCHEMA = {
 
 def _today(tz: str) -> Any:
     return datetime.now(ZoneInfo(tz)).date()
+
+
+# Punctuation the model likes that falls outside GSM-7. One such character
+# flips the whole SMS to UCS-2 (67-char segments), tripling segment count,
+# so normalize to ASCII before budgeting.
+_GSM7_UNSAFE = str.maketrans(
+    {
+        "‘": "'",
+        "’": "'",
+        "“": '"',
+        "”": '"',
+        "–": "-",
+        "—": "-",
+        "…": "...",
+        " ": " ",
+        "→": "->",
+        "•": "-",
+    }
+)
+
+
+def _shorten(line: str, limit: int) -> str:
+    if len(line) <= limit:
+        return line
+    return line[: max(limit - 3, 0)].rstrip() + "..."
+
+
+def _digest_link(settings: Any) -> str:
+    base = (settings.public_base_url or "https://cirvia.ca").rstrip("/")
+    return f"{base}/app/dashboard#tab-digest"
+
+
+def build_sms_teaser(body: str, *, link: str) -> str:
+    """Derive the <=300-char SMS teaser from a validated digest body.
+
+    Deterministic on purpose: validate_digest_structure already guarantees the
+    PORTFOLIO: first line and the standalone TOP RISK label, so no extra model
+    call (or its length-retry loop) is needed, and the segment budget is a hard
+    guarantee. When the risk line can't be found the teaser degrades to the
+    portfolio line + link; the link is never truncated.
+    """
+    lines = [ln.strip() for ln in body.translate(_GSM7_UNSAFE).strip().splitlines()]
+    nonempty = [ln for ln in lines if ln]
+
+    portfolio = nonempty[0] if nonempty else ""
+
+    risk = ""
+    for i, ln in enumerate(nonempty):
+        if ln == "TOP RISK" or ln.startswith("TOP RISK:"):
+            risk = ln.removeprefix("TOP RISK").lstrip(":").strip()
+            if not risk:
+                for nxt in nonempty[i + 1 :]:
+                    # Stop at the next section label instead of pulling its
+                    # heading (or the watch line) in as the "risk".
+                    if nxt.startswith("WATCH TODAY:") or (
+                        nxt == nxt.upper() and any(c.isalpha() for c in nxt)
+                    ):
+                        break
+                    risk = nxt
+                    break
+            break
+
+    tail = f"Full digest: {link}"
+    budget = DIGEST_SMS_TEASER_MAX_CHARS - len(tail) - 1  # newline before tail
+
+    parts: list[str] = []
+    if portfolio:
+        if risk:
+            risk_line = f"TOP RISK: {risk}"
+            # Risk gives way first; the portfolio line keeps at least half.
+            portfolio = _shorten(portfolio, max(budget // 2, budget - len(risk_line) - 1))
+            risk_line = _shorten(risk_line, budget - len(portfolio) - 1)
+            parts = [portfolio, risk_line] if len(risk_line) > len("TOP RISK: ") else [portfolio]
+        else:
+            parts = [_shorten(portfolio, budget)]
+    parts.append(tail)
+    return "\n".join(parts)
 
 
 def validate_digest_structure(body: str) -> str | None:
@@ -85,8 +166,8 @@ async def send_digest(payload: dict[str, Any], ctx: Any = None) -> dict[str, Any
 
     settings = get_settings()
 
-    # Optional Pro-only per-holding breakdown. The short `body` is the SMS core;
-    # the rich body (core + HOLDINGS) is stored and sent to longer channels.
+    # Optional Pro-only per-holding breakdown. The rich body (core + HOLDINGS)
+    # is stored and sent to longer channels; SMS gets a derived teaser.
     holdings = payload.get("holdings")
     rich_body = body
     if isinstance(holdings, str) and holdings.strip():
@@ -100,7 +181,7 @@ async def send_digest(payload: dict[str, Any], ctx: Any = None) -> dict[str, Any
         rich_body = f"{body}\n\nHOLDINGS\n{holdings}"
 
     # Deterministic watched-tickers section built by the digest pipeline; long
-    # channels only — the SMS core stays the model-written short body.
+    # channels only — SMS gets only the teaser.
     watchlist_section = getattr(ctx, "watchlist_section", None)
     if isinstance(watchlist_section, str) and watchlist_section.strip():
         rich_body = f"{rich_body}\n\nWATCHLIST\n{watchlist_section.strip()}"
@@ -111,7 +192,7 @@ async def send_digest(payload: dict[str, Any], ctx: Any = None) -> dict[str, Any
     user_id = getattr(ctx, "user_id", None)
 
     # Store the rich body so the dashboard and /digest/latest show the full
-    # breakdown; the SMS channel still gets the short core via `sms_body`.
+    # breakdown; the SMS channel gets the teaser via `sms_body`.
     digest_id = await ctx.repo.upsert_digest(
         run_id=run_id, body=rich_body, digest_date=digest_date, user_id=user_id
     )
@@ -137,7 +218,7 @@ async def send_digest(payload: dict[str, Any], ctx: Any = None) -> dict[str, Any
         user_id=user_id,
         kind="digest",
         subject=f"Your morning digest, {digest_date.strftime('%b %d')}",
-        sms_body=body,
+        sms_body=build_sms_teaser(body, link=_digest_link(settings)),
         push=True,
         push_title="Your morning digest",
         deep_link="cirvia://digest",

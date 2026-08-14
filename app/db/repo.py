@@ -59,6 +59,7 @@ from app.db.models import (
     WatchlistItem,
 )
 from app.delivery.channels import CHANNELS, PUSH_CHANNEL
+from app.plans import effective_plan
 
 # Owner (user #1) attribution until per-user auth lands. Every tenant-scoped
 # read/write defaults to this user; pass user_id to scope to another.
@@ -1598,6 +1599,13 @@ class Repo:
         the richer version kept for email/Discord/web). Skipped rows retain the
         full ``body`` for the audit trail.
 
+        SMS is a Pro perk, enforced lazily here (the delivery chokepoint)
+        rather than on plan-change events — a lapsed trial writes nothing to
+        the DB, so only lazy resolution catches it, and ``preferred_channel``
+        is never rewritten so SMS resumes automatically on re-upgrade. A
+        non-Pro user preferring SMS falls back to their verified email
+        channel, or the row is skipped with the reason recorded.
+
         ``push=True`` additionally fans out one row per registered device, with
         ``channel='push'`` and the device token as the destination. This is
         strictly additive: the preferred-channel row above is written exactly
@@ -1630,6 +1638,31 @@ class Repo:
                 elif row.opted_out_at is not None:
                     msg.status = "skipped"
                     msg.last_error = f"preferred channel '{preferred}' opted out"
+                elif (
+                    preferred == "sms"
+                    and uid != _OWNER_USER_ID
+                    and effective_plan(user) != "pro"
+                ):
+                    fallback = await s.execute(
+                        select(NotificationChannel).where(
+                            NotificationChannel.user_id == uid,
+                            NotificationChannel.channel == "email",
+                        )
+                    )
+                    email_row = fallback.scalar_one_or_none()
+                    if (
+                        email_row is not None
+                        and email_row.verified_at is not None
+                        and email_row.opted_out_at is None
+                    ):
+                        msg.channel = "email"
+                        msg.destination = email_row.destination
+                    else:
+                        msg.status = "skipped"
+                        msg.last_error = (
+                            "preferred channel 'sms' requires pro; "
+                            "no verified email fallback"
+                        )
                 else:
                     msg.channel = preferred
                     msg.destination = row.destination

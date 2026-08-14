@@ -2798,6 +2798,10 @@ def create_app() -> FastAPI:
 
     # ---- Notification channels ------------------------------------------
 
+    def _sms_allowed(user, user_id: uuid.UUID) -> bool:
+        """SMS delivery is a Pro perk (active trials count as Pro)."""
+        return user_id == _OWNER_USER_ID or effective_plan(user) == "pro"
+
     async def _notifications_payload(repo: Repo, user_id: uuid.UUID) -> dict:
         settings = get_settings()
         user, rows, devices = await asyncio.gather(
@@ -2805,14 +2809,18 @@ def create_app() -> FastAPI:
             repo.get_notification_channels(user_id),
             repo.list_push_devices(user_id),
         )
+        sms_ok = _sms_allowed(user, user_id)
         return {
             "preferred_channel": getattr(user, "preferred_channel", None),
             # Channels this deployment can send (creds configured) — drives the
             # UI picker. Push is filtered out on purpose: it is an additive
             # fan-out, not a destination a user can choose instead of email,
             # and offering it in the picker would let them lose their digest.
+            # SMS is additionally hidden from non-Pro users (Pro perk).
             "available_channels": sorted(
-                c for c in app.state.delivery_adapters if c != PUSH_CHANNEL
+                c
+                for c in app.state.delivery_adapters
+                if c != PUSH_CHANNEL and (c != "sms" or sms_ok)
             ),
             # Read-only for the web settings page, so web and native agree on
             # which devices are registered.
@@ -2921,6 +2929,16 @@ def create_app() -> FastAPI:
                 status_code=400,
                 detail="SMS requires consent to receive automated texts",
             )
+        if req.channel == "sms" and not _sms_allowed(
+            await repo.get_user(user_id), user_id
+        ):
+            raise HTTPException(
+                status_code=402,
+                detail=(
+                    "Text-message delivery is a Pro feature. Upgrade to "
+                    "receive digests by SMS."
+                ),
+            )
         try:
             await verification.issue_code(
                 repo,
@@ -2953,6 +2971,18 @@ def create_app() -> FastAPI:
         """Switch among already-verified channels."""
         repo = _require_repo(app)
         user_id = _user_id(request)
+        # A downgraded user may still hold a verified sms row; don't let them
+        # re-select it (delivery would demote to email anyway).
+        if req.channel == "sms" and not _sms_allowed(
+            await repo.get_user(user_id), user_id
+        ):
+            raise HTTPException(
+                status_code=402,
+                detail=(
+                    "Text-message delivery is a Pro feature. Upgrade to "
+                    "receive digests by SMS."
+                ),
+            )
         ok = await repo.set_preferred_channel(user_id, req.channel)
         if not ok:
             raise HTTPException(

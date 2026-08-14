@@ -138,6 +138,73 @@ async def test_run_digests_for_all_fan_out(monkeypatch):
     assert str(u_free) in ids and str(u_pro) in ids
 
 
+# --- SMS is a Pro perk: enqueue-time demotion --------------------------------
+
+
+@pytest.mark.asyncio
+async def test_enqueue_sms_pro_user_gets_sms_body():
+    repo = FakeRepo()
+    uid = uuid.uuid4()
+    repo.seed_user(uid, plan="pro")
+    repo._users_by_id[uid].preferred_channel = "sms"
+    msg_id = await repo.enqueue_outbound("rich body", user_id=uid, sms_body="teaser")
+    msg = repo._outbox[msg_id]
+    assert msg.status == "queued"
+    assert msg.channel == "sms"
+    assert msg.body == "teaser"
+
+
+@pytest.mark.asyncio
+async def test_enqueue_sms_trial_user_counts_as_pro():
+    from datetime import datetime, timedelta, timezone
+
+    repo = FakeRepo()
+    uid = uuid.uuid4()
+    repo.seed_user(
+        uid,
+        plan="free",
+        trial_ends_at=datetime.now(timezone.utc) + timedelta(days=3),
+    )
+    repo._users_by_id[uid].preferred_channel = "sms"
+    msg_id = await repo.enqueue_outbound("rich body", user_id=uid, sms_body="teaser")
+    msg = repo._outbox[msg_id]
+    assert msg.status == "queued"
+    assert msg.channel == "sms"
+    assert msg.body == "teaser"
+
+
+@pytest.mark.asyncio
+async def test_enqueue_sms_free_user_demotes_to_verified_email():
+    repo = FakeRepo()
+    uid = uuid.uuid4()
+    repo.seed_user(uid, plan="free")
+    repo._users_by_id[uid].preferred_channel = "sms"
+    await repo.upsert_notification_channel(
+        uid, channel="email", destination="you@example.com"
+    )
+    await repo.mark_channel_verified(uid, "email")
+    msg_id = await repo.enqueue_outbound("rich body", user_id=uid, sms_body="teaser")
+    msg = repo._outbox[msg_id]
+    assert msg.status == "queued"
+    assert msg.channel == "email"
+    assert msg.destination == "you@example.com"
+    # Email gets the full body, never the SMS teaser.
+    assert msg.body == "rich body"
+
+
+@pytest.mark.asyncio
+async def test_enqueue_sms_free_user_without_email_is_skipped():
+    repo = FakeRepo()
+    uid = uuid.uuid4()
+    repo.seed_user(uid, plan="free")
+    repo._users_by_id[uid].preferred_channel = "sms"
+    msg_id = await repo.enqueue_outbound("rich body", user_id=uid, sms_body="teaser")
+    msg = repo._outbox[msg_id]
+    assert msg.status == "skipped"
+    assert "requires pro" in msg.last_error
+    assert msg.body == "rich body"
+
+
 @pytest.mark.asyncio
 async def test_free_plan_caps_holdings_in_market_context(monkeypatch):
     from app.agent import digest_pipeline as dp

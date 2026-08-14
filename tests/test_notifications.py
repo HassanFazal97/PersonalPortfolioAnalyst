@@ -5,6 +5,7 @@ import uuid
 
 from fastapi.testclient import TestClient
 
+import app.main as main
 from app.config import DEFAULT_USER_ID, get_settings
 from app.delivery.adapters.base import SendResult
 from app.delivery.adapters.discord import DiscordAdapter
@@ -274,6 +275,86 @@ def test_set_preferred_rejects_unverified(monkeypatch):
     )
     assert resp.status_code == 400
     assert "not verified" in resp.json()["detail"].lower()
+
+
+def _as_user(monkeypatch, uid):
+    """Route the request identity to a non-owner user (bearer binds owner)."""
+    monkeypatch.setattr(main, "_user_id", lambda request: uid)
+
+
+def test_available_channels_hides_sms_for_free_user(monkeypatch):
+    repo = FakeRepo()
+    uid = uuid.uuid4()
+    repo.seed_user(uid, plan="free")
+    client = _client(monkeypatch, repo, adapters=_adapters(sms=True))
+    _as_user(monkeypatch, uid)
+    body = client.get("/me/notifications", headers=_AUTH).json()
+    assert "sms" not in body["available_channels"]
+    assert "discord" in body["available_channels"]
+
+
+def test_available_channels_includes_sms_for_pro_and_trial(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
+    repo = FakeRepo()
+    u_pro = uuid.uuid4()
+    u_trial = uuid.uuid4()
+    repo.seed_user(u_pro, plan="pro")
+    repo.seed_user(
+        u_trial,
+        plan="free",
+        trial_ends_at=datetime.now(timezone.utc) + timedelta(days=3),
+    )
+    client = _client(monkeypatch, repo, adapters=_adapters(sms=True))
+    for uid in (u_pro, u_trial):
+        _as_user(monkeypatch, uid)
+        body = client.get("/me/notifications", headers=_AUTH).json()
+        assert "sms" in body["available_channels"]
+
+
+def test_register_sms_rejected_for_free_user(monkeypatch):
+    repo = FakeRepo()
+    uid = uuid.uuid4()
+    repo.seed_user(uid, plan="free")
+    client = _client(monkeypatch, repo, adapters=_adapters(sms=True))
+    _as_user(monkeypatch, uid)
+    resp = client.post(
+        "/me/notifications/channel",
+        headers=_AUTH,
+        json={"channel": "sms", "destination": "+14165551234", "consent": True},
+    )
+    assert resp.status_code == 402
+    assert "pro" in resp.json()["detail"].lower()
+
+
+def test_set_preferred_sms_rejected_for_free_user(monkeypatch):
+    from datetime import datetime, timezone
+
+    repo = FakeRepo()
+    uid = uuid.uuid4()
+    repo.seed_user(uid, plan="free")
+    # A downgraded user may still hold a verified sms row.
+    now = datetime.now(timezone.utc)
+    repo._notification_channels[(uid, "sms")] = type(
+        "Row",
+        (),
+        {
+            "channel": "sms",
+            "destination": "+14165551234",
+            "verified_at": now,
+            "opted_out_at": None,
+            "consent_at": now,
+        },
+    )()
+    client = _client(monkeypatch, repo, adapters=_adapters(sms=True))
+    _as_user(monkeypatch, uid)
+    resp = client.post(
+        "/me/notifications/preferred",
+        headers=_AUTH,
+        json={"channel": "sms"},
+    )
+    assert resp.status_code == 402
+    assert "pro" in resp.json()["detail"].lower()
 
 
 def test_available_channels_reflects_env(monkeypatch):

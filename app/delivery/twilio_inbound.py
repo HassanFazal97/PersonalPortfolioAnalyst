@@ -24,8 +24,8 @@ HELP_WORDS = {"HELP", "INFO"}
 EMPTY_TWIML = '<?xml version="1.0" encoding="UTF-8"?><Response/>'
 HELP_TWIML = (
     '<?xml version="1.0" encoding="UTF-8"?><Response><Message>'
-    "Portfolio Analyst: daily portfolio digests and alerts. "
-    "Reply STOP to unsubscribe, START to resume. Support: see the dashboard."
+    "Cirvia: daily portfolio digests and alerts. "
+    "Reply STOP to unsubscribe, START to resume. Support: https://cirvia.ca"
     "</Message></Response>"
 )
 

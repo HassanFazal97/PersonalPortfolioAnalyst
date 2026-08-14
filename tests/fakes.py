@@ -857,20 +857,49 @@ class FakeRepo:
                                subject=None, sms_body=None, push=False,
                                push_title=None, push_body=None, deep_link=None):
         # Mirror the real channel-aware routing: SMS gets the shorter sms_body,
-        # other channels get the (possibly richer) body.
+        # other channels get the (possibly richer) body. SMS is Pro-only —
+        # a non-Pro user preferring it demotes to their verified email
+        # channel, or the row is skipped with the reason recorded.
+        from app.config import DEFAULT_USER_ID
+        from app.plans import effective_plan
+
         user = self._users_by_id.get(user_id) if user_id is not None else None
         preferred = getattr(user, "preferred_channel", None) if user else None
-        stored_body = sms_body if (preferred == "sms" and sms_body) else body
+        status = "queued"
+        last_error = None
+        destination = None
+        if (
+            preferred == "sms"
+            and user_id != uuid.UUID(DEFAULT_USER_ID)
+            and effective_plan(user) != "pro"
+        ):
+            email_row = self._notification_channels.get((user_id, "email"))
+            if (
+                email_row is not None
+                and email_row.verified_at is not None
+                and email_row.opted_out_at is None
+            ):
+                preferred = "email"
+                destination = email_row.destination
+            else:
+                status = "skipped"
+                last_error = (
+                    "preferred channel 'sms' requires pro; "
+                    "no verified email fallback"
+                )
+        use_sms_body = preferred == "sms" and sms_body and status == "queued"
+        stored_body = sms_body if use_sms_body else body
         msg_id = uuid.uuid4()
         self.outbound.append(stored_body)
         self._outbox[msg_id] = SimpleNamespace(
             id=msg_id,
             user_id=user_id,
             body=stored_body,
-            status="queued",
+            status=status,
             attempts=0,
             channel=preferred,
-            destination=None,
+            destination=destination,
+            last_error=last_error,
             payload={"kind": kind, **({"subject": subject} if subject else {})},
         )
         # Additive fan-out: one extra row per subscribed device, never in

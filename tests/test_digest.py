@@ -10,7 +10,13 @@ from app.agent.digest_pipeline import (
 )
 from app.agent.planner import parse_plan
 from app.config import get_settings
-from app.tools.digest import DIGEST_MAX_CHARS, send_digest, validate_digest_structure
+from app.tools.digest import (
+    DIGEST_MAX_CHARS,
+    DIGEST_SMS_TEASER_MAX_CHARS,
+    build_sms_teaser,
+    send_digest,
+    validate_digest_structure,
+)
 from tests.fakes import FakeRepo, ScriptedAnthropic, text_turn, tool_use_turn
 
 STRUCTURED_BODY = (
@@ -225,8 +231,14 @@ async def test_send_digest_appends_watchlist_to_rich_body_only():
     today = datetime.now(ZoneInfo(get_settings().tz)).date()
     stored = repo._digests_by_user[(uid, today)].body
     assert "\n\nWATCHLIST\nSHOP.TO  $98.12  +1.4% today · news" in stored
-    # The queued SMS body is the short core without the section.
-    assert repo.outbound[-1] == STRUCTURED_BODY
+    # The queued SMS body is the derived teaser: portfolio line, top risk,
+    # link — never the rich body or the watchlist section.
+    queued = repo.outbound[-1]
+    assert queued.startswith("PORTFOLIO: -1.0% today")
+    assert "TOP RISK: NVDA slipping" in queued
+    assert queued.endswith("/app/dashboard#tab-digest")
+    assert "WATCHLIST" not in queued
+    assert len(queued) <= DIGEST_SMS_TEASER_MAX_CHARS
 
 
 async def test_send_digest_without_watchlist_section_unchanged():
@@ -234,6 +246,52 @@ async def test_send_digest_without_watchlist_section_unchanged():
     ctx = SimpleNamespace(repo=repo, run_id=None)
     await send_digest({"body": STRUCTURED_BODY}, ctx)
     assert "WATCHLIST" not in repo.outbound[-1]
+
+
+# --- SMS teaser ---------------------------------------------------------------
+
+_LINK = "https://cirvia.ca/app/dashboard#tab-digest"
+
+
+def test_sms_teaser_extracts_portfolio_risk_and_link():
+    teaser = build_sms_teaser(STRUCTURED_BODY, link=_LINK)
+    assert teaser.splitlines() == [
+        "PORTFOLIO: -1.0% today",
+        "TOP RISK: NVDA slipping on cooling AI demand chatter; largest position.",
+        f"Full digest: {_LINK}",
+    ]
+
+
+def test_sms_teaser_caps_length_and_keeps_link():
+    body = (
+        "PORTFOLIO: " + "x" * 400 + "\n\nTOP RISK\n" + "y" * 400
+        + "\n\nWATCH TODAY: nothing."
+    )
+    teaser = build_sms_teaser(body, link=_LINK)
+    assert len(teaser) <= DIGEST_SMS_TEASER_MAX_CHARS
+    assert teaser.endswith(f"Full digest: {_LINK}")
+    assert teaser.startswith("PORTFOLIO: xxx")
+    assert "TOP RISK: yyy" in teaser
+
+
+def test_sms_teaser_degrades_without_risk_content():
+    body = "PORTFOLIO: +0.2% today\n\nTOP RISK\n\nWATCH TODAY: Fed minutes."
+    teaser = build_sms_teaser(body, link=_LINK)
+    assert teaser.splitlines() == [
+        "PORTFOLIO: +0.2% today",
+        f"Full digest: {_LINK}",
+    ]
+
+
+def test_sms_teaser_normalizes_non_gsm7_punctuation():
+    body = (
+        "PORTFOLIO: down 1% — “risk-off” day\n\nTOP RISK\n"
+        "NVDA’s momentum fading…\n\nWATCH TODAY: CPI."
+    )
+    teaser = build_sms_teaser(body, link=_LINK)
+    assert "—" not in teaser and "“" not in teaser and "’" not in teaser
+    assert 'down 1% - "risk-off" day' in teaser
+    assert "NVDA's momentum fading..." in teaser
 
 
 def test_validate_structure_requires_portfolio_first_line():
