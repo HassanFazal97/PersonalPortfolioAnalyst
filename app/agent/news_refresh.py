@@ -36,9 +36,9 @@ def _get_client(client: Any) -> Any:
     if client is not None:
         return client
     try:
-        from anthropic import AsyncAnthropic
+        from app.agent.anthropic_client import shared_client
 
-        return AsyncAnthropic(api_key=get_settings().anthropic_api_key)
+        return shared_client()
     except Exception:  # noqa: BLE001 - no client just means no importance filter
         return None
 

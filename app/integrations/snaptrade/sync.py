@@ -40,22 +40,26 @@ async def sync_brokerage_positions(
 
     # The SnapTrade SDK is synchronous (requests): every remote call runs
     # via to_thread so a sync — inline from POST /portfolio/sync or from the
-    # background positions job — never blocks the event loop.
+    # background positions job — never blocks the event loop. The per-item
+    # calls fan out concurrently: each is an independent HTTP request, and
+    # serial round trips were the bulk of this endpoint's latency.
     if refresh:
-        refresh_skipped = 0
-        for conn in await asyncio.to_thread(service.list_connections):
-            auth_id = conn.get("id") or conn.get("authorization_id")
-            if auth_id and not await asyncio.to_thread(
-                service.refresh_connection, str(auth_id)
-            ):
-                refresh_skipped += 1
+        auth_ids = [
+            str(a)
+            for conn in await asyncio.to_thread(service.list_connections)
+            if (a := conn.get("id") or conn.get("authorization_id"))
+        ]
+        refreshed = await asyncio.gather(
+            *(asyncio.to_thread(service.refresh_connection, a) for a in auth_ids)
+        )
+        refresh_skipped = sum(1 for ok in refreshed if not ok)
     else:
         refresh_skipped = 0
 
     accounts = [
         a
         for a in await asyncio.to_thread(service.list_accounts)
-        if is_investment_account(a)
+        if is_investment_account(a) and a.get("id")
     ]
     if not accounts:
         raise RuntimeError(
@@ -63,21 +67,21 @@ async def sync_brokerage_positions(
             "your brokerage first."
         )
 
+    positions_by_account = await asyncio.gather(
+        *(
+            asyncio.to_thread(service.get_account_positions, str(a["id"]))
+            for a in accounts
+        )
+    )
+
     mapped: list[MappedPosition] = []
     account_summaries: list[dict[str, Any]] = []
-
-    for account in accounts:
-        account_id = account.get("id")
-        if not account_id:
-            continue
-        positions = await asyncio.to_thread(
-            service.get_account_positions, str(account_id)
-        )
+    for account, positions in zip(accounts, positions_by_account):
         rows = map_account_positions(account, positions)
         mapped.extend(rows)
         account_summaries.append(
             {
-                "account_id": account_id,
+                "account_id": account.get("id"),
                 "name": account.get("name"),
                 "raw_type": account.get("raw_type"),
                 "positions": len(rows),
@@ -109,17 +113,20 @@ async def sync_brokerage_positions(
             account=row.account,
         )
 
-    keep: set[tuple[str, str]] = set()
-    for row in merged.values():
-        keep.add((row.ticker, row.account))
-        await repo.upsert_position(
-            ticker=row.ticker,
-            quantity=row.quantity,
-            avg_cost=row.avg_cost,
-            currency=row.currency,
-            account=row.account,
-            user_id=user_id,
-        )
+    keep = set(merged.keys())
+    await repo.upsert_positions(
+        [
+            {
+                "ticker": row.ticker,
+                "quantity": row.quantity,
+                "avg_cost": row.avg_cost,
+                "currency": row.currency,
+                "account": row.account,
+            }
+            for row in merged.values()
+        ],
+        user_id=user_id,
+    )
 
     removed = await repo.prune_positions_except(keep, user_id=user_id)
 

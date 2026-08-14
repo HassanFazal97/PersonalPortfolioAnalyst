@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections import OrderedDict
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -34,9 +35,19 @@ CACHE_TTL_SECONDS = 7 * 86400.0
 # Misses retry sooner: the website lands on the next fundamentals refresh.
 MISS_TTL_SECONDS = 6 * 3600.0
 
-# ticker -> (monotonic_timestamp, (bytes, media_type) | None on a miss)
-_cache: dict[str, tuple[float, tuple[bytes, str] | None]] = {}
+# ticker -> (monotonic_timestamp, (bytes, media_type) | None on a miss).
+# LRU-capped: logo bytes are tens of KB each and any real ticker can land
+# here via the stock pages, so unbounded growth is real memory.
+_CACHE_MAX = 1000
+_cache: OrderedDict[str, tuple[float, tuple[bytes, str] | None]] = OrderedDict()
 _fetch_locks: dict[str, asyncio.Lock] = {}
+
+
+def _cache_put(ticker: str, entry: tuple[float, tuple[bytes, str] | None]) -> None:
+    _cache[ticker] = entry
+    _cache.move_to_end(ticker)
+    while len(_cache) > _CACHE_MAX:
+        _cache.popitem(last=False)
 
 
 def _clock() -> float:
@@ -97,7 +108,7 @@ async def get_logo(
         return None
     domain = domain_of(profile.get("website"))
     if domain is None:
-        _cache[ticker] = (_clock(), None)
+        _cache_put(ticker, (_clock(), None))
         return None
 
     lock = _fetch_locks.setdefault(ticker, asyncio.Lock())
@@ -109,5 +120,5 @@ async def get_logo(
             icon = await _fetch_icon_raw(domain)
         except httpx.HTTPError:
             return None  # transient: uncached, so the next request retries
-        _cache[ticker] = (_clock(), icon)
+        _cache_put(ticker, (_clock(), icon))
         return icon

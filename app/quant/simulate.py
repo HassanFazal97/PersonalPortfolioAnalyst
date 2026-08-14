@@ -65,7 +65,7 @@ def simulate_portfolio(
     weights: np.ndarray,
     *,
     horizon_days: int = TRADING_DAYS,
-    n_sims: int = 5000,
+    n_sims: int = 2000,
     drift_daily: np.ndarray | float = 0.0,
     seed: int = 12345,
 ) -> SimulationResult:
@@ -74,27 +74,35 @@ def simulate_portfolio(
     ``cov`` and ``weights`` are the daily covariance and normalized weights
     (weights are re-normalized here). Returns the percentile fan of the
     portfolio value factor (1.0 = start).
+
+    The path arrays are float32: at 25 assets × 252 days the draw tensor is
+    the peak allocation of the whole request, and the percentile bands are
+    rounded to two decimals of a percent downstream, far coarser than float32
+    noise. n_sims=2000 puts the percentile standard error around 2.4% — it
+    can shift the last displayed digit, which is accepted (this cone frames
+    risk, it does not price anything).
     """
-    w = np.asarray(weights, dtype=float)
+    w = np.asarray(weights, dtype=np.float32)
     w = w / w.sum()
     n_assets = cov.shape[0]
     rng = np.random.default_rng(seed)
 
-    factor = psd_cholesky(cov)  # (n_assets, n_assets)
+    factor = psd_cholesky(cov).astype(np.float32)  # (n_assets, n_assets)
     sigma2 = np.clip(np.diag(cov), 0.0, None)
     mu = np.full(n_assets, drift_daily) if np.isscalar(drift_daily) else np.asarray(drift_daily, dtype=float)
+    ito_drift = (mu - 0.5 * sigma2).astype(np.float32)
 
     # Daily log-return draws: r_t = (mu - 0.5σ²) + L z, z ~ N(0, I).
     # Shape (horizon, n_sims, n_assets).
-    z = rng.standard_normal((horizon_days, n_sims, n_assets))
+    z = rng.standard_normal((horizon_days, n_sims, n_assets), dtype=np.float32)
     correlated = z @ factor.T
-    log_returns = (mu - 0.5 * sigma2) + correlated  # broadcast over (h, sims)
+    log_returns = ito_drift + correlated  # broadcast over (h, sims)
 
     # Portfolio value path: start at 1.0, each day grows by the weighted simple
     # return of that day's asset log returns.
     simple = np.expm1(log_returns)  # (h, sims, n_assets)
     port_daily = simple @ w  # (h, sims): portfolio simple return per day
-    value_paths = np.cumprod(1.0 + port_daily, axis=0)  # (h, sims)
+    value_paths = np.cumprod(1.0 + port_daily, axis=0, dtype=np.float64)  # (h, sims)
 
     terminal = value_paths[-1, :]
     terminal_pct = {p: float(np.percentile(terminal, p)) for p in _PERCENTILES}

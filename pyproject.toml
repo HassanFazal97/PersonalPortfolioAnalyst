@@ -22,6 +22,10 @@ dependencies = [
     "scipy>=1.13,<2",
     "apscheduler>=3.10",
     "httpx>=0.27",
+    # Shared snapshot cache for multi-worker deployments (REDIS_URL set);
+    # the in-process dict backend needs nothing, so redis-py stays unused
+    # until the topology actually splits.
+    "redis>=5,<7",
     # Pinned below 12: SnapTrade SDK 12.0.0 changed its request auth and
     # breaks every call with 401/403 code 0000 "Authentication credentials
     # were not provided". Prod has no lockfile, so `pip install .` pulls the
@@ -42,6 +46,8 @@ dev = [
     "ruff>=0.6",
     # Eval harness (evals/): golden chat cases are YAML.
     "pyyaml>=6.0",
+    # In-memory Redis double for RedisSnapshotStore tests (no server needed).
+    "fakeredis>=2.23",
 ]
 
 [tool.pytest.ini_options]

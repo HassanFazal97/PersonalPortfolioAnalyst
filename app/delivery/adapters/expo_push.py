@@ -18,7 +18,7 @@ from typing import Any
 
 import httpx
 
-from app.delivery.adapters.base import SendResult
+from app.delivery.adapters.base import SendResult, http_client
 
 _log = logging.getLogger(__name__)
 
@@ -42,11 +42,15 @@ class ExpoPushAdapter:
         dry_run: bool = False,
         timeout: float = 10.0,
         transport: httpx.AsyncBaseTransport | None = None,
+        client: httpx.AsyncClient | None = None,
     ) -> None:
         self._access_token = access_token
         self._dry_run = dry_run
         self._timeout = timeout
         self._transport = transport
+        # A test transport wins over the shared client — a mocked adapter
+        # must never send through the real pooled connection.
+        self._client = None if transport is not None else client
 
     async def send(
         self, destination: str, body: str, payload: dict[str, Any]
@@ -83,10 +87,14 @@ class ExpoPushAdapter:
             headers["Authorization"] = f"Bearer {self._access_token}"
 
         try:
-            async with httpx.AsyncClient(
-                timeout=self._timeout, transport=self._transport
-            ) as client:
-                resp = await client.post(PUSH_URL, json=message, headers=headers)
+            if self._transport is not None:
+                async with httpx.AsyncClient(
+                    timeout=self._timeout, transport=self._transport
+                ) as client:
+                    resp = await client.post(PUSH_URL, json=message, headers=headers)
+            else:
+                async with http_client(self._client, self._timeout) as client:
+                    resp = await client.post(PUSH_URL, json=message, headers=headers)
         except httpx.HTTPError as exc:
             return SendResult(ok=False, error=f"expo request failed: {exc}")
 

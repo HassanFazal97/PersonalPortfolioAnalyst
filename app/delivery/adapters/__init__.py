@@ -11,6 +11,8 @@ from __future__ import annotations
 import logging
 import re
 
+import httpx
+
 from app.config import Settings
 from app.delivery.adapters.base import ChannelAdapter, SendResult
 from app.delivery.adapters.discord import DiscordAdapter
@@ -34,12 +36,21 @@ def _looks_like_valid_from(value: str) -> bool:
     return bool(_EMAIL_FROM_RE.match(value.strip()))
 
 
-def build_adapters(settings: Settings) -> dict[str, ChannelAdapter]:
-    adapters: dict[str, ChannelAdapter] = {"discord": DiscordAdapter()}
+def build_adapters(
+    settings: Settings, *, http_client: httpx.AsyncClient | None = None
+) -> dict[str, ChannelAdapter]:
+    """``http_client`` is the process-shared connection pool (created in the
+    app lifespan, closed there too); without it each send opens a fresh
+    TCP+TLS connection — fine for tests, wasteful for the dispatcher."""
+    adapters: dict[str, ChannelAdapter] = {
+        "discord": DiscordAdapter(client=http_client)
+    }
     if settings.resend_api_key and settings.email_from:
         if _looks_like_valid_from(settings.email_from):
             adapters["email"] = ResendEmailAdapter(
-                api_key=settings.resend_api_key, from_addr=settings.email_from
+                api_key=settings.resend_api_key,
+                from_addr=settings.email_from,
+                client=http_client,
             )
         else:
             # A doomed adapter is worse than no adapter: registering it would
@@ -62,6 +73,7 @@ def build_adapters(settings: Settings) -> dict[str, ChannelAdapter]:
             account_sid=settings.twilio_account_sid,
             auth_token=settings.twilio_auth_token,
             from_number=settings.twilio_from_number,
+            client=http_client,
         )
     if settings.push_enabled:
         # Registered under "push", which is deliberately not in CHANNELS — the
@@ -70,6 +82,7 @@ def build_adapters(settings: Settings) -> dict[str, ChannelAdapter]:
         adapters["push"] = ExpoPushAdapter(
             access_token=settings.expo_access_token,
             dry_run=settings.push_dry_run,
+            client=http_client,
         )
         if settings.push_dry_run:
             _logger.warning(

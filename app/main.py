@@ -14,10 +14,12 @@ import json
 import logging
 import re
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
-from time import perf_counter
+from collections import OrderedDict
+from time import monotonic, perf_counter
 from urllib.parse import parse_qsl
 from zoneinfo import ZoneInfo
 
@@ -142,6 +144,16 @@ from app.webapp import (
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
+    # Explicit default executor: everything routed through asyncio.to_thread
+    # (Monte Carlo, yfinance, SnapTrade, JWKS) shares this pool, so size it
+    # deliberately instead of inheriting cpu_count()+4 from the host.
+    executor = ThreadPoolExecutor(
+        max_workers=settings.thread_pool_workers, thread_name_prefix="app-worker"
+    )
+    asyncio.get_running_loop().set_default_executor(executor)
+    # Snapshot backend: shared Redis when configured (multi-worker), else the
+    # in-process dict store.
+    snapshot.configure(settings.redis_url)
     repo = (
         Repo(settings.database_url, ssl=settings.db_ssl)
         if settings.database_url
@@ -163,7 +175,12 @@ async def lifespan(app: FastAPI):
     app.state.quote_warm_scheduler = None
     app.state.positions_refresh_scheduler = None
     # Which channels this deployment can send (drives verification + UI).
-    app.state.delivery_adapters = build_adapters(settings)
+    # One shared connection pool across every adapter: sends reuse TCP+TLS
+    # instead of paying a fresh handshake per message.
+    delivery_http = httpx.AsyncClient(timeout=10.0)
+    app.state.delivery_adapters = build_adapters(
+        settings, http_client=delivery_http
+    )
 
     if not (settings.supabase_url or settings.supabase_jwt_secret):
         logging.getLogger(__name__).warning(
@@ -172,10 +189,15 @@ async def lifespan(app: FastAPI):
             "Do not expose this deployment publicly in this state."
         )
 
-    if repo is not None:
+    if repo is not None and not settings.run_schedulers:
+        logging.getLogger(__name__).info(
+            "RUN_SCHEDULERS=0 — serving requests only; a separate single "
+            "instance must run the schedulers or digests will not fire."
+        )
+    if repo is not None and settings.run_schedulers:
         async def _run_digest() -> None:
             await run_digests_for_all(repo)
-            snapshot.store.clear()
+            await snapshot.store.clear()
 
         scheduler = DigestScheduler(
             heartbeat_wrapped("morning_digest", repo, _run_digest),
@@ -189,7 +211,7 @@ async def lifespan(app: FastAPI):
         if settings.macro_scan_interval_minutes > 0:
             async def _run_macro() -> None:
                 await run_macro_scans_for_all(repo)
-                snapshot.store.clear()
+                await snapshot.store.clear()
 
             macro_scheduler = IntervalScheduler(
                 heartbeat_wrapped("macro_scan", repo, _run_macro),
@@ -202,7 +224,7 @@ async def lifespan(app: FastAPI):
         if settings.anomaly_scan_cron:
             async def _run_anomaly() -> None:
                 await run_anomaly_scans_for_all(repo)
-                snapshot.store.clear()
+                await snapshot.store.clear()
 
             anomaly_scheduler = DigestScheduler(
                 heartbeat_wrapped("anomaly_scan", repo, _run_anomaly),
@@ -245,7 +267,7 @@ async def lifespan(app: FastAPI):
         if settings.news_refresh_cron:
             async def _run_news_refresh() -> None:
                 await run_news_refresh_for_all(repo)
-                snapshot.store.clear()
+                await snapshot.store.clear()
 
             news_scheduler = DigestScheduler(
                 heartbeat_wrapped("news_refresh", repo, _run_news_refresh),
@@ -347,8 +369,8 @@ async def lifespan(app: FastAPI):
                 # hours the close doesn't move; skip entirely.
                 if not snapshot.market_hours_now():
                     return
-                for uid in snapshot.store.active_users(30 * 60):
-                    snapshot.store.refresh(
+                for uid in await snapshot.store.active_users(30 * 60):
+                    await snapshot.store.refresh(
                         uid, ["portfolio", "watchlist"], _warm_builder
                     )
 
@@ -367,13 +389,13 @@ async def lifespan(app: FastAPI):
                 users — positions previously only updated on manual sync."""
                 if not snapshot.market_hours_now():
                     return
-                for uid in snapshot.store.active_users(24 * 3600):
+                for uid in await snapshot.store.active_users(24 * 3600):
                     set_current_user_id(uid)
                     if await repo.get_snaptrade_credentials(uid) is None:
                         continue
                     try:
                         await sync_brokerage_positions(repo, user_id=uid)
-                        snapshot.store.invalidate(uid, "portfolio", "status", "me")
+                        await snapshot.store.invalidate(uid, "portfolio", "status", "me")
                     except Exception as exc:
                         logging.getLogger(__name__).warning(
                             "positions refresh for %s failed: %s", uid, exc
@@ -440,6 +462,9 @@ async def lifespan(app: FastAPI):
             app.state.scheduler.shutdown()
         if repo is not None:
             await repo.dispose()
+        await delivery_http.aclose()
+        await snapshot.store.close()
+        executor.shutdown(wait=False, cancel_futures=True)
 
 
 class ChatRequest(BaseModel):
@@ -914,15 +939,19 @@ async def _me_payload(repo: Repo, user_id: uuid.UUID) -> dict:
     # the stored paid flag so the UI can tell trial apart from subscription.
     plan = effective_plan(user)
     cap = max_digest_holdings(plan, settings)
-    positions = await repo.list_positions(user_id=user_id)
-    unique_tickers = sorted({p.ticker for p in positions})
+    # Only the distinct-ticker COUNT is needed (not hydrated rows), and it is
+    # independent of the quota query — run both concurrently.
+    ticker_count, chat_quota = await asyncio.gather(
+        repo.count_distinct_tickers(user_id=user_id),
+        _chat_quota_payload(repo, user_id, plan, settings),
+    )
     # Read off the row already in hand (repo.get_digest_tickers would
     # re-fetch the same user for one column).
     digest_tickers = [str(t) for t in (getattr(user, "digest_tickers", None) or [])]
     editable = (
         plan == "free"
         and cap is not None
-        and len(unique_tickers) > cap
+        and ticker_count > cap
     )
     return {
         "user_id": str(user_id),
@@ -943,16 +972,22 @@ async def _me_payload(repo: Repo, user_id: uuid.UUID) -> dict:
         },
         "trial": _trial_payload(user),
         "billing": _billing_payload(settings, user),
-        "chat_quota": await _chat_quota_payload(repo, user_id, plan, settings),
+        "chat_quota": chat_quota,
     }
 
 
 async def _validate_digest_tickers(
-    repo: Repo, user_id: uuid.UUID, tickers: list[str]
+    repo: Repo,
+    user_id: uuid.UUID,
+    tickers: list[str],
+    *,
+    user=None,
 ) -> list[str]:
-    """Validate and normalize a digest watchlist update."""
+    """Validate and normalize a digest watchlist update. Pass ``user`` when
+    the caller already holds the row to skip a duplicate fetch."""
     settings = get_settings()
-    user = await repo.get_user(user_id)
+    if user is None:
+        user = await repo.get_user(user_id)
     plan = effective_plan(user)
     if plan == "pro":
         return []
@@ -1272,7 +1307,7 @@ async def _run_chat_turn(
     quota = await _chat_quota_payload(repo, user_id, plan, settings)
     _ingest_chat_memory(repo, user_id, message, result)
     # Agent tools may have written alerts or watchlist rows.
-    snapshot.store.invalidate(user_id, "news", "watchlist", "me")
+    await snapshot.store.invalidate(user_id, "news", "watchlist", "me")
     return {
         "run_id": str(result.run_id),
         "answer": result.answer,
@@ -1297,7 +1332,7 @@ _FUNNEL_PATHS = frozenset({"/", "/pricing", "/app", "/app/onboarding", "/app/das
 def create_app() -> FastAPI:
     # The perf caches are process-wide singletons; a fresh app instance must
     # not inherit another instance's data (tests build many apps — prod one).
-    snapshot.store.clear()
+    snapshot.reset()
     authcache.cache_clear()
     _track_record_cache.clear()
     app = FastAPI(
@@ -1489,55 +1524,77 @@ def create_app() -> FastAPI:
 
     # ---- Signed-in web app (Supabase JS auth in the browser) -----------
 
-    def _webapp_html(render) -> HTMLResponse:
+    # The shells are static per (supabase_url, anon_key): render once, hash
+    # once, and let repeat loads revalidate to a 304 instead of re-rendering
+    # and re-gzipping ~120 KB per request. Keyed per route; stock pages vary
+    # per ticker so they render per request but still carry the ETag.
+    _shell_cache: dict[tuple, tuple[str, str]] = {}
+
+    def _webapp_html(
+        render, *, page_key: str | None = None, request: Request | None = None
+    ) -> Response:
         settings = get_settings()
         if not settings.supabase_url or not settings.supabase_anon_key:
             return HTMLResponse(NOT_CONFIGURED_HTML, status_code=503)
-        return HTMLResponse(render(settings.supabase_url, settings.supabase_anon_key))
+        key = (page_key, settings.supabase_url, settings.supabase_anon_key)
+        cached = _shell_cache.get(key) if page_key else None
+        if cached is None:
+            html = render(settings.supabase_url, settings.supabase_anon_key)
+            etag = f'W/"{hashlib.sha256(html.encode()).hexdigest()[:20]}"'
+            cached = (etag, html)
+            if page_key:
+                _shell_cache[key] = cached
+        etag, html = cached
+        headers = {"ETag": etag, "Cache-Control": "no-cache"}
+        if request is not None and request.headers.get("if-none-match") == etag:
+            return Response(status_code=304, headers=headers)
+        return HTMLResponse(html, headers=headers)
 
     @app.get("/app", response_class=HTMLResponse)
-    async def app_login() -> HTMLResponse:
+    async def app_login(request: Request) -> Response:
         """Sign in / sign up page."""
-        return _webapp_html(login_page)
+        return _webapp_html(login_page, page_key="login", request=request)
 
     @app.get("/app/onboarding", response_class=HTMLResponse)
-    async def app_onboarding() -> HTMLResponse:
+    async def app_onboarding(request: Request) -> Response:
         """Connect brokerage -> sync -> digest preferences."""
-        return _webapp_html(onboarding_page)
+        return _webapp_html(onboarding_page, page_key="onboarding", request=request)
 
     @app.get("/app/dashboard", response_class=HTMLResponse)
-    async def app_dashboard() -> HTMLResponse:
+    async def app_dashboard(request: Request) -> Response:
         """Holdings, digest, alerts, and chat."""
-        return _webapp_html(dashboard_page)
+        return _webapp_html(dashboard_page, page_key="dashboard", request=request)
 
     @app.get("/app/stock/{ticker}", response_class=HTMLResponse)
-    async def app_stock(ticker: str) -> HTMLResponse:
+    async def app_stock(ticker: str, request: Request) -> Response:
         """Full-page view of one holding: chart, fundamentals, position, news."""
         t = _validated_ticker(ticker)  # 404s anything outside the symbol alphabet
-        return _webapp_html(lambda url, key: stock_page(t, url, key))
+        return _webapp_html(
+            lambda url, key: stock_page(t, url, key), request=request
+        )
 
     @app.get("/app/risk", response_class=HTMLResponse)
-    async def app_risk() -> HTMLResponse:
+    async def app_risk(request: Request) -> Response:
         """Visual Risk Lab: portfolio-level quant analytics (Pro-gated by the
         /portfolio/risk-analytics API the page calls)."""
-        return _webapp_html(risk_lab_page)
+        return _webapp_html(risk_lab_page, page_key="risk", request=request)
 
     @app.get("/app/picks", response_class=HTMLResponse)
-    async def app_picks() -> HTMLResponse:
+    async def app_picks(request: Request) -> Response:
         """Daily Best Stocks dashboard (Pro-gated by the /stocks/picks API
         the page calls)."""
-        return _webapp_html(picks_page)
+        return _webapp_html(picks_page, page_key="picks", request=request)
 
     @app.get("/app/deep-dives", response_class=HTMLResponse)
-    async def app_deep_dives() -> HTMLResponse:
+    async def app_deep_dives(request: Request) -> Response:
         """Deep-dive report history and full report view (data comes from the
         Pro-gated /deep-dive APIs the page calls)."""
-        return _webapp_html(deep_dives_page)
+        return _webapp_html(deep_dives_page, page_key="deep-dives", request=request)
 
     @app.get("/app/settings", response_class=HTMLResponse)
-    async def app_settings() -> HTMLResponse:
+    async def app_settings(request: Request) -> Response:
         """Account, brokerage connection, plan, and account deletion."""
-        return _webapp_html(settings_page)
+        return _webapp_html(settings_page, page_key="settings", request=request)
 
     @app.get("/app/settings/delivery")
     async def app_settings_delivery(request: Request) -> RedirectResponse:
@@ -1547,9 +1604,9 @@ def create_app() -> FastAPI:
         return RedirectResponse(f"/app/settings{qs}#section-delivery", status_code=307)
 
     @app.get("/app/reset", response_class=HTMLResponse)
-    async def app_reset() -> HTMLResponse:
+    async def app_reset(request: Request) -> Response:
         """Set a new password after a Supabase recovery-link redirect."""
-        return _webapp_html(reset_page)
+        return _webapp_html(reset_page, page_key="reset", request=request)
 
     @app.get("/health")
     async def health() -> dict:
@@ -2099,10 +2156,10 @@ def create_app() -> FastAPI:
         user_id = _user_id(request)
         if user_id == _OWNER_USER_ID and request.headers.get("X-Digest-Run-All") == "1":
             result = {"digests": await run_digests_for_all(repo)}
-            snapshot.store.clear()
+            await snapshot.store.clear()
             return result
         result = await run_digest_pipeline(repo, user_id=user_id, force=True)
-        snapshot.store.invalidate(user_id, "digest", "news")
+        await snapshot.store.invalidate(user_id, "digest", "news")
         return result
 
     first_briefings_active: set[uuid.UUID] = set()
@@ -2119,11 +2176,15 @@ def create_app() -> FastAPI:
         user_id = _user_id(request)
         user = await repo.get_user(user_id)
         tz = user.timezone if user is not None else get_settings().tz
-        if await get_latest_digest(repo, user_id=user_id, tz=tz) is not None:
+        latest, positions = await asyncio.gather(
+            get_latest_digest(repo, user_id=user_id, tz=tz),
+            repo.list_positions(user_id=user_id),
+        )
+        if latest is not None:
             return {"status": "exists"}
         if user_id in first_briefings_active:
             return {"status": "running"}
-        if not await repo.list_positions(user_id=user_id):
+        if not positions:
             raise HTTPException(
                 status_code=400, detail="Add holdings before your first briefing."
             )
@@ -2133,7 +2194,7 @@ def create_app() -> FastAPI:
             try:
                 await run_digest_pipeline(repo, user_id=user_id, force=True)
                 await repo.record_funnel_event("first_briefing", user_id=user_id)
-                snapshot.store.invalidate(user_id, "digest", "news")
+                await snapshot.store.invalidate(user_id, "digest", "news")
             except Exception:
                 logging.getLogger(__name__).exception("first briefing failed")
             finally:
@@ -2187,10 +2248,10 @@ def create_app() -> FastAPI:
         user_id = _user_id(request)
         if user_id == _OWNER_USER_ID and request.headers.get("X-News-Refresh-All") == "1":
             result = {"refreshes": await run_news_refresh_for_all(repo)}
-            snapshot.store.clear()
+            await snapshot.store.clear()
             return result
         result = await refresh_news_for_user(repo, user_id)
-        snapshot.store.invalidate(user_id, "news")
+        await snapshot.store.invalidate(user_id, "news")
         return result
 
     @app.get("/alerts")
@@ -2237,11 +2298,30 @@ def create_app() -> FastAPI:
         except SnapTradeError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
 
+    # /portfolio/status is polled every few seconds during onboarding and
+    # gates the post-sign-in redirect; each live call is two SnapTrade round
+    # trips. A short per-user TTL makes the poll nearly free while staying
+    # fresh enough for connect detection; ?fresh=1 (the explicit "I've
+    # connected" click) always bypasses.
+    _status_ttl_cache: OrderedDict[uuid.UUID, tuple[float, dict]] = OrderedDict()
+    _STATUS_TTL_SECONDS = 15.0
+
     @app.get("/portfolio/status")
     async def portfolio_brokerage_status(request: Request) -> dict:
         """Brokerage registration/connection/sync status for onboarding."""
         repo = _require_repo(app)
-        return await portfolio_status(repo, _user_id(request), get_settings())
+        user_id = _user_id(request)
+        now = monotonic()
+        if request.query_params.get("fresh") != "1":
+            cached = _status_ttl_cache.get(user_id)
+            if cached and now - cached[0] < _STATUS_TTL_SECONDS:
+                return cached[1]
+        result = await portfolio_status(repo, user_id, get_settings())
+        _status_ttl_cache[user_id] = (now, result)
+        _status_ttl_cache.move_to_end(user_id)
+        while len(_status_ttl_cache) > 500:
+            _status_ttl_cache.popitem(last=False)
+        return result
 
     @app.post("/portfolio/sync")
     async def portfolio_sync(request: Request) -> dict:
@@ -2258,7 +2338,7 @@ def create_app() -> FastAPI:
         await repo.record_funnel_event("portfolio_connected", user_id=user_id)
         if armed is not None:
             result = {**result, "trial_ends_at": armed.isoformat()}
-        snapshot.store.invalidate(user_id, "portfolio", "status", "me")
+        await snapshot.store.invalidate(user_id, "portfolio", "status", "me")
         return result
 
     _MANUAL_ACCOUNT = "Manual"
@@ -2305,16 +2385,20 @@ def create_app() -> FastAPI:
                 detail=f"Could not find a price for: {', '.join(unknown)}.",
             )
 
-        for ticker in tickers:
-            await repo.upsert_position(
-                ticker=ticker,
-                quantity=merged[ticker],
-                avg_cost=quotes[ticker]["last_price"],
-                # Yahoo-format heuristic: .TO trades in CAD, the rest in USD.
-                currency="CAD" if ticker.endswith(".TO") else "USD",
-                account=_MANUAL_ACCOUNT,
-                user_id=user_id,
-            )
+        await repo.upsert_positions(
+            [
+                {
+                    "ticker": ticker,
+                    "quantity": merged[ticker],
+                    "avg_cost": quotes[ticker]["last_price"],
+                    # Yahoo-format heuristic: .TO trades in CAD, the rest in USD.
+                    "currency": "CAD" if ticker.endswith(".TO") else "USD",
+                    "account": _MANUAL_ACCOUNT,
+                }
+                for ticker in tickers
+            ],
+            user_id=user_id,
+        )
         # Drop manual rows not re-submitted; never touch brokerage accounts.
         keep = {(t, _MANUAL_ACCOUNT) for t in tickers} | {
             (p.ticker, p.account)
@@ -2325,7 +2409,7 @@ def create_app() -> FastAPI:
 
         armed = await repo.maybe_start_trial(user_id, get_settings().trial_days)
         await repo.record_funnel_event("portfolio_connected", user_id=user_id)
-        snapshot.store.invalidate(user_id, "portfolio", "status", "me")
+        await snapshot.store.invalidate(user_id, "portfolio", "status", "me")
         result: dict = {"positions": len(tickers), "removed": removed}
         if armed is not None:
             result["trial_ends_at"] = armed.isoformat()
@@ -2357,7 +2441,7 @@ def create_app() -> FastAPI:
         except SnapTradeError as exc:
             remote_error = str(exc)
         local_cleared = await repo.delete_snaptrade_credentials(user_id)
-        snapshot.store.invalidate(user_id, "status", "portfolio")
+        await snapshot.store.invalidate(user_id, "status", "portfolio")
         return {
             "disconnected": True,
             "remote_deleted": remote_deleted,
@@ -2389,7 +2473,8 @@ def create_app() -> FastAPI:
         digest_tickers: list[str] | None = None
         if req.digest_tickers is not None:
             digest_tickers = await _validate_digest_tickers(
-                repo, user_id, req.digest_tickers
+                repo, user_id, req.digest_tickers,
+                user=await repo.get_user(user_id),
             )
         await repo.update_user_preferences(
             user_id,
@@ -2398,7 +2483,7 @@ def create_app() -> FastAPI:
             digest_enabled=req.digest_enabled,
             digest_tickers=digest_tickers,
         )
-        snapshot.store.invalidate(user_id, "me", "portfolio")
+        await snapshot.store.invalidate(user_id, "me", "portfolio")
         return await _me_payload(repo, user_id)
 
     @app.put("/me/profile")
@@ -2435,7 +2520,7 @@ def create_app() -> FastAPI:
             goals=req.goals,
             completed_at=datetime.now(timezone.utc),
         )
-        snapshot.store.invalidate(user_id, "me")
+        await snapshot.store.invalidate(user_id, "me")
         return await _me_payload(repo, user_id)
 
     @app.post("/me/profile/dismiss")
@@ -2445,7 +2530,7 @@ def create_app() -> FastAPI:
         repo = _require_repo(app)
         user_id = _user_id(request)
         await repo.set_profile_prompt_dismissed(user_id)
-        snapshot.store.invalidate(user_id, "me")
+        await snapshot.store.invalidate(user_id, "me")
         return await _me_payload(repo, user_id)
 
     @app.post("/me/tutorial/complete")
@@ -2461,7 +2546,7 @@ def create_app() -> FastAPI:
         await repo.record_funnel_event(
             "tutorial_completed", user_id=user_id, meta={"outcome": req.outcome}
         )
-        snapshot.store.invalidate(user_id, "me")
+        await snapshot.store.invalidate(user_id, "me")
         return await _me_payload(repo, user_id)
 
     @app.get("/me/profile/projections")
@@ -2531,7 +2616,7 @@ def create_app() -> FastAPI:
         # the tombstone check needs.
         authcache.evict_user(deleted_uid)
         authcache.evict_tokens_for(deleted_uid)
-        snapshot.store.invalidate(user_id)
+        await snapshot.store.invalidate(user_id)
         auth_user_deleted = await _delete_supabase_auth_user(settings, auth_id)
         return {"deleted": True, "auth_user_deleted": auth_user_deleted}
 
@@ -2582,7 +2667,7 @@ def create_app() -> FastAPI:
                 raise HTTPException(status_code=404, detail="unknown ticker")
 
         await repo.add_watchlist_ticker(user_id, t)
-        snapshot.store.invalidate(user_id, "watchlist")
+        await snapshot.store.invalidate(user_id, "watchlist")
         return await _watchlist_payload(repo, user_id)
 
     @app.delete("/watchlist/{ticker}")
@@ -2592,7 +2677,7 @@ def create_app() -> FastAPI:
         repo = _require_repo(app)
         user_id = _user_id(request)
         await repo.remove_watchlist_ticker(user_id, t)
-        snapshot.store.invalidate(user_id, "watchlist")
+        await snapshot.store.invalidate(user_id, "watchlist")
         return await _watchlist_payload(repo, user_id)
 
     # ---- Billing (Stripe) ------------------------------------------------
@@ -2631,7 +2716,7 @@ def create_app() -> FastAPI:
         repo = _require_repo(app)
         user_id = _user_id(request)
         await repo.resolve_trial(user_id)
-        snapshot.store.invalidate(user_id, "me")
+        await snapshot.store.invalidate(user_id, "me")
         return await _me_payload(repo, user_id)
 
     @app.post("/billing/portal")
@@ -2676,7 +2761,7 @@ def create_app() -> FastAPI:
         await repo.record_stripe_event(event["id"], event["type"])
         # Subscription state changed for one of our users; snapshots are
         # cheap to rebuild, so clear rather than resolve customer → user.
-        snapshot.store.clear()
+        await snapshot.store.clear()
         return {"received": True}
 
     @app.get("/news")
@@ -2715,9 +2800,11 @@ def create_app() -> FastAPI:
 
     async def _notifications_payload(repo: Repo, user_id: uuid.UUID) -> dict:
         settings = get_settings()
-        user = await repo.get_user(user_id)
-        rows = await repo.get_notification_channels(user_id)
-        devices = await repo.list_push_devices(user_id)
+        user, rows, devices = await asyncio.gather(
+            repo.get_user(user_id),
+            repo.get_notification_channels(user_id),
+            repo.list_push_devices(user_id),
+        )
         return {
             "preferred_channel": getattr(user, "preferred_channel", None),
             # Channels this deployment can send (creds configured) — drives the
@@ -2794,7 +2881,7 @@ def create_app() -> FastAPI:
             platform=req.platform,
             kinds=list(req.kinds) or list(_PUSH_KINDS),
         )
-        snapshot.store.invalidate(user_id, "notifications")
+        await snapshot.store.invalidate(user_id, "notifications")
         return await _notifications_payload(repo, user_id)
 
     @app.delete("/me/devices")
@@ -2807,7 +2894,7 @@ def create_app() -> FastAPI:
         owned = {d.expo_token for d in await repo.list_push_devices(user_id)}
         if req.expo_token.strip() in owned:
             await repo.disable_push_device(req.expo_token.strip())
-        snapshot.store.invalidate(user_id, "notifications")
+        await snapshot.store.invalidate(user_id, "notifications")
         return await _notifications_payload(repo, user_id)
 
     @app.patch("/me/devices/kinds")
@@ -2821,7 +2908,7 @@ def create_app() -> FastAPI:
                 status_code=400, detail=f"unknown notification kinds: {', '.join(bad)}"
             )
         await repo.set_push_device_kinds(user_id, kinds=list(req.kinds))
-        snapshot.store.invalidate(user_id, "notifications")
+        await snapshot.store.invalidate(user_id, "notifications")
         return await _notifications_payload(repo, user_id)
 
     @app.post("/me/notifications/channel", status_code=202)
@@ -2858,7 +2945,7 @@ def create_app() -> FastAPI:
             )
         except verification.VerificationError as exc:
             raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
-        snapshot.store.invalidate(user_id, "notifications", "me")
+        await snapshot.store.invalidate(user_id, "notifications", "me")
         return await _notifications_payload(repo, user_id)
 
     @app.post("/me/notifications/preferred")
@@ -2871,7 +2958,7 @@ def create_app() -> FastAPI:
             raise HTTPException(
                 status_code=400, detail="channel is not verified for this account"
             )
-        snapshot.store.invalidate(user_id, "notifications", "me")
+        await snapshot.store.invalidate(user_id, "notifications", "me")
         return await _notifications_payload(repo, user_id)
 
     def _public_base(request: Request) -> str:
@@ -3046,8 +3133,8 @@ def create_app() -> FastAPI:
         on yfinance or SnapTrade."""
         repo = _require_repo(app)
         user_id = _user_id(request)
-        snapshot.store.touch(user_id)
-        snap, stale = snapshot.store.get(user_id)
+        await snapshot.store.touch(user_id)
+        snap, stale = await snapshot.store.get(user_id)
         if not snap:
             # Cold start for this user+process: cheap point to stamp the
             # once-per-account milestone (insert is idempotent).
@@ -3069,9 +3156,9 @@ def create_app() -> FastAPI:
                     sections[name] = {"error": str(result)}
                 else:
                     sections[name] = {"data": result}
-                    snapshot.store.put(user_id, name, result)
+                    await snapshot.store.put(user_id, name, result)
         if stale:
-            snapshot.store.refresh(user_id, stale, _section_builder)
+            await snapshot.store.refresh(user_id, stale, _section_builder)
         # ETag over the sections only — generated_at changes every call and
         # would defeat If-None-Match revalidation.
         sections_body = json.dumps(sections, separators=(",", ":"), default=str)
@@ -3287,16 +3374,19 @@ def create_app() -> FastAPI:
         settings = get_settings()
         user_id = _user_id(request)
         ctx = ToolContext(settings=settings, repo=repo, user_id=user_id)
-        pf = await portfolio.get_portfolio({}, ctx)
+        # Six independent reads — fan them out instead of paying the chain.
+        pf, funds, stored, watchlist, val_rows, user = await asyncio.gather(
+            portfolio.get_portfolio({}, ctx),
+            fundamentals.get_fundamentals([t], repo=repo, settings=settings),
+            repo.get_ticker_fundamentals([t]),
+            repo.get_watchlist_tickers(user_id),
+            repo.get_ticker_valuations([t]),
+            repo.get_user(user_id),
+        )
         rows = [p for p in pf.get("positions", []) if p["ticker"] == t]
-
-        funds = await fundamentals.get_fundamentals([t], repo=repo, settings=settings)
         data = funds.get(t) or {}
-        stored = await repo.get_ticker_fundamentals([t])
         fetched_at = stored[t].fetched_at.isoformat() if t in stored else None
-        watching = t in await repo.get_watchlist_tickers(user_id)
-        val_rows = await repo.get_ticker_valuations([t])
-        user = await repo.get_user(user_id)
+        watching = t in watchlist
 
         position = None
         if rows:

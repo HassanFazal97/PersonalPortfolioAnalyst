@@ -1,11 +1,26 @@
 # Deploy & Activation Runbook
 
 How to deploy **Cirvia** and turn on multi-user auth + RLS.
-Host is **Railway** (single container). The image runs migrations, then serves.
+Host is **Railway**. The image runs migrations, then serves.
 
-> **One replica only.** The morning digest and macro scan are driven by an
-> in-process scheduler; a second instance would double-fire. Keep it at 1
-> replica / 1 uvicorn worker (see `Dockerfile`).
+## Topology
+
+One image, two roles, selected by env (see `Dockerfile`):
+
+- **Single-service (default, today's prod):** no topology vars set —
+  schedulers on, one uvicorn worker, in-process caches. Keep it at 1
+  replica: the digest scheduler double-fires otherwise.
+- **Split (scale-out):** a *web* service with `RUN_SCHEDULERS=0`,
+  `UVICORN_WORKERS=N`, and `REDIS_URL` (shared snapshot cache — without it
+  each worker's cache goes 1/N effective), plus one *worker* service with
+  `RUN_SCHEDULERS=1` at exactly 1 instance / 1 worker. Both run migrations
+  at boot (idempotent; a simultaneous first boot can race the
+  `schema_migrations` insert — one container restarts and proceeds).
+
+Sizing note: `DATABASE_URL` on port 5432 is the **session-mode** pooler — a
+backend is pinned per connection, and each process holds up to
+`pool_size+max_overflow = 20`. Size `workers × 20` against the Supabase
+connection limit before raising `UVICORN_WORKERS`.
 
 ---
 
@@ -36,6 +51,12 @@ Host is **Railway** (single container). The image runs migrations, then serves.
 | `STRIPE_PRICE_PRO_ANNUAL` | no | `price_…` — Pro $120/yr USD; empty hides yearly |
 | `STRIPE_AUTOMATIC_TAX` | no | `false` until GST/HST-registered (Stripe Tax) |
 | `TRIAL_DAYS` | no | no-card Pro trial length for new signups (default 7; 0 disables) |
+| `RUN_SCHEDULERS` | topology | `0` on web services in the split topology; default `1` (see Topology) |
+| `UVICORN_WORKERS` | topology | uvicorn worker count (default 1; raise only with `RUN_SCHEDULERS=0` + `REDIS_URL`) |
+| `REDIS_URL` | topology | shared snapshot-cache backend for multi-worker; empty = in-process dicts |
+| `THREAD_POOL_WORKERS` | no | asyncio default-executor size (default 8; Monte Carlo + blocking SDKs share it) |
+| `DB_POOL_PRE_PING` | no | per-checkout liveness ping (default true; see app/db/repo.py before disabling) |
+| `ANTHROPIC_TIMEOUT_SECONDS` / `ANTHROPIC_MAX_RETRIES` | no | LLM request bounds (default 180 s / 2 — the SDK default is 600 s) |
 
 Auth mode is implicit: if neither `SUPABASE_URL` nor `SUPABASE_JWT_SECRET` is
 set, only `API_TOKEN` works (single-user). Set `SUPABASE_URL` to accept per-user

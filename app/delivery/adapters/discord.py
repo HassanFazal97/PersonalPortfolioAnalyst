@@ -11,7 +11,7 @@ from typing import Any
 
 import httpx
 
-from app.delivery.adapters.base import SendResult
+from app.delivery.adapters.base import SendResult, http_client
 from app.delivery.channels import DISCORD_WEBHOOK_PREFIX
 
 _MAX_CONTENT = 2000
@@ -24,8 +24,11 @@ def _chunk(body: str, size: int = _MAX_CONTENT) -> list[str]:
 class DiscordAdapter:
     channel = "discord"
 
-    def __init__(self, *, timeout: float = 10.0) -> None:
+    def __init__(
+        self, *, timeout: float = 10.0, client: httpx.AsyncClient | None = None
+    ) -> None:
         self._timeout = timeout
+        self._client = client
 
     async def send(
         self, destination: str, body: str, payload: dict[str, Any]
@@ -33,7 +36,7 @@ class DiscordAdapter:
         if not destination.startswith(DISCORD_WEBHOOK_PREFIX):
             return SendResult(ok=False, error="invalid Discord webhook URL", permanent=True)
         try:
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
+            async with http_client(self._client, self._timeout) as client:
                 for chunk in _chunk(body):
                     resp = await client.post(destination, json={"content": chunk})
                     if resp.status_code in (401, 403, 404):

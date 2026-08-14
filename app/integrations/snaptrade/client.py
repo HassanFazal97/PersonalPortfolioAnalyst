@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any, Protocol
 
 from snaptrade_client import SnapTrade
@@ -93,6 +94,14 @@ class _SnapTradeBackend(Protocol):
     def get_account_positions(self, account_id: str) -> list[dict[str, Any]]: ...
 
 
+@lru_cache(maxsize=2)
+def _sdk_client(client_id: str, consumer_key: str) -> SnapTrade:
+    """One SDK client per key pair. User credentials travel per request, so
+    the client is user-agnostic — reusing it keeps its connection pool warm
+    instead of paying DNS+TCP+TLS on every service construction."""
+    return SnapTrade(client_id=client_id, consumer_key=consumer_key)
+
+
 class _CommercialBackend:
     """Commercial SnapTrade keys: clientId + consumerKey + userId + userSecret."""
 
@@ -103,9 +112,8 @@ class _CommercialBackend:
     ) -> None:
         self._settings = settings
         self._credentials = credentials
-        self._client = SnapTrade(
-            client_id=settings.snaptrade_client_id,
-            consumer_key=settings.snaptrade_consumer_key,
+        self._client = _sdk_client(
+            settings.snaptrade_client_id, settings.snaptrade_consumer_key
         )
 
     @property

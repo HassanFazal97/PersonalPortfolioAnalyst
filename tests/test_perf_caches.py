@@ -14,93 +14,87 @@ U2 = uuid.uuid4()
 # ---- SnapshotStore -----------------------------------------------------------
 
 
-def test_get_empty():
-    assert SnapshotStore().get(U1) == ({}, [])
+async def test_get_empty():
+    assert await SnapshotStore().get(U1) == ({}, [])
 
 
-def test_put_and_get_fresh():
+async def test_put_and_get_fresh():
     store = SnapshotStore()
-    store.put(U1, "me", {"plan": "pro"})
-    snap, stale = store.get(U1)
+    await store.put(U1, "me", {"plan": "pro"})
+    snap, stale = await store.get(U1)
     assert snap == {"me": {"plan": "pro"}}
     assert stale == []
 
 
-def test_stale_detection(monkeypatch):
+async def test_stale_detection(monkeypatch):
     store = SnapshotStore()
-    store.put(U1, "me", {"plan": "pro"})
+    await store.put(U1, "me", {"plan": "pro"})
     # Age the section past its TTL by rewinding its built_at stamp.
     store._snaps[U1]["me"].built_at -= section_ttl("me") + 1
-    snap, stale = store.get(U1)
+    snap, stale = await store.get(U1)
     assert snap == {"me": {"plan": "pro"}}  # stale data still served
     assert stale == ["me"]
 
 
-def test_invalidate_named_and_all():
+async def test_invalidate_named_and_all():
     store = SnapshotStore()
-    store.put(U1, "me", 1)
-    store.put(U1, "news", 2)
-    store.invalidate(U1, "me")
-    assert store.get(U1)[0] == {"news": 2}
-    store.invalidate(U1)
-    assert store.get(U1) == ({}, [])
+    await store.put(U1, "me", 1)
+    await store.put(U1, "news", 2)
+    await store.invalidate(U1, "me")
+    assert (await store.get(U1))[0] == {"news": 2}
+    await store.invalidate(U1)
+    assert await store.get(U1) == ({}, [])
 
 
-def test_lru_eviction():
+async def test_lru_eviction():
     store = SnapshotStore(max_users=2)
     u3 = uuid.uuid4()
-    store.put(U1, "me", 1)
-    store.put(U2, "me", 2)
-    store.put(u3, "me", 3)
-    assert store.get(U1) == ({}, [])  # oldest evicted
-    assert store.get(U2)[0] == {"me": 2}
+    await store.put(U1, "me", 1)
+    await store.put(U2, "me", 2)
+    await store.put(u3, "me", 3)
+    assert await store.get(U1) == ({}, [])  # oldest evicted
+    assert (await store.get(U2))[0] == {"me": 2}
 
 
-def test_active_users_tracking():
+async def test_active_users_tracking():
     store = SnapshotStore()
-    store.touch(U1)
-    assert U1 in store.active_users(60)
-    assert store.active_users(0) == []
+    await store.touch(U1)
+    assert U1 in await store.active_users(60)
+    assert await store.active_users(0) == []
 
 
-def test_refresh_single_flight_and_serve_stale_on_failure():
-    async def run():
-        store = SnapshotStore()
-        store.put(U1, "portfolio", {"positions": ["old"]})
-        calls = 0
-        gate: asyncio.Future = asyncio.get_event_loop().create_future()
+async def test_refresh_single_flight_and_serve_stale_on_failure():
+    store = SnapshotStore()
+    await store.put(U1, "portfolio", {"positions": ["old"]})
+    calls = 0
+    gate: asyncio.Future = asyncio.get_event_loop().create_future()
 
-        async def builder(user_id, name):
-            nonlocal calls
-            calls += 1
-            await gate
-            raise RuntimeError("rebuild failed")
+    async def builder(user_id, name):
+        nonlocal calls
+        calls += 1
+        await gate
+        raise RuntimeError("rebuild failed")
 
-        store.refresh(U1, ["portfolio"], builder)
-        store.refresh(U1, ["portfolio"], builder)  # coalesced: still in flight
-        await asyncio.sleep(0)
-        gate.set_result(None)
-        await asyncio.gather(*store._inflight.values(), return_exceptions=True)
-        assert calls == 1
-        # Failed rebuild keeps the previous copy (serve-stale over error).
-        assert store.get(U1)[0] == {"portfolio": {"positions": ["old"]}}
-
-    asyncio.run(run())
+    await store.refresh(U1, ["portfolio"], builder)
+    await store.refresh(U1, ["portfolio"], builder)  # coalesced: still in flight
+    await asyncio.sleep(0)
+    gate.set_result(None)
+    await asyncio.gather(*store._inflight.values(), return_exceptions=True)
+    assert calls == 1
+    # Failed rebuild keeps the previous copy (serve-stale over error).
+    assert (await store.get(U1))[0] == {"portfolio": {"positions": ["old"]}}
 
 
-def test_refresh_success_replaces_data():
-    async def run():
-        store = SnapshotStore()
-        store.put(U1, "news", {"items": []})
+async def test_refresh_success_replaces_data():
+    store = SnapshotStore()
+    await store.put(U1, "news", {"items": []})
 
-        async def builder(user_id, name):
-            return {"items": ["fresh"]}
+    async def builder(user_id, name):
+        return {"items": ["fresh"]}
 
-        store.refresh(U1, ["news"], builder)
-        await asyncio.gather(*store._inflight.values(), return_exceptions=True)
-        assert store.get(U1)[0] == {"news": {"items": ["fresh"]}}
-
-    asyncio.run(run())
+    await store.refresh(U1, ["news"], builder)
+    await asyncio.gather(*store._inflight.values(), return_exceptions=True)
+    assert (await store.get(U1))[0] == {"news": {"items": ["fresh"]}}
 
 
 # ---- authcache ---------------------------------------------------------------

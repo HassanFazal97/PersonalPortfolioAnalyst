@@ -15,7 +15,7 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import delete, event, func, or_, select, text
+from sqlalchemy import delete, event, func, or_, select, text, tuple_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import (
@@ -103,7 +103,12 @@ def _apply_rls_user(session: Session, transaction, connection) -> None:
 
 class Repo:
     def __init__(
-        self, database_url: str, *, echo: bool = False, ssl: bool = False
+        self,
+        database_url: str,
+        *,
+        echo: bool = False,
+        ssl: bool = False,
+        pool_pre_ping: bool | None = None,
     ) -> None:
         # Managed poolers (Supabase) silently drop idle connections; a
         # long-running job (digest, picks) then hits "connection is closed" —
@@ -111,19 +116,27 @@ class Repo:
         # catches dead-at-checkout; command_timeout bounds any statement that
         # dies mid-flight (our largest statements finish in single-digit
         # seconds, so 60s only ever fires on a wedged connection).
+        # DB_POOL_PRE_PING=0 trades that safety for one fewer round trip per
+        # checkout — only after observing the target topology's recycling.
         connect_args: dict = {"command_timeout": 60}
         if ssl:
             connect_args["ssl"] = "require"
+        if pool_pre_ping is None:
+            from app.config import get_settings
+
+            pool_pre_ping = get_settings().db_pool_pre_ping
         # pool_size sized for the dashboard fan-out: a single page load runs
         # several endpoint handlers concurrently, each opening short-lived
         # sessions; the SQLAlchemy default of 5 queues checkouts under that
         # burst. 10+10 stays well inside Supabase connection limits for one
-        # process.
+        # process. NOTE for multi-worker: port 5432 is the session-mode
+        # pooler (one backend pinned per connection) — size workers × (10+10)
+        # against the Supabase connection limit before scaling out.
         self._engine: AsyncEngine = create_async_engine(
             database_url,
             echo=echo,
             connect_args=connect_args,
-            pool_pre_ping=True,
+            pool_pre_ping=pool_pre_ping,
             pool_size=10,
             max_overflow=10,
         )
@@ -726,6 +739,18 @@ class Repo:
             result = await s.execute(select(Position).where(Position.user_id == uid))
             return list(result.scalars().all())
 
+    async def count_distinct_tickers(self, *, user_id: uuid.UUID | None = None) -> int:
+        """COUNT(DISTINCT ticker) for one user — /me needs only the number,
+        not a hydrated position list."""
+        uid = user_id or _OWNER_USER_ID
+        async with self._session() as s:
+            result = await s.execute(
+                select(func.count(func.distinct(Position.ticker))).where(
+                    Position.user_id == uid
+                )
+            )
+            return int(result.scalar_one() or 0)
+
     async def upsert_position(
         self,
         *,
@@ -765,22 +790,69 @@ class Repo:
                 row.updated_at = datetime.now()
             await s.commit()
 
+    async def upsert_positions(
+        self,
+        rows: list[dict],
+        *,
+        user_id: uuid.UUID | None = None,
+    ) -> None:
+        """Batch insert-or-update keyed by (user_id, ticker, account).
+
+        One multi-row ``INSERT ... ON CONFLICT DO UPDATE`` in one session, so a
+        full brokerage sync costs a handful of round trips instead of a session
+        (and its pre-ping + GUC setup) per position. Same conflict semantics as
+        the single-row ``upsert_position``: the incoming row replaces quantity,
+        avg_cost and currency for its (user_id, ticker, account) bucket.
+        """
+        if not rows:
+            return
+        uid = user_id or _OWNER_USER_ID
+        now = datetime.now()
+        values = [
+            {
+                "user_id": uid,
+                "ticker": r["ticker"],
+                "quantity": r["quantity"],
+                "avg_cost": r["avg_cost"],
+                "currency": r["currency"],
+                "account": r["account"],
+                "updated_at": now,
+            }
+            for r in rows
+        ]
+        stmt = pg_insert(Position).values(values)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[Position.user_id, Position.ticker, Position.account],
+            set_={
+                "quantity": stmt.excluded.quantity,
+                "avg_cost": stmt.excluded.avg_cost,
+                "currency": stmt.excluded.currency,
+                "updated_at": stmt.excluded.updated_at,
+            },
+        )
+        async with self._session() as s:
+            await s.execute(stmt)
+            await s.commit()
+
     async def prune_positions_except(
         self, keep: set[tuple[str, str]], *, user_id: uuid.UUID | None = None
     ) -> int:
-        """Delete this user's positions whose (ticker, account) is not in ``keep``."""
+        """Delete this user's positions whose (ticker, account) is not in ``keep``.
+
+        One DELETE statement; an empty ``keep`` clears the user's book (same
+        semantics as the old select-then-delete loop)."""
         uid = user_id or _OWNER_USER_ID
+        stmt = delete(Position).where(Position.user_id == uid)
+        if keep:
+            stmt = stmt.where(
+                tuple_(Position.ticker, Position.account).not_in(list(keep))
+            )
         async with self._session() as s:
-            result = await s.execute(select(Position).where(Position.user_id == uid))
-            rows = list(result.scalars().all())
-            removed = 0
-            for row in rows:
-                if (row.ticker, row.account) not in keep:
-                    await s.delete(row)
-                    removed += 1
-            if removed:
-                await s.commit()
-            return removed
+            result = await s.execute(
+                stmt.execution_options(synchronize_session=False)
+            )
+            await s.commit()
+            return int(result.rowcount or 0)
 
     # ---- agent runs & observability -------------------------------------
 
@@ -2023,16 +2095,20 @@ class Repo:
 
     async def get_daily_prices(
         self, ticker: str, *, since: date | None = None
-    ) -> list[DailyPrice]:
+    ) -> list[Any]:
         """Stored adjusted closes for one ticker, oldest first, on/after
-        ``since`` (all history when ``since`` is None)."""
+        ``since`` (all history when ``since`` is None). Returns lightweight
+        (price_date, adj_close) rows — ~500/ticker on the hot risk path, so
+        skipping full ORM hydration matters."""
         async with self._session() as s:
-            q = select(DailyPrice).where(DailyPrice.ticker == ticker)
+            q = select(DailyPrice.price_date, DailyPrice.adj_close).where(
+                DailyPrice.ticker == ticker
+            )
             if since is not None:
                 q = q.where(DailyPrice.price_date >= since)
             q = q.order_by(DailyPrice.price_date)
             result = await s.execute(q)
-            return list(result.scalars().all())
+            return list(result.all())
 
     async def upsert_daily_prices(
         self, ticker: str, rows: list[dict[str, Any]]

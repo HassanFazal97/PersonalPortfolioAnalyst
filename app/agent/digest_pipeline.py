@@ -12,6 +12,7 @@ cadence (Free weekly Mon / Pro daily weekdays), monthly cost caps, and
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 import traceback
@@ -54,9 +55,9 @@ _OWNER_USER_ID = uuid.UUID(DEFAULT_USER_ID)
 def _get_client(client: Any) -> Any:
     if client is not None:
         return client
-    from anthropic import AsyncAnthropic
+    from app.agent.anthropic_client import shared_client
 
-    return AsyncAnthropic(api_key=get_settings().anthropic_api_key)
+    return shared_client()
 
 
 def _trim_positions(
@@ -118,16 +119,20 @@ async def build_market_context(
     )
     cap = max_digest_holdings(plan, settings)
 
-    period_moves: dict[str, Any] = {}
-    for pos in positions:
-        ticker = pos["ticker"]
+    async def _period_move(ticker: str) -> tuple[str, Any]:
         try:
             hist = await market.get_price_history(
                 {"ticker": ticker, "days": window_days}, ctx
             )
-            period_moves[ticker] = hist.get("period_return_pct")
+            return ticker, hist.get("period_return_pct")
         except Exception:  # noqa: BLE001 - best effort
-            period_moves[ticker] = None
+            return ticker, None
+
+    # One fetch per holding, fanned out — this loop was 25 serial Yahoo
+    # round trips on a full book.
+    period_moves: dict[str, Any] = dict(
+        await asyncio.gather(*(_period_move(p["ticker"]) for p in positions))
+    )
 
     yesterday_digest = await ctx.repo.get_digest(
         yesterday, user_id=getattr(ctx, "user_id", None)

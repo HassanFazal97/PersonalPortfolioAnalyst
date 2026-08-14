@@ -13,6 +13,7 @@ import re
 import time
 from datetime import UTC, datetime, timedelta
 from difflib import SequenceMatcher
+from functools import lru_cache
 from typing import Any
 
 from app.config import get_settings
@@ -87,16 +88,24 @@ def _finnhub_symbol_candidates(query: str) -> list[str]:
     return out
 
 
+@lru_cache(maxsize=2)
+def _finnhub_client(api_key: str):
+    """One Finnhub client per key — it wraps a requests.Session, so reuse
+    keeps the TCP+TLS connection alive across news fetches. Requests carry
+    the library's own 10 s default timeout."""
+    import finnhub
+
+    return finnhub.Client(api_key=api_key)
+
+
 def _fetch_finnhub_news(
     query: str, lookback_days: int, max_results: int
 ) -> list[dict[str, Any]]:
     """Company news for symbols extracted from ``query``, via Finnhub."""
-    import finnhub
-
     settings = get_settings()
     if not settings.finnhub_api_key:
         raise RuntimeError("FINNHUB_API_KEY not configured")
-    client = finnhub.Client(api_key=settings.finnhub_api_key)
+    client = _finnhub_client(settings.finnhub_api_key)
     to = datetime.now(UTC).date()
     frm = to - timedelta(days=lookback_days)
     date_from, date_to = frm.isoformat(), to.isoformat()

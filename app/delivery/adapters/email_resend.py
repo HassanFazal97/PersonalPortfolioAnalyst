@@ -11,7 +11,7 @@ from typing import Any
 
 import httpx
 
-from app.delivery.adapters.base import SendResult
+from app.delivery.adapters.base import SendResult, http_client
 
 _API_URL = "https://api.resend.com/emails"
 
@@ -19,10 +19,18 @@ _API_URL = "https://api.resend.com/emails"
 class ResendEmailAdapter:
     channel = "email"
 
-    def __init__(self, *, api_key: str, from_addr: str, timeout: float = 10.0) -> None:
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        from_addr: str,
+        timeout: float = 10.0,
+        client: httpx.AsyncClient | None = None,
+    ) -> None:
         self._api_key = api_key
         self._from = from_addr
         self._timeout = timeout
+        self._client = client
 
     async def send(
         self, destination: str, body: str, payload: dict[str, Any]
@@ -47,7 +55,7 @@ class ResendEmailAdapter:
                 "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
             }
         try:
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
+            async with http_client(self._client, self._timeout) as client:
                 resp = await client.post(
                     _API_URL,
                     headers={"Authorization": f"Bearer {self._api_key}"},

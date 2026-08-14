@@ -66,9 +66,9 @@ _FALLBACK_QUESTIONS: dict[str, list[str]] = {
 def _get_client(client: Any) -> Any:
     if client is not None:
         return client
-    from anthropic import AsyncAnthropic
+    from app.agent.anthropic_client import shared_client
 
-    return AsyncAnthropic(api_key=get_settings().anthropic_api_key)
+    return shared_client()
 
 
 def _strip_fences(text: str) -> str:

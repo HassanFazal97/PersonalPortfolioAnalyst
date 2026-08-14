@@ -23,6 +23,10 @@ INTRADAY_TTL_SECONDS = 60.0
 # quant tools (analyze_portfolio_risk, estimate_downside_risk) share one fetch
 # per ticker within a conversation instead of each re-pulling ~2yr of history.
 ADJUSTED_TTL_SECONDS = 900.0
+# Raw OHLCV history: same once-a-day data as adjusted closes, same TTL. This
+# was the one market seam with no cache — the digest pipeline hits it once
+# per holding.
+HISTORY_TTL_SECONDS = 900.0
 
 # ticker -> (monotonic_timestamp, normalized_quote_dict)
 _quote_cache: dict[str, tuple[float, dict[str, Any]]] = {}
@@ -30,6 +34,8 @@ _quote_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 _intraday_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
 # (ticker, days) -> (monotonic_timestamp, adjusted-close rows)
 _adjusted_cache: dict[tuple[str, int], tuple[float, list[dict[str, Any]]]] = {}
+# (ticker, days) -> (monotonic_timestamp, ohlcv rows)
+_history_cache: dict[tuple[str, int], tuple[float, list[dict[str, Any]]]] = {}
 
 
 def _clock() -> float:
@@ -37,10 +43,11 @@ def _clock() -> float:
 
 
 def cache_clear() -> None:
-    """Test/utility helper to reset the quote, intraday, and adjusted caches."""
+    """Test/utility helper to reset the quote, intraday, and history caches."""
     _quote_cache.clear()
     _intraday_cache.clear()
     _adjusted_cache.clear()
+    _history_cache.clear()
 
 
 async def get_adjusted_closes(ticker: str, days: int) -> list[dict[str, Any]]:
@@ -331,7 +338,13 @@ async def get_price_history(payload: dict[str, Any], ctx: Any = None) -> dict[st
     if not isinstance(days, int) or not (5 <= days <= 365):
         raise ValueError("days must be an integer between 5 and 365")
 
-    rows = await asyncio.to_thread(_fetch_history_raw, ticker, days)
+    key = (ticker, days)
+    cached = _history_cache.get(key)
+    if cached and _clock() - cached[0] < HISTORY_TTL_SECONDS:
+        rows = cached[1]
+    else:
+        rows = await asyncio.to_thread(_fetch_history_raw, ticker, days)
+        _history_cache[key] = (_clock(), rows)
     closes = [r["close"] for r in rows]
 
     return {

@@ -664,9 +664,18 @@ const SB_URL = window.CIRVIA_CONFIG.supabaseUrl;
 const SB_KEY = window.CIRVIA_CONFIG.supabaseAnonKey;
 const sb = window.supabase.createClient(SB_URL, SB_KEY);
 
+// Token cache: sb.auth.getSession() round-trips through the SDK (and its
+// storage adapter) on every call; the access token itself is valid for an
+// hour. Serve it from memory until 60s before expiry.
+let _tokenCache = null;
+let _tokenExp = 0;
 async function getToken() {
+  if (_tokenCache && Date.now() / 1000 < _tokenExp - 60) return _tokenCache;
   const { data } = await sb.auth.getSession();
-  return data.session ? data.session.access_token : null;
+  const session = data.session;
+  _tokenCache = session ? session.access_token : null;
+  _tokenExp = session && session.expires_at ? session.expires_at : 0;
+  return _tokenCache;
 }
 
 // Cached per-user page data (see the dashboard boot sequence) must never
@@ -703,6 +712,7 @@ async function requireSession() {
 
 async function signOut() {
   clearBootCaches();
+  _tokenCache = null; _tokenExp = 0;
   await sb.auth.signOut();
   window.location.href = '/app';
 }
@@ -907,7 +917,7 @@ def _page(
 {shell}
 <script>window.CIRVIA_CONFIG = {config};</script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-<script src="{MOTION_CDN}"></script>
+<script defer src="{MOTION_CDN}"></script>
 <script>{_SHELL_JS}</script>
 <script>{_SIDEBAR_JS}</script>
 <script>{extra_js}</script>
@@ -1732,22 +1742,46 @@ function showError(id, msg) {
 }
 
 let pollTimer = null;
+let pollDelay = 5000;
 
-async function pollStatus() {
+async function pollStatus(fresh = false) {
   try {
-    const resp = await api('/portfolio/status');
+    // fresh=1 (the explicit "I've connected" click) bypasses the server's
+    // short status cache; the background poll rides it.
+    const resp = await api('/portfolio/status' + (fresh ? '?fresh=1' : ''));
     const s = await resp.json();
     if (s.connected) {
-      clearInterval(pollTimer); pollTimer = null;
+      stopStatusPoll();
       await runSync();
     }
   } catch (e) { /* keep polling */ }
 }
 
+// Self-scheduling poll with backoff (5s -> 15s cap): brokerage linking takes
+// 30-60s, so a fixed 5s cadence is mostly wasted round trips.
+function startStatusPoll() {
+  if (pollTimer) return;
+  pollDelay = 5000;
+  const tick = async () => {
+    await pollStatus();
+    if (pollTimer === null) return;  // connected mid-flight
+    pollDelay = Math.min(pollDelay * 1.5, 15000);
+    pollTimer = setTimeout(tick, pollDelay);
+  };
+  pollTimer = setTimeout(tick, pollDelay);
+}
+
+function stopStatusPoll() {
+  if (pollTimer) clearTimeout(pollTimer);
+  pollTimer = null;
+}
+
 async function afterSync() {
   try {
-    const me = await (await api('/me')).json();
-    const pf = await (await api('/portfolio')).json();
+    const [me, pf] = await Promise.all([
+      api('/me').then((r) => r.json()),
+      api('/portfolio').then((r) => r.json()),
+    ]);
     // Largest positions first, matching the digest's own fallback ordering.
     const byValue = [...(pf.positions || [])].sort(
       (a, b) => (b.market_value ?? -1) - (a.market_value ?? -1));
@@ -1860,7 +1894,7 @@ async function runSync(attempt = 0) {
     // Kick off the Monte Carlo fetch now: the first call may backfill two
     // years of prices, so starting during this beat hides most of the wait.
     startProjections();
-    setTimeout(showRiskPicker, 900);
+    showRiskPicker();
   } catch (e) {
     // Stop the spinner and offer a retry so a transient failure isn't a dead end.
     document.getElementById('sync-status-line').style.display = 'none';
@@ -1890,7 +1924,7 @@ document.getElementById('connect-btn').addEventListener('click', async () => {
     window.open(url, '_blank');
     document.getElementById('connect-status').style.display = 'flex';
     document.getElementById('connected-btn').style.display = 'block';
-    if (!pollTimer) pollTimer = setInterval(pollStatus, 5000);
+    startStatusPoll();
   } catch (e) {
     showError('connect-error', e.message);
   } finally {
@@ -1898,7 +1932,7 @@ document.getElementById('connect-btn').addEventListener('click', async () => {
   }
 });
 
-document.getElementById('connected-btn').addEventListener('click', pollStatus);
+document.getElementById('connected-btn').addEventListener('click', () => pollStatus(true));
 
 // --- manual holdings fallback: convert the users who won't link a brokerage
 // to an unknown site on day one; SnapTrade can upsell later.

@@ -15,7 +15,7 @@ from typing import Any
 
 import httpx
 
-from app.delivery.adapters.base import SendResult
+from app.delivery.adapters.base import SendResult, http_client
 
 # Twilio error codes that no amount of retrying will fix.
 _PERMANENT_CODES = {21211, 21408, 21610, 21614}
@@ -31,11 +31,13 @@ class TwilioSMSAdapter:
         auth_token: str,
         from_number: str,
         timeout: float = 10.0,
+        client: httpx.AsyncClient | None = None,
     ) -> None:
         self._account_sid = account_sid
         self._auth_token = auth_token
         self._from = from_number
         self._timeout = timeout
+        self._client = client
 
     async def send(
         self, destination: str, body: str, payload: dict[str, Any]
@@ -45,7 +47,7 @@ class TwilioSMSAdapter:
             f"{self._account_sid}/Messages.json"
         )
         try:
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
+            async with http_client(self._client, self._timeout) as client:
                 resp = await client.post(
                     url,
                     auth=(self._account_sid, self._auth_token),

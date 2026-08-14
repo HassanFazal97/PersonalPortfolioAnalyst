@@ -11,6 +11,7 @@ is logged through the observability layer, so its cost lands in
 from __future__ import annotations
 
 import json
+from collections import OrderedDict
 from typing import Any
 
 from app.agent.prompts import CLASSIFY_SYSTEM_PROMPT
@@ -21,8 +22,17 @@ _VALID_SIGNALS = frozenset({"warning", "opportunity", "neutral"})
 _SUMMARY_MAX_CHARS = 300
 _RATIONALE_MAX_CHARS = 200
 
-# canonical headline -> {"signal", "salience", "rationale"}
-_signal_cache: dict[str, dict[str, Any]] = {}
+# canonical headline -> {"signal", "salience", "rationale"}. LRU-capped:
+# headlines churn daily, and an uncapped dict grows for process life.
+_SIGNAL_CACHE_MAX = 5000
+_signal_cache: OrderedDict[str, dict[str, Any]] = OrderedDict()
+
+
+def _cache_put(key: str, label: dict[str, Any]) -> None:
+    _signal_cache[key] = label
+    _signal_cache.move_to_end(key)
+    while len(_signal_cache) > _SIGNAL_CACHE_MAX:
+        _signal_cache.popitem(last=False)
 
 
 def cache_clear() -> None:
@@ -185,7 +195,7 @@ async def classify_news(
                 labels = None
             if labels is not None:
                 for it, label in zip(pending, labels):
-                    _signal_cache[_canonical(it.get("headline") or "")] = label
+                    _cache_put(_canonical(it.get("headline") or ""), label)
                 await _record(ctx, usage, log)
 
     out: list[dict[str, Any]] = []

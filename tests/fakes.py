@@ -550,6 +550,13 @@ class FakeRepo:
             user_id=uid,
         )
 
+    async def count_distinct_tickers(self, *, user_id=None):
+        return len({p.ticker for p in await self.list_positions(user_id=user_id)})
+
+    async def upsert_positions(self, rows, *, user_id=None):
+        for r in rows:
+            await self.upsert_position(user_id=user_id, **r)
+
     async def prune_positions_except(self, keep: set[tuple[str, str]], *, user_id=None) -> int:
         from app.config import DEFAULT_USER_ID
 

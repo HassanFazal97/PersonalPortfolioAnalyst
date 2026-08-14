@@ -255,8 +255,10 @@ async def risk_analytics_payload(ctx: Any) -> dict[str, Any]:
         return {"available": False, "note": loaded.note}
 
     rm = loaded.rm
-    est = ledoit_wolf(rm.matrix)
-    d = decompose(est.cov, loaded.weights, rm.tickers)
+    # The numpy-heavy steps run off the event loop: BLAS releases the GIL, so
+    # to_thread genuinely unblocks other requests instead of relocating cost.
+    est = await asyncio.to_thread(ledoit_wolf, rm.matrix)
+    d = await asyncio.to_thread(decompose, est.cov, loaded.weights, rm.tickers)
     total_mv = sum(loaded.mv_by_ticker[t] for t in rm.tickers)
 
     port = tailrisk.portfolio_return_series(rm.matrix, loaded.weights)
@@ -266,8 +268,11 @@ async def risk_analytics_payload(ctx: Any) -> dict[str, Any]:
     beta_value = (
         tailrisk.beta(port, rm.benchmark_returns) if rm.benchmark_returns is not None else None
     )
-    mc = qsimulate.simulate_portfolio(
-        est.cov, loaded.weights, horizon_days=_MC_HORIZON_DAYS, n_sims=5000
+    mc = await asyncio.to_thread(
+        qsimulate.simulate_portfolio,
+        est.cov,
+        loaded.weights,
+        horizon_days=_MC_HORIZON_DAYS,
     )
 
     # Holdings sorted by risk contribution (the story ordering).
@@ -367,20 +372,21 @@ def _posture_block(mc, total_mv: float | None, ann_vol: float) -> dict[str, Any]
     return block
 
 
-def _fallback_projections() -> dict[str, Any]:
+async def _fallback_projections() -> dict[str, Any]:
     """Illustrative constant-vol fans (same payload shape) so the onboarding
     step never dead-ends when the real portfolio isn't analyzable yet."""
-    postures = {}
-    for name, ann_vol in _FALLBACK_VOL.items():
+
+    async def _one(name: str, ann_vol: float) -> tuple[str, dict[str, Any]]:
         daily_var = (ann_vol**2) / qsimulate.TRADING_DAYS
-        mc = qsimulate.simulate_portfolio(
+        mc = await asyncio.to_thread(
+            qsimulate.simulate_portfolio,
             np.array([[daily_var]]),
             np.array([1.0]),
             horizon_days=_MC_HORIZON_DAYS,
-            n_sims=5000,
         )
-        postures[name] = _posture_block(mc, None, ann_vol)
-    return postures
+        return name, _posture_block(mc, None, ann_vol)
+
+    return dict(await asyncio.gather(*(_one(n, v) for n, v in _FALLBACK_VOL.items())))
 
 
 async def risk_posture_projections(ctx: Any) -> dict[str, Any]:
@@ -396,23 +402,26 @@ async def risk_posture_projections(ctx: Any) -> dict[str, Any]:
             "available": False,
             "note": loaded.note,
             "fallback": True,
-            "postures": _fallback_projections(),
+            "postures": await _fallback_projections(),
         }
 
     rm = loaded.rm
-    est = ledoit_wolf(rm.matrix)
-    d = decompose(est.cov, loaded.weights, rm.tickers)
+    est = await asyncio.to_thread(ledoit_wolf, rm.matrix)
+    d = await asyncio.to_thread(decompose, est.cov, loaded.weights, rm.tickers)
     total_mv = sum(loaded.mv_by_ticker[t] for t in rm.tickers)
 
-    postures = {}
-    for name, k in _POSTURE_K.items():
-        mc = qsimulate.simulate_portfolio(
+    async def _one_posture(name: str, k: float) -> tuple[str, dict[str, Any]]:
+        mc = await asyncio.to_thread(
+            qsimulate.simulate_portfolio,
             est.cov * (k**2),
             loaded.weights,
             horizon_days=_MC_HORIZON_DAYS,
-            n_sims=5000,
         )
-        postures[name] = _posture_block(mc, total_mv, d.portfolio_vol * k)
+        return name, _posture_block(mc, total_mv, d.portfolio_vol * k)
+
+    postures = dict(
+        await asyncio.gather(*(_one_posture(n, k) for n, k in _POSTURE_K.items()))
+    )
 
     return {
         "available": True,
@@ -449,8 +458,8 @@ async def analyze_portfolio_risk(payload: dict[str, Any], ctx: Any) -> dict[str,
     if loaded.note:
         return {"note": loaded.note}
 
-    est = ledoit_wolf(loaded.rm.matrix)
-    d = decompose(est.cov, loaded.weights, loaded.rm.tickers)
+    est = await asyncio.to_thread(ledoit_wolf, loaded.rm.matrix)
+    d = await asyncio.to_thread(decompose, est.cov, loaded.weights, loaded.rm.tickers)
     return _shape_decomposition(d, est, loaded)
 
 
@@ -618,13 +627,16 @@ async def project_portfolio_outcomes(payload: dict[str, Any], ctx: Any) -> dict[
         return {"note": loaded.note}
 
     rm = loaded.rm
-    est = ledoit_wolf(rm.matrix)
+    est = await asyncio.to_thread(ledoit_wolf, rm.matrix)
     total_mv = sum(loaded.mv_by_ticker[t] for t in rm.tickers)
 
     # Monte Carlo projection (zero drift — the cone reflects risk, not a return
     # forecast; a 1-2yr sample mean is too noisy to trust as drift).
-    mc = qsimulate.simulate_portfolio(
-        est.cov, loaded.weights, horizon_days=_MC_HORIZON_DAYS, n_sims=5000
+    mc = await asyncio.to_thread(
+        qsimulate.simulate_portfolio,
+        est.cov,
+        loaded.weights,
+        horizon_days=_MC_HORIZON_DAYS,
     )
     projected_value = {
         f"p{p}": round(f * total_mv, 2) for p, f in mc.terminal_percentiles.items()

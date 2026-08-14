@@ -296,6 +296,31 @@ class Settings(BaseSettings):
     # fair-use backstop enforced against agent_runs.cost_usd, sized so the full
     # question quota fits with margin to spare (Pro floor margin ~35% of the
     # $15/mo price even at the cap; realistic spend is a fraction of it).
+    # Multi-worker topology (Phase 4 of the latency plan): the web service
+    # runs with RUN_SCHEDULERS=0 and N uvicorn workers; exactly ONE separate
+    # worker service runs with RUN_SCHEDULERS=1 (the digest double-fire
+    # constraint is real). Default true = today's single-service topology.
+    run_schedulers: bool = Field(default=True, alias="RUN_SCHEDULERS")
+    # Per-checkout liveness ping. Costs one round trip per session; keep it
+    # on behind Supabase's pooler (it silently drops idle connections), turn
+    # it off only after observing recycle behaviour in the target topology.
+    db_pool_pre_ping: bool = Field(default=True, alias="DB_POOL_PRE_PING")
+    # Shared cache backend for auth/snapshot caches. Empty = in-process
+    # dicts (single-worker). Set to a redis:// URL when running multiple
+    # web workers so cache hits and invalidations are shared.
+    redis_url: str = Field(default="", alias="REDIS_URL")
+    # Anthropic request bounds: the SDK's default timeout is 600 s, which
+    # turns a hung upstream call into a 10-minute pinned chat. 180 s still
+    # accommodates a long streamed answer.
+    anthropic_timeout_seconds: float = Field(
+        default=180.0, alias="ANTHROPIC_TIMEOUT_SECONDS"
+    )
+    anthropic_max_retries: int = Field(default=2, alias="ANTHROPIC_MAX_RETRIES")
+    # Default-executor size for asyncio.to_thread. Shared by Monte Carlo, the
+    # wrapped blocking SDKs (yfinance, SnapTrade, JWKS) and anything else that
+    # threads off the loop — sized for a small shared-vCPU container, not the
+    # CPython default of cpu_count()+4 measured on the build machine.
+    thread_pool_workers: int = Field(default=8, alias="THREAD_POOL_WORKERS")
     free_weekly_chat_limit: int = Field(default=3, alias="FREE_WEEKLY_CHAT_LIMIT")
     pro_daily_chat_limit: int = Field(default=10, alias="PRO_DAILY_CHAT_LIMIT")
     free_monthly_cost_cap_usd: float = Field(default=1.50, alias="FREE_MONTHLY_COST_CAP_USD")
