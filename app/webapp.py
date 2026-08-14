@@ -948,6 +948,10 @@ _LOGIN_BODY = """
         <label for="password">Password</label>
         <input type="password" id="password" autocomplete="current-password" minlength="8" required>
         <p class="field-hint" id="pw-hint">At least 8 characters.</p>
+        <div id="confirm-row" style="display:none;">
+          <label for="confirm-password">Confirm password</label>
+          <input type="password" id="confirm-password" autocomplete="new-password" minlength="8">
+        </div>
         <p class="forgot-row" id="forgot-row">
           <button class="link-btn" id="forgot-btn" type="button">Forgot password?</button>
         </p>
@@ -1007,6 +1011,11 @@ function applyMode(animate) {
   document.getElementById('forgot-row').style.display = signin ? 'block' : 'none';
   document.getElementById('password').setAttribute('autocomplete',
     signin ? 'current-password' : 'new-password');
+  const confirmRow = document.getElementById('confirm-row');
+  const confirmInput = document.getElementById('confirm-password');
+  confirmRow.style.display = signin ? 'none' : 'block';
+  confirmInput.toggleAttribute('required', !signin);
+  if (signin) confirmInput.value = '';
   // The brand aside pitches the 3-step setup only to new users; returning
   // users get a plain welcome instead.
   document.getElementById('brand-title').textContent = signin
@@ -1074,6 +1083,15 @@ form.addEventListener('submit', async (ev) => {
   btn.disabled = true;
   const email = document.getElementById('email').value.trim();
   const password = document.getElementById('password').value;
+  if (mode === 'signup') {
+    const confirm = document.getElementById('confirm-password').value;
+    if (password !== confirm) {
+      errBox.textContent = 'Passwords do not match.';
+      errBox.style.display = 'block';
+      btn.disabled = false;
+      return;
+    }
+  }
   try {
     if (mode === 'signup') {
       // Without emailRedirectTo, Supabase sends the confirmation link to the

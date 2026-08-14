@@ -15,6 +15,7 @@ export default function SignIn() {
   const [mode, setMode] = useState<Mode>('sign-in');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -24,6 +25,10 @@ export default function SignIn() {
     setNotice(null);
     if (!email.trim() || !password) {
       setError('Enter your email and password.');
+      return;
+    }
+    if (mode === 'sign-up' && password !== confirmPassword) {
+      setError('Passwords do not match.');
       return;
     }
     setBusy(true);
@@ -90,10 +95,24 @@ export default function SignIn() {
           autoCapitalize="none"
           autoComplete={mode === 'sign-in' ? 'current-password' : 'new-password'}
           textContentType={mode === 'sign-in' ? 'password' : 'newPassword'}
-          returnKeyType="go"
-          onSubmitEditing={submit}
-          error={error}
+          returnKeyType={mode === 'sign-in' ? 'go' : 'next'}
+          onSubmitEditing={mode === 'sign-in' ? submit : undefined}
+          error={mode === 'sign-in' ? error : undefined}
         />
+        {mode === 'sign-up' ? (
+          <Field
+            label="Confirm password"
+            value={confirmPassword}
+            onChangeText={setConfirmPassword}
+            secureTextEntry
+            autoCapitalize="none"
+            autoComplete="new-password"
+            textContentType="newPassword"
+            returnKeyType="go"
+            onSubmitEditing={submit}
+            error={error}
+          />
+        ) : null}
 
         {notice ? (
           <Txt variant="bodySm" tone="accent" style={styles.notice}>
@@ -112,6 +131,7 @@ export default function SignIn() {
             variant="ghost"
             onPress={() => {
               setMode(mode === 'sign-in' ? 'sign-up' : 'sign-in');
+              setConfirmPassword('');
               setError(null);
               setNotice(null);
             }}
