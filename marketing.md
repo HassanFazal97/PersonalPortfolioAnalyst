@@ -1,9 +1,10 @@
 # Cirvia Marketing — Operating Doc
 
-**Last reviewed:** 2026-07-30 · **Phase:** Foundation (weeks 1–2) · **Picks measured:** check `/stocks/picks/track-record` (headline stats unlock at ≥30)
+**Last reviewed:** 2026-08-13 · **Phase:** Foundation complete → loop starts (week 3) · **Picks measured:** check `/stocks/picks/track-record` (headline stats unlock at ≥30)
 
 This is the marketing *operating doc*: the angle, the hooks, the weekly loop, and the guardrails.
 Strategy roadmap and product backlog live in [docs/ROADMAP.md](docs/ROADMAP.md) — this file references it, never duplicates it.
+Ready-to-adapt copy (Reddit comments, the r/CanadianInvestor post, X bio/thread/first weeks) lives in [marketing-drafts.md](marketing-drafts.md).
 
 ---
 
@@ -120,23 +121,27 @@ Ranked by leverage. Each row points at [docs/ROADMAP.md](docs/ROADMAP.md) — do
 | # | Item | Roadmap ref | Why it's here |
 |---|---|---|---|
 | 1 | **/methodology page** | Phase 1 #7 | The compliant link target for every channel. Nothing else works without it. |
-| 2 | **Referrer + UTM capture in funnel middleware** (`app/main.py` page-view logger) | new, ~S | Currently only `path` is logged — zero channel attribution. Every checkpoint in §6 depends on this. |
+| 2 | ~~**Referrer + UTM capture in funnel middleware**~~ **Done** (`app/main.py:1265`) | new, ~S | Logs `referer` + all five `utm_*` params. Every checkpoint in §6 depends on this. |
 | 3 | **Weekly recap permalink + CASL opt-in form** | Phase 3 #6, pulled forward to week 4 | Roadmap gates *amplification* on 3-month history; *accumulating* the archive + list should start now. |
-| 4 | **"Model Picks" rename on all public surfaces** | Regulatory posture section | Compliance prerequisite before any public post mentions picks. |
+| 4 | ~~**"Model Picks" rename on all public surfaces**~~ **Done Aug 13** | Regulatory posture section | Compliance prerequisite before any public post mentions picks. Surfaces said "Top Picks" — a superlative claim in the same family as "Best Stocks"; renamed across `landing.py`, `webapp.py`, `trial_notices.py`. Internal module/docstring names still say "Best Stocks" — code-only, not public. |
 | 5 | **One real public sample Deep Dive** | Phase 1 #8 | The shareable "whoa" artifact for threads and the r/CanadianInvestor post. |
 | 6 | **Weekly Portfolio Report Card** | Phase 2 #3 | The user-screenshot artifact. Later — respect the time budget. |
 
-**Blocker check (Phase 0):** billing live in prod (Stripe env vars in Railway) and `hello@cirvia.ca` receiving — traffic into a "coming soon" paywall is wasted.
+**Blocker check (Phase 0): both cleared.** Billing live in prod (Stripe env vars confirmed in Railway, Jul 30). `hello@cirvia.ca` receiving verified Aug 13 — ImprovMX catch-all on the GoDaddy DNS, test send logged `DELIVERED` (details in [ROADMAP item 3](docs/ROADMAP.md)).
 
 ---
 
 ## 6. 90-Day Plan & Milestones
 
 **Weeks 1–2 — Foundation (no public promotion):**
-- [ ] Ship backlog #1, #2, #4; confirm Phase 0 blockers cleared
-- [ ] Twitter bio + pinned thread live
-- [ ] Begin Reddit comment-only participation (PFC + r/CanadianInvestor), zero links
-- [ ] Record baseline `GET /funnel` counts here: signup ___ / connected ___ / trial ___ / upgraded ___
+- [x] Ship backlog #1, #2, #4; confirm Phase 0 blockers cleared — **all done Aug 13**
+- [ ] Twitter bio + pinned thread live — account not yet created (`x@cirvia.ca` now works for signup)
+- [ ] Begin Reddit comment-only participation (PFC + r/CanadianInvestor), zero links — **not started; this is the long-lead item, see below**
+- [x] **Baseline `GET /funnel`, read from prod Aug 13:** signup **0** / connected **0** / trial **0** / upgraded **0**. Only event ever recorded is `dashboard_viewed` (1). Supporting tables: 3 `users`, 40 `positions` — all predating migration 025, which is why they carry no funnel rows.
+
+> **Instrumentation caveat on the baseline.** `signup` and `portfolio_connected` have never fired once in prod. The emitting code exists (`app/main.py:2011`, `:2080`) but is unverified end-to-end. The §6 decision rule — pause the loop if day-30 connect rate is <30% — reads from counters that have never incremented, so a broken emitter is indistinguishable from no traction. **Verify with one real signup + sync before day 30**, or the kill/keep call is made on noise.
+
+**Lead-time note:** Reddit is the only Foundation item that can't be compressed — r/CanadianInvestor wants 2–3 weeks of comment history *before* the one post, and that clock starts only when commenting starts. It's unblocked by everything else (comment-only, zero links, no product claims).
 
 **Weeks 3–6 — The loop starts (pre-proof messaging):**
 - [ ] Weekly loop (§4) running
