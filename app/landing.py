@@ -1442,7 +1442,7 @@ _HOME_BODY = """
       <span class="meta">Weekdays, your time</span>
     </div>
     <div class="ledger-row" data-reveal-item>
-      <h3>Top Picks<span class="pro-pill">Pro</span></h3>
+      <h3>Model Picks<span class="pro-pill">Pro</span></h3>
       <p>A daily board screened from ~560 S&amp;P 500 and TSX names: quantitative
       factors first, then AI analysts, then a verifier that re-checks every number.
       Scored on a <a href="/track-record">public track record</a>.</p>
@@ -1599,7 +1599,7 @@ _HOME_BODY = """
       <p class="price-note">or $160/yr CAD, 4 months free.</p>
       <ul>
         <li>Daily weekday digest across all holdings</li>
-        <li>Top Picks: the daily verified board, with its
+        <li>Model Picks: the daily verified board, with its
         <a href="/track-record">public track record</a></li>
         <li>Risk Lab: Monte Carlo, risk contribution, correlation</li>
         <li>Macro alerts when the world moves</li>
@@ -1690,7 +1690,7 @@ _METHODOLOGY_BODY = """
 
   <p>Cirvia's design rule is simple: <strong>every number you see is computed in
   code from market data; the AI only narrates.</strong> This page explains what
-  that means for the daily Top Picks, the public track record, and the
+  that means for the daily Model Picks, the public track record, and the
   portfolio analytics, including the limitations we haven't fixed yet.</p>
 
   <h2>How the daily picks are made</h2>
@@ -2129,7 +2129,7 @@ def _pricing_product_jsonld(base: str) -> dict:
         "@type": "Product",
         "name": "Cirvia Pro",
         "description": (
-            "Daily verified portfolio digest, Top Picks with a public track "
+            "Daily verified portfolio digest, Model Picks with a public track "
             "record, Deep Dive research, Risk Lab, and macro alerts."
         ),
         "brand": {"@type": "Brand", "name": "Cirvia"},
@@ -2186,7 +2186,7 @@ _PRICING_BODY = f"""
       <ul>
         <li>Unlimited connected accounts</li>
         <li>Daily weekday digest across all holdings</li>
-        <li>Top Picks: the daily verified board, with its
+        <li>Model Picks: the daily verified board, with its
         <a href="/track-record">public track record</a></li>
         <li>Deep Dive research reports, 2 per week</li>
         <li>Risk Lab: Monte Carlo, risk contribution, correlation</li>
@@ -2225,7 +2225,7 @@ _TRACK_RECORD_INTRO = """
 <section class="hero" style="padding-bottom:0;">
   <div class="hero-copy">
     <h1 data-hero>Every pick. Priced honestly.</h1>
-    <p class="lead" data-hero>Each day&rsquo;s Top Picks are published with a frozen
+    <p class="lead" data-hero>Each day&rsquo;s Model Picks are published with a frozen
     entry price and scored here against the S&amp;P 500 over the identical span.
     Misses stay on the board, nothing is ever deleted.</p>
   </div>
@@ -2280,7 +2280,7 @@ def track_record_html(payload: dict) -> str:
 """ + _TRACK_RECORD_METHOD
         return _layout(
             "Pick track record | Cirvia",
-            "The public, honestly-priced track record of Cirvia's daily Top Picks, "
+            "The public, honestly-priced track record of Cirvia's daily Model Picks, "
             "benchmarked against the S&P 500.",
             body,
             active="track",
@@ -2366,7 +2366,7 @@ def track_record_html(payload: dict) -> str:
 {_TRACK_RECORD_METHOD}"""
     return _layout(
         "Pick track record | Cirvia",
-        "The public, honestly-priced track record of Cirvia's daily Top Picks, "
+        "The public, honestly-priced track record of Cirvia's daily Model Picks, "
         "benchmarked against the S&P 500.",
         body,
         active="track",
@@ -2675,7 +2675,7 @@ LANDING_HTML = _layout(
 PRICING_HTML = _layout(
     "Pricing | Cirvia",
     "Cirvia pricing: start free with a weekly digest and chat questions, or go Pro at "
-    "$20/mo CAD ($160/yr) for daily digests, verified Top Picks with a public track "
+    "$20/mo CAD ($160/yr) for daily digests, verified Model Picks with a public track "
     "record, Deep Dive reports, Risk Lab, and macro alerts.",
     _PRICING_BODY,
     active="pricing",

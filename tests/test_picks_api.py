@@ -247,7 +247,7 @@ def test_manual_triggers_require_auth_and_owner(monkeypatch):
 
 def test_picks_page_renders():
     html = picks_page("https://x.supabase.co", "anon-key")
-    assert "<title>Top Picks" in html
+    assert "<title>Model Picks" in html
     assert "/stocks/picks" in html
     for token in (
         "picks-gate", "pickCard", "renderMovers", "loadTrackRecord",

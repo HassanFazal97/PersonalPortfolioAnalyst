@@ -779,7 +779,7 @@ function staggerIn(els, duration = 0.25, gap = 0.04) {
 
 _APP_NAV_LINKS = (
     ("dashboard", "/app/dashboard", "Dashboard"),
-    ("picks", "/app/picks", "Top Picks"),
+    ("picks", "/app/picks", "Model Picks"),
     ("risk", "/app/risk", "Risk Lab"),
     ("deep-dives", "/app/deep-dives", "Deep Dives"),
     ("settings", "/app/settings", "Settings"),
@@ -5555,7 +5555,7 @@ def risk_lab_page(supabase_url: str, anon_key: str) -> str:
 
 _PICKS_BODY = """
 <section class="picks-head">
-  <h1>Top Picks</h1>
+  <h1>Model Picks</h1>
   <p class="picks-sub">Every market morning, a quantitative screen ranks ~560 US and Canadian
   large caps, and analyst agents research the strongest candidates. Every number is computed
   from source data and machine-verified; every claim is adversarially checked.</p>
@@ -5563,7 +5563,7 @@ _PICKS_BODY = """
 <div id="picks-loading" class="muted-note">Loading today's analysis&hellip;</div>
 <div id="picks-gate" class="dash-card gate-card" style="display:none;">
   <h2>A Pro feature</h2>
-  <p>The daily Top Picks dashboard, ranked candidates with verified evidence, what's moving
+  <p>The daily Model Picks dashboard, ranked candidates with verified evidence, what's moving
   and why, and a public track record, is part of Cirvia&nbsp;Pro.</p>
   <a class="btn" href="/app/settings?billing=upgrade">Upgrade to Pro</a>
 </div>
@@ -5839,7 +5839,7 @@ _PICKS_CSS = """
 
 def picks_page(supabase_url: str, anon_key: str) -> str:
     return _page(
-        "Top Picks | Cirvia",
+        "Model Picks | Cirvia",
         f"<style>{_PICKS_CSS}</style>{_PICKS_BODY}",
         supabase_url=supabase_url,
         anon_key=anon_key,
