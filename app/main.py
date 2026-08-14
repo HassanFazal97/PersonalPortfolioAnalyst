@@ -562,6 +562,10 @@ _AUTH_EXEMPT_PATHS = {
     # Discord's OAuth redirect is a bare browser GET; the signed ``state``
     # (minted by connect-url for the signed-in user) is the auth.
     "/integrations/discord/callback",
+    # Universal links / App Links association files. Apple and Google fetch
+    # these with no credentials and no ability to supply any.
+    "/.well-known/apple-app-site-association",
+    "/.well-known/assetlinks.json",
 }
 
 _DISCORD_CALLBACK_PATH = "/integrations/discord/callback"
@@ -1357,6 +1361,75 @@ def create_app() -> FastAPI:
     @app.get("/sitemap.xml", response_class=Response)
     async def sitemap() -> Response:
         return Response(content=sitemap_xml(), media_type="application/xml")
+
+    # ---- Universal links / App Links -------------------------------------
+    #
+    # Served as explicit routes rather than static files so the team id,
+    # bundle id, and signing fingerprints come from config — a rebuild under
+    # different credentials needs no code change.
+    #
+    # The path allowlist is deliberately narrow: /app/* and /stocks/* open in
+    # the app, while /, /pricing, /track-record and the rest stay in the
+    # browser, where they can convert a visitor and legally sell a
+    # subscription. Handing marketing pages to the app would move those
+    # flows inside a binary that is not allowed to sell anything.
+
+    @app.get("/.well-known/apple-app-site-association")
+    async def apple_app_site_association() -> Response:
+        settings = get_settings()
+        if not settings.ios_team_id:
+            raise HTTPException(status_code=404, detail="not configured")
+        app_id = f"{settings.ios_team_id}.{settings.ios_bundle_id}"
+        payload = {
+            "applinks": {
+                "apps": [],
+                "details": [
+                    {
+                        "appID": app_id,
+                        "paths": ["/app/*", "/stocks/*", "NOT /app/reset"],
+                        # The modern form Apple prefers; `paths` stays for
+                        # older iOS versions that ignore `components`.
+                        "components": [
+                            {"/": "/app/reset*", "exclude": True},
+                            {"/": "/app/*"},
+                            {"/": "/stocks/*"},
+                        ],
+                    }
+                ],
+            },
+            # Password autofill association for the sign-in screen.
+            "webcredentials": {"apps": [app_id]},
+        }
+        # Must be served as JSON with no extension and no redirect.
+        return Response(
+            content=json.dumps(payload, separators=(",", ":")),
+            media_type="application/json",
+        )
+
+    @app.get("/.well-known/assetlinks.json")
+    async def android_asset_links() -> Response:
+        settings = get_settings()
+        fingerprints = [
+            f.strip().upper()
+            for f in settings.android_cert_fingerprints.split(",")
+            if f.strip()
+        ]
+        if not fingerprints:
+            raise HTTPException(status_code=404, detail="not configured")
+        payload = [
+            {
+                "relation": ["delegate_permission/common.handle_all_urls"],
+                "target": {
+                    "namespace": "android_app",
+                    "package_name": settings.android_package,
+                    "sha256_cert_fingerprints": fingerprints,
+                },
+            }
+        ]
+        return Response(
+            content=json.dumps(payload, separators=(",", ":")),
+            media_type="application/json",
+        )
 
     @app.get("/contact", response_class=HTMLResponse)
     async def contact_page() -> HTMLResponse:

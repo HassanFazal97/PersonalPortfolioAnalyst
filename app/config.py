@@ -386,6 +386,19 @@ class Settings(BaseSettings):
     # APNs key / FCM service account live in EAS rather than this container.
     # The access token is optional (Expo accepts unauthenticated sends unless
     # the project enforces it); push_enabled is what registers the adapter.
+    # Native app identity, for the universal-link association files. Both are
+    # public by definition (Apple and Google fetch them unauthenticated); they
+    # are settings rather than literals so a rebuild under a different team or
+    # signing key needs no code change.
+    ios_team_id: str = Field(default="", alias="IOS_TEAM_ID")
+    ios_bundle_id: str = Field(default="ca.cirvia.app", alias="IOS_BUNDLE_ID")
+    android_package: str = Field(default="ca.cirvia.app", alias="ANDROID_PACKAGE")
+    # SHA-256 fingerprints of the Android signing certs, comma-separated. EAS
+    # shows these under credentials; the Play upload key and the app-signing
+    # key are different certs and both usually belong here.
+    android_cert_fingerprints: str = Field(
+        default="", alias="ANDROID_CERT_FINGERPRINTS"
+    )
     expo_access_token: str = Field(default="", alias="EXPO_ACCESS_TOKEN")
     push_enabled: bool = Field(default=False, alias="PUSH_ENABLED")
     # Dry run: fan out and queue push rows, but have the adapter log instead
