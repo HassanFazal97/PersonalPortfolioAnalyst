@@ -54,10 +54,10 @@ from app.config import (
     get_settings,
     monthly_cost_cap,
 )
-from app.db.repo import Repo
+from app.db.repo import DeletedAccountError, Repo
 from app.delivery import discord_connect, twilio_inbound, unsubscribe, verification
 from app.delivery.adapters import build_adapters
-from app.delivery.channels import mask_destination
+from app.delivery.channels import PUSH_CHANNEL, mask_destination
 from app.delivery.dispatcher import Dispatcher
 from app.delivery.shortcuts import get_latest_digest
 from app.integrations.snaptrade.client import SnapTradeError
@@ -586,6 +586,7 @@ async def require_auth(
         # auth-uid → user-id mapping is insert-only, so after the first
         # provisioning query the DB is skipped entirely (app/perf/authcache).
         cached = authcache.get_verified(supplied)
+        issued_at: datetime | None = None
         if cached is not None:
             auth_id, email = cached
         else:
@@ -605,17 +606,29 @@ async def require_auth(
             except (AuthError, ValueError) as exc:
                 raise HTTPException(status_code=401, detail="invalid token") from exc
             email = claims.get("email")
+            raw_iat = claims.get("iat")
+            if raw_iat is not None:
+                issued_at = datetime.fromtimestamp(float(raw_iat), tz=timezone.utc)
             authcache.put_verified(
                 supplied, auth_id, email, float(claims.get("exp", 0))
             )
         user_id = authcache.get_user_id(auth_id)
         if user_id is None:
             repo = _require_repo(request.app)
-            user_id = await repo.get_or_create_user(
-                auth_id=auth_id,
-                email=email,
-                trial_days=settings.trial_days,
-            )
+            try:
+                user_id = await repo.get_or_create_user(
+                    auth_id=auth_id,
+                    email=email,
+                    trial_days=settings.trial_days,
+                    issued_at=issued_at,
+                )
+            except DeletedAccountError as exc:
+                # The signature is genuine but the account is gone, and this
+                # token predates the deletion — provisioning a replacement would
+                # silently resurrect it (migration 029).
+                raise HTTPException(
+                    status_code=401, detail="account deleted"
+                ) from exc
             authcache.put_user_id(auth_id, user_id)
         _bind_user(request, user_id)
         return
@@ -2240,9 +2253,21 @@ def create_app() -> FastAPI:
                     ),
                 ) from exc
         await repo.delete_user_data(user_id)
-        # Deleted account: drop the cached auth mapping so a re-signup with
-        # the same auth uid re-provisions instead of hitting a dead user id.
-        authcache.evict_user(auth_id if isinstance(auth_id, uuid.UUID) else None)
+        deleted_uid = auth_id if isinstance(auth_id, uuid.UUID) else None
+        # The caller's JWT stays valid until its own exp, and deleting the
+        # Supabase auth user below cannot revoke it. Tombstone the uid so a
+        # token minted before now can't walk back into get_or_create_user and
+        # silently provision a replacement account (migration 029). Written
+        # after the data delete: tombstoning an account that then failed to
+        # delete would lock a live user out.
+        if deleted_uid is not None:
+            await repo.tombstone_auth_id(deleted_uid)
+        # Drop the cached auth mapping so a re-signup with the same auth uid
+        # re-provisions instead of hitting a dead user id, and the cached
+        # verifications so the next request re-verifies and recovers the iat
+        # the tombstone check needs.
+        authcache.evict_user(deleted_uid)
+        authcache.evict_tokens_for(deleted_uid)
         snapshot.store.invalidate(user_id)
         auth_user_deleted = await _delete_supabase_auth_user(settings, auth_id)
         return {"deleted": True, "auth_user_deleted": auth_user_deleted}

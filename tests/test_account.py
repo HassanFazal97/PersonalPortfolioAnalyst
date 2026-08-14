@@ -43,7 +43,9 @@ def _b64(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
 
 
-def _make_jwt(sub: str, email: str = "user@example.com") -> str:
+def _make_jwt(
+    sub: str, email: str = "user@example.com", *, iat: int | None = None
+) -> str:
     header = _b64(json.dumps({"alg": "HS256", "typ": "JWT"}).encode())
     payload = _b64(
         json.dumps(
@@ -51,6 +53,7 @@ def _make_jwt(sub: str, email: str = "user@example.com") -> str:
                 "sub": sub,
                 "aud": "authenticated",
                 "email": email,
+                "iat": int(time.time()) if iat is None else iat,
                 "exp": int(time.time()) + 3600,
             }
         ).encode()
@@ -209,6 +212,45 @@ async def test_delete_me_removes_app_data(monkeypatch):
     assert await repo.get_user(uid) is None
     assert await repo.list_positions(user_id=uid) == []
     assert await repo.list_chat_runs(uid) == []
+
+
+async def test_deleted_account_is_not_resurrected_by_its_old_token(monkeypatch):
+    # The bug this guards: the caller's JWT stays valid for its remaining ~1h
+    # after DELETE /me, and deleting the Supabase auth user cannot revoke it.
+    # Re-using it used to fall through to get_or_create_user and silently
+    # provision a brand-new empty account (with a fresh trial to follow).
+    repo = FakeRepo()
+    auth_id = uuid.uuid4()
+    await repo.get_or_create_user(auth_id=auth_id, email="jane@example.com")
+    client = _client(monkeypatch, repo, jwt_secret=SECRET)
+    token = _make_jwt(str(auth_id))
+    headers = {"Authorization": f"Bearer {token}"}
+
+    assert client.delete("/me", headers=headers).status_code == 200
+
+    # Same still-unexpired token, immediately afterwards.
+    assert client.get("/me", headers=headers).status_code == 401
+    assert auth_id not in repo._users_by_auth
+
+
+async def test_signing_in_again_after_deletion_provisions_a_new_account(monkeypatch):
+    # The tombstone is dated, not permanent: a token minted *after* the delete
+    # is a genuine new sign-in. This path stays reachable whenever the Supabase
+    # auth user outlives the delete (e.g. no service-role key configured), and
+    # a permanent ban list would lock that user out for good.
+    repo = FakeRepo()
+    auth_id = uuid.uuid4()
+    await repo.get_or_create_user(auth_id=auth_id, email="jane@example.com")
+    client = _client(monkeypatch, repo, jwt_secret=SECRET)
+    old = {"Authorization": f"Bearer {_make_jwt(str(auth_id))}"}
+
+    assert client.delete("/me", headers=old).status_code == 200
+
+    fresh = {
+        "Authorization": f"Bearer {_make_jwt(str(auth_id), iat=int(time.time()) + 5)}"
+    }
+    assert client.get("/me", headers=fresh).status_code == 200
+    assert auth_id in repo._users_by_auth
 
 
 async def test_delete_me_reports_auth_deletion(monkeypatch):

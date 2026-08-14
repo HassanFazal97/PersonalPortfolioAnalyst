@@ -33,6 +33,7 @@ from app.db.models import (
     Alert,
     DailyPrice,
     DeepDiveReport,
+    DeletedAuthId,
     Digest,
     FundamentalsSnapshot,
     FunnelEvent,
@@ -76,6 +77,12 @@ def digest_mentions_ticker(body: str | None, ticker: str) -> bool:
     root = ticker.split(".")[0]
     pattern = rf"\b({re.escape(ticker)}|{re.escape(root)})\b"
     return re.search(pattern, body) is not None
+
+
+class DeletedAccountError(Exception):
+    """Raised when a token tries to provision an account that was deleted after
+    the token was issued. The API layer turns this into a 401 — the credential
+    is genuine, but the account behind it is gone (migration 029)."""
 
 
 @event.listens_for(Session, "after_begin")
@@ -271,7 +278,12 @@ class Repo:
             return sorted(result.scalars().all())
 
     async def get_or_create_user(
-        self, *, auth_id: uuid.UUID, email: str | None = None, trial_days: int = 0
+        self,
+        *,
+        auth_id: uuid.UUID,
+        email: str | None = None,
+        trial_days: int = 0,
+        issued_at: datetime | None = None,
     ) -> uuid.UUID:
         """Resolve the app user for a Supabase auth uid, provisioning on first
         sight. Returns the app ``users.id`` (distinct from the auth uid).
@@ -279,18 +291,46 @@ class Repo:
         The no-card Pro trial is NOT armed here — it starts at the first
         successful portfolio sync (``maybe_start_trial``), so all
         ``trial_days`` are value days. The parameter is kept for call-site
-        compatibility but no longer read."""
+        compatibility but no longer read.
+
+        ``issued_at`` is the token's ``iat``. It only matters when the uid has a
+        deletion tombstone (migration 029): a token minted at or before the
+        delete must not resurrect the account, so it raises
+        ``DeletedAccountError``; a token minted after it is a genuine new
+        sign-in, so the tombstone is cleared and provisioning proceeds. A
+        tombstoned uid with no ``issued_at`` is refused — a token we cannot date
+        is not evidence of a new sign-in."""
         del trial_days
         async with self._session() as s:
             existing = await s.execute(select(User.id).where(User.auth_id == auth_id))
             row = existing.scalar_one_or_none()
             if row is not None:
                 return row
+            tombstone = await s.get(DeletedAuthId, auth_id)
+            if tombstone is not None:
+                if issued_at is None or issued_at <= tombstone.deleted_at:
+                    raise DeletedAccountError(str(auth_id))
+                await s.delete(tombstone)
             user = User(auth_id=auth_id, email=email)
             s.add(user)
             await s.commit()
             await self.record_funnel_event("signup", user_id=user.id)
             return user.id
+
+    async def tombstone_auth_id(self, auth_id: uuid.UUID) -> None:
+        """Mark an auth uid as deleted so tokens issued before now cannot
+        re-provision it. Idempotent; refreshes ``deleted_at`` on re-delete."""
+        async with self._session() as s:
+            stmt = (
+                pg_insert(DeletedAuthId)
+                .values(auth_id=auth_id, deleted_at=datetime.now(timezone.utc))
+                .on_conflict_do_update(
+                    index_elements=[DeletedAuthId.auth_id],
+                    set_={"deleted_at": datetime.now(timezone.utc)},
+                )
+            )
+            await s.execute(stmt)
+            await s.commit()
 
     async def maybe_start_trial(
         self, user_id: uuid.UUID, trial_days: int

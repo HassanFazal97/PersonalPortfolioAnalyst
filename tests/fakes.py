@@ -13,6 +13,8 @@ from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Any
 
+from app.db.repo import DeletedAccountError
+
 
 class FakeRepo:
     def __init__(self, positions: list[Any] | None = None) -> None:
@@ -27,6 +29,7 @@ class FakeRepo:
         self.alerts: dict[str, SimpleNamespace] = {}
         self._snaptrade: dict[uuid.UUID, SimpleNamespace] = {}
         self._users_by_auth: dict[uuid.UUID, uuid.UUID] = {}
+        self._deleted_auth_ids: dict[uuid.UUID, datetime] = {}
         self._users_by_id: dict[uuid.UUID, Any] = {}
         self._cost_override: dict[uuid.UUID, float] = {}
         # (count, oldest created_at) forced per user, bypassing run counting.
@@ -102,11 +105,18 @@ class FakeRepo:
         )
         return rows[:limit]
 
-    async def get_or_create_user(self, *, auth_id, email=None, trial_days=0):
+    async def get_or_create_user(
+        self, *, auth_id, email=None, trial_days=0, issued_at=None
+    ):
         # Mirrors the real repo: provisioning no longer arms the trial —
         # that happens at first portfolio sync via maybe_start_trial.
         del trial_days
         if auth_id not in self._users_by_auth:
+            deleted_at = self._deleted_auth_ids.get(auth_id)
+            if deleted_at is not None:
+                if issued_at is None or issued_at <= deleted_at:
+                    raise DeletedAccountError(str(auth_id))
+                del self._deleted_auth_ids[auth_id]
             uid = uuid.uuid4()
             self._users_by_auth[auth_id] = uid
             self._users_by_id[uid] = SimpleNamespace(
@@ -124,6 +134,9 @@ class FakeRepo:
             )
             await self.record_funnel_event("signup", user_id=self._users_by_auth[auth_id])
         return self._users_by_auth[auth_id]
+
+    async def tombstone_auth_id(self, auth_id):
+        self._deleted_auth_ids[auth_id] = datetime.now(timezone.utc)
 
     async def maybe_start_trial(self, user_id, trial_days):
         if trial_days <= 0:

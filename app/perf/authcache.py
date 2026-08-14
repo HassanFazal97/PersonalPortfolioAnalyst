@@ -70,6 +70,21 @@ def evict_user(auth_id: uuid.UUID | None) -> None:
         _user_ids.pop(auth_id, None)
 
 
+def evict_tokens_for(auth_id: uuid.UUID | None) -> None:
+    """Drop every cached verification for an auth uid, on account deletion.
+
+    Without this, a token verified before the delete keeps serving cached claims
+    for its remaining ~1h and never re-enters full verification — which is where
+    the token's ``iat`` comes from, and ``iat`` is what lets provisioning tell a
+    pre-delete token from a genuine new sign-in (migration 029). Evicting forces
+    the next request to re-verify and produce one. A linear scan is fine: the
+    dict is capped at ``_VERIFIED_MAX`` and deletion is rare."""
+    if auth_id is None:
+        return
+    for key in [k for k, (aid, _, _) in _verified_tokens.items() if aid == auth_id]:
+        _verified_tokens.pop(key, None)
+
+
 def cache_clear() -> None:
     """Test hook, mirroring app/tools/market.py's cache_clear()."""
     _user_ids.clear()

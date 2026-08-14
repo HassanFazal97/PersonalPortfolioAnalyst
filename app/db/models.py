@@ -672,6 +672,20 @@ class FunnelEvent(Base):
     )
 
 
+class DeletedAuthId(Base):
+    """Account-deletion tombstone (migration 029). A deleted account's JWT stays
+    valid until its own exp, so provisioning checks this table and refuses to
+    re-create a user from a token issued at or before ``deleted_at``. A later
+    sign-in carries a newer iat and clears the row."""
+
+    __tablename__ = "deleted_auth_ids"
+
+    auth_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    deleted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class SchemaMigration(Base):
     """Tracks which numbered migration files have been applied."""
 
