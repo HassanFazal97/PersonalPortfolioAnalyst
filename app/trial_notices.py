@@ -50,7 +50,7 @@ def _notices_for(user: Any, now: datetime, settings: Any) -> list[dict[str, str]
                     "subject": f"Your Pro trial ends in {days_left} day{plural}",
                     "body": (
                         f"Your Cirvia Pro trial ends in {days_left} day{plural}. "
-                        "After that, daily digests, Top Picks, Deep Dives, and the "
+                        "After that, daily digests, Model Picks, Deep Dives, and the "
                         "Risk Lab pause until you pick a plan: upgrade to keep "
                         f"them, or continue free with a Monday digest.\n\n{url}"
                     ),
@@ -70,7 +70,7 @@ def _notices_for(user: Any, now: datetime, settings: Any) -> list[dict[str, str]
             "subject": "Your Pro trial has ended: pick a plan",
             "body": (
                 "Your Cirvia Pro trial has ended, so your digests are paused. "
-                "Upgrade to Pro to resume daily briefings, Top Picks, Deep "
+                "Upgrade to Pro to resume daily briefings, Model Picks, Deep "
                 "Dives, and the Risk Lab, or choose Free and keep a Monday "
                 f"digest on your top holdings.\n\n{url}"
             ),
