@@ -276,6 +276,7 @@ async def run_agent(
     on_event: EventCallback | None = None,
     dispatch: dict[str, Any] | None = None,
     max_tokens: int = 1024,
+    run_id: Any | None = None,
 ) -> AgentResult:
     settings = get_settings()
     client = _get_client(client)
@@ -293,13 +294,18 @@ async def run_agent(
     schemas_by_name = {t["name"]: t for t in tools}
 
     started = time.monotonic()
-    run_id = await db.create_run(
-        trigger=trigger,
-        user_message=user_message,
-        model=settings.model,
-        prompt_version=PROMPT_VERSION,
-        user_id=user_id,
-    )
+    # A caller that must know the run id *before* the run starts — /chat/start,
+    # which hands it to a mobile client so a backgrounded answer can be
+    # recovered — creates the row itself and passes it in. Same shape as the
+    # deep-dive path, which has always pre-created its run.
+    if run_id is None:
+        run_id = await db.create_run(
+            trigger=trigger,
+            user_message=user_message,
+            model=settings.model,
+            prompt_version=PROMPT_VERSION,
+            user_id=user_id,
+        )
     ctx.run_id = run_id
     observer = Observer(db, run_id)
     await emit(on_event, {"type": "run_start", "run_id": str(run_id)})

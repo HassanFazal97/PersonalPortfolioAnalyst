@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
+from collections import OrderedDict, deque
 from typing import Any, AsyncIterator
 
 from fastapi import Request
@@ -67,12 +68,26 @@ class ProgressBroker:
     """In-process pub/sub for job progress, keyed by an id (e.g. a deep-dive
     report id). Subscribers get their own bounded queue; a slow subscriber
     drops events rather than stalling the publisher — reconnects rehydrate
-    from the persisted progress snapshot, so drops are cosmetic."""
+    from the persisted progress snapshot, so drops are cosmetic.
+
+    Set ``replay_size`` to keep the last N events per key so a subscriber that
+    arrives late — or comes back after the phone suspended the app — can be
+    handed everything it missed. Without it, dropping events is only cosmetic
+    for jobs whose progress is persisted elsewhere; for chat the dropped
+    events would be the ``text_delta`` frames, i.e. the answer itself.
+    """
 
     _QUEUE_SIZE = 256
 
-    def __init__(self) -> None:
+    def __init__(self, *, replay_size: int = 0, max_histories: int = 64) -> None:
         self._subs: dict[uuid.UUID, list[asyncio.Queue]] = {}
+        self._replay_size = replay_size
+        self._max_histories = max_histories
+        # Ordered so the oldest run's history is the one evicted at the cap.
+        # Kept past close() on purpose: replaying a *finished* run is the
+        # whole point — that is how a backgrounded client gets its answer.
+        self._history: OrderedDict[uuid.UUID, deque[dict[str, Any]]] = OrderedDict()
+        self._finished: set[uuid.UUID] = set()
 
     def subscribe(self, key: uuid.UUID) -> asyncio.Queue:
         q: asyncio.Queue = asyncio.Queue(maxsize=self._QUEUE_SIZE)
@@ -91,16 +106,67 @@ class ProgressBroker:
             self._subs.pop(key, None)
 
     def publish(self, key: uuid.UUID, event: dict[str, Any]) -> None:
+        self._record(key, event)
         for q in self._subs.get(key, []):
             try:
                 q.put_nowait(event)
             except asyncio.QueueFull:
                 pass
 
+    def _record(self, key: uuid.UUID, event: dict[str, Any]) -> None:
+        if not self._replay_size:
+            return
+        buffer = self._history.get(key)
+        if buffer is None:
+            buffer = deque(maxlen=self._replay_size)
+            self._history[key] = buffer
+            while len(self._history) > self._max_histories:
+                evicted, _ = self._history.popitem(last=False)
+                self._finished.discard(evicted)
+        self._history.move_to_end(key)
+        buffer.append(event)
+
+    def open(self, key: uuid.UUID) -> None:
+        """Register a run before its first event.
+
+        Without this a subscriber arriving in the gap between "job started"
+        and "first event published" would look indistinguishable from one
+        asking about a run whose buffer was evicted long ago.
+        """
+        if not self._replay_size:
+            return
+        self._finished.discard(key)
+        if key not in self._history:
+            self._history[key] = deque(maxlen=self._replay_size)
+        self._history.move_to_end(key)
+        while len(self._history) > self._max_histories:
+            evicted, _ = self._history.popitem(last=False)
+            self._finished.discard(evicted)
+
+    def history(self, key: uuid.UUID) -> list[dict[str, Any]]:
+        """Everything published for ``key`` that is still buffered."""
+        return list(self._history.get(key, ()))
+
+    def is_finished(self, key: uuid.UUID) -> bool:
+        """True once ``close`` has run — the run is over and its history, if
+        any, is all a new subscriber will ever get."""
+        return key in self._finished
+
+    def is_known(self, key: uuid.UUID) -> bool:
+        """True while the broker still holds live subscribers or history."""
+        return key in self._subs or key in self._history
+
     def close(self, key: uuid.UUID) -> None:
         """Terminate all subscribers for a finished job."""
+        if self._replay_size:
+            self._finished.add(key)
         for q in self._subs.pop(key, []):
             try:
                 q.put_nowait(SENTINEL)
             except asyncio.QueueFull:
                 pass
+
+    def forget(self, key: uuid.UUID) -> None:
+        """Drop a key's buffered history outright."""
+        self._history.pop(key, None)
+        self._finished.discard(key)

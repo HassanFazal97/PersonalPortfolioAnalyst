@@ -1204,6 +1204,57 @@ def _ingest_chat_memory(repo: Repo, user_id: uuid.UUID, question: str, result) -
     memory_ingest.schedule(_embed())
 
 
+async def _run_chat_turn(
+    repo: Repo,
+    *,
+    user_id: uuid.UUID,
+    message: str,
+    settings,
+    prepared: tuple[str, Budget, ToolContext, list[dict], str, list[dict]],
+    on_event=None,
+    run_id: uuid.UUID | None = None,
+) -> dict:
+    """One chat turn, end to end: run the agent, refresh the quota, ingest the
+    exchange into memory, invalidate the sections the agent's tools may have
+    written, and return the terminal payload.
+
+    Shared by ``/chat``, ``/chat/stream`` and ``/chat/start`` so the three
+    cannot drift — the streaming variants ship this same dict as their ``done``
+    event. ``prepared`` is the tuple from ``_prepare_chat``; ``run_id`` is set
+    only when the caller pre-created the run to return its id up front.
+    """
+    plan, budget, ctx, tools, system_prompt, history = prepared
+    result = await run_agent(
+        message,
+        trigger="chat",
+        system_prompt=system_prompt,
+        tools=tools,
+        budget=budget,
+        db=repo,
+        ctx=ctx,
+        user_id=user_id,
+        history=history,
+        on_event=on_event,
+        run_id=run_id,
+    )
+    quota = await _chat_quota_payload(repo, user_id, plan, settings)
+    _ingest_chat_memory(repo, user_id, message, result)
+    # Agent tools may have written alerts or watchlist rows.
+    snapshot.store.invalidate(user_id, "news", "watchlist", "me")
+    return {
+        "run_id": str(result.run_id),
+        "answer": result.answer,
+        "status": result.status,
+        "iterations": result.iterations,
+        "input_tokens": result.input_tokens,
+        "output_tokens": result.output_tokens,
+        "cost_usd": result.cost_usd,
+        "latency_ms": result.latency_ms,
+        "tool_calls": result.tool_summaries,
+        "chat_quota": quota,
+    }
+
+
 # Funnel visibility (PRODUCT.md: visitor -> signup -> connected portfolio).
 # One structured log line per page render; no cookies, no client-side JS.
 _funnel_logger = logging.getLogger("cirvia.funnel")
@@ -1459,6 +1510,10 @@ def create_app() -> FastAPI:
     # (check-then-act race) and blow past the Free caps. In-process is enough —
     # the app runs as a single process (see DeliveryScheduler et al.).
     active_chats: set[uuid.UUID] = set()
+    # Exposed for the same reason the progress brokers are: it is a real
+    # invariant of the three chat endpoints, and a test cannot hold a run
+    # in flight across requests to observe it any other way.
+    app.state.active_chats = active_chats
 
     @app.post("/chat")
     async def chat(req: ChatRequest, request: Request) -> dict:
@@ -1474,38 +1529,16 @@ def create_app() -> FastAPI:
         active_chats.add(user_id)
         try:
             await _enforce_usage_limits(repo, user_id, settings)
-            plan, budget, ctx, tools, system_prompt, history = await _prepare_chat(
-                repo, user_id, settings
-            )
-            result = await run_agent(
-                req.message,
-                trigger="chat",
-                system_prompt=system_prompt,
-                tools=tools,
-                budget=budget,
-                db=repo,
-                ctx=ctx,
+            prepared = await _prepare_chat(repo, user_id, settings)
+            return await _run_chat_turn(
+                repo,
                 user_id=user_id,
-                history=history,
+                message=req.message,
+                settings=settings,
+                prepared=prepared,
             )
-            quota = await _chat_quota_payload(repo, user_id, plan, settings)
-            _ingest_chat_memory(repo, user_id, req.message, result)
-            # Agent tools may have written alerts or watchlist rows.
-            snapshot.store.invalidate(user_id, "news", "watchlist", "me")
         finally:
             active_chats.discard(user_id)
-        return {
-            "run_id": str(result.run_id),
-            "answer": result.answer,
-            "status": result.status,
-            "iterations": result.iterations,
-            "input_tokens": result.input_tokens,
-            "output_tokens": result.output_tokens,
-            "cost_usd": result.cost_usd,
-            "latency_ms": result.latency_ms,
-            "tool_calls": result.tool_summaries,
-            "chat_quota": quota,
-        }
 
     # Keep strong references to driver tasks: asyncio only holds weak refs,
     # and a GC'd task would silently kill an in-flight streamed chat.
@@ -1529,9 +1562,7 @@ def create_app() -> FastAPI:
         active_chats.add(user_id)
         try:
             await _enforce_usage_limits(repo, user_id, settings)
-            plan, budget, ctx, tools, system_prompt, history = await _prepare_chat(
-                repo, user_id, settings
-            )
+            prepared = await _prepare_chat(repo, user_id, settings)
         except BaseException:
             active_chats.discard(user_id)
             raise
@@ -1545,34 +1576,15 @@ def create_app() -> FastAPI:
             # Owns run completion: a disconnected client stops the SSE
             # generator, but the run still finishes, persists, and bills.
             try:
-                result = await run_agent(
-                    req.message,
-                    trigger="chat",
-                    system_prompt=system_prompt,
-                    tools=tools,
-                    budget=budget,
-                    db=repo,
-                    ctx=ctx,
+                done = await _run_chat_turn(
+                    repo,
                     user_id=user_id,
-                    history=history,
+                    message=req.message,
+                    settings=settings,
+                    prepared=prepared,
                     on_event=on_event,
                 )
-                quota = await _chat_quota_payload(repo, user_id, plan, settings)
-                _ingest_chat_memory(repo, user_id, req.message, result)
-                snapshot.store.invalidate(user_id, "news", "watchlist", "me")
-                await queue.put(
-                    {
-                        "type": "done",
-                        "run_id": str(result.run_id),
-                        "answer": result.answer,
-                        "status": result.status,
-                        "iterations": result.iterations,
-                        "cost_usd": result.cost_usd,
-                        "latency_ms": result.latency_ms,
-                        "tool_calls": result.tool_summaries,
-                        "chat_quota": quota,
-                    }
-                )
+                await queue.put({"type": "done", **done})
             except Exception:
                 logging.getLogger(__name__).exception("streamed chat run failed")
                 await queue.put(
@@ -1589,6 +1601,140 @@ def create_app() -> FastAPI:
         stream_tasks.add(task)
         task.add_done_callback(stream_tasks.discard)
         return sse_response(queue, request)
+
+    # Native clients cannot use POST /chat/stream: React Native's fetch has no
+    # readable stream body and EventSource can neither POST nor set an
+    # Authorization header. This pair splits the two halves — a POST that
+    # claims the slot and returns the run id, then a plain GET for the SSE —
+    # which also makes the run *recoverable*: when iOS suspends the app
+    # mid-run the socket dies, but the run id is already on the client, so it
+    # re-subscribes on foreground and replays what it missed. With
+    # /chat/stream the id only arrives in the terminal `done` event, so a
+    # backgrounded client loses the answer it has already been billed for.
+    chat_broker = ProgressBroker(replay_size=500)
+    app.state.chat_broker = chat_broker
+
+    @app.post("/chat/start", status_code=202)
+    async def chat_start(req: ChatRequest, request: Request) -> dict:
+        """Claim the chat slot, start the run, and return its id immediately.
+
+        Pre-run failures (quota, concurrency) still raise proper 4xx JSON
+        before anything is started, exactly as /chat/stream does.
+        """
+        settings = get_settings()
+        repo = _require_repo(app)
+        user_id = _user_id(request)
+        if user_id in active_chats:
+            raise HTTPException(
+                status_code=429,
+                detail="A chat is already running for this account; wait for it to finish.",
+            )
+        active_chats.add(user_id)
+        try:
+            await _enforce_usage_limits(repo, user_id, settings)
+            prepared = await _prepare_chat(repo, user_id, settings)
+            # Created here rather than inside run_agent so the id exists before
+            # the response is written.
+            run_id = await repo.create_run(
+                trigger="chat",
+                user_message=req.message,
+                model=settings.model,
+                prompt_version=PROMPT_VERSION,
+                user_id=user_id,
+            )
+        except BaseException:
+            active_chats.discard(user_id)
+            raise
+
+        # Registered before the task starts so a client that opens the SSE in
+        # the gap before the first event is told "live", not "unknown".
+        chat_broker.open(run_id)
+
+        async def on_event(event: dict) -> None:
+            chat_broker.publish(run_id, event)
+
+        async def drive() -> None:
+            # Detached: the run owns its own completion, so a client that
+            # never opens the SSE (or drops it) still gets a persisted,
+            # billable answer it can collect later.
+            try:
+                done = await _run_chat_turn(
+                    repo,
+                    user_id=user_id,
+                    message=req.message,
+                    settings=settings,
+                    prepared=prepared,
+                    on_event=on_event,
+                    run_id=run_id,
+                )
+                chat_broker.publish(run_id, {"type": "done", **done})
+            except Exception:
+                logging.getLogger(__name__).exception("started chat run failed")
+                chat_broker.publish(
+                    run_id,
+                    {
+                        "type": "error",
+                        "detail": "Something went wrong answering that. Please try again.",
+                    },
+                )
+            finally:
+                active_chats.discard(user_id)
+                chat_broker.close(run_id)
+
+        task = asyncio.create_task(drive())
+        stream_tasks.add(task)
+        task.add_done_callback(stream_tasks.discard)
+        return {"run_id": str(run_id)}
+
+    @app.get("/chat/runs/{run_id}/events")
+    async def chat_run_events(run_id: uuid.UUID, request: Request):
+        """SSE tail for a run started by /chat/start.
+
+        Opens with a ``chat_snapshot`` frame replaying every event buffered so
+        far, which closes two gaps at once: the race between the POST
+        returning and this GET opening, and a client that was suspended for
+        the whole run and is only now coming back for its answer.
+        """
+        repo = _require_repo(app)
+        caller = _user_id(request)
+        run = await repo.get_run(run_id)
+        # 404-not-403 so run ids can't be probed (same as /runs/{id}).
+        if run is not None and caller != _OWNER_USER_ID and run.user_id != caller:
+            run = None
+        if run is None:
+            raise HTTPException(status_code=404, detail="run not found")
+
+        # Read the broker's view *before* subscribing — subscribing would
+        # itself make the run "known" and defeat the evicted-buffer check.
+        finished = chat_broker.is_finished(run_id)
+        known = chat_broker.is_known(run_id)
+        replayed = chat_broker.history(run_id)
+
+        queue = chat_broker.subscribe(run_id)
+        await queue.put(
+            {
+                "type": "chat_snapshot",
+                "run_id": str(run_id),
+                "finished": finished,
+                "events": replayed,
+            }
+        )
+        if finished or not known:
+            # Terminal, or so old its buffer was evicted: the snapshot is all
+            # there is, and the client falls back to GET /runs/{run_id}.
+            await queue.put(SENTINEL)
+        response = sse_response(queue, request)
+        original_iterator = response.body_iterator
+
+        async def cleanup_iterator():
+            try:
+                async for chunk in original_iterator:
+                    yield chunk
+            finally:
+                chat_broker.unsubscribe(run_id, queue)
+
+        response.body_iterator = cleanup_iterator()
+        return response
 
     @app.get("/chat/history")
     async def chat_history(request: Request, limit: int = 10) -> dict:

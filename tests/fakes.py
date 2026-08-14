@@ -88,6 +88,22 @@ class FakeRepo:
         }
         return run_id
 
+    async def get_run(self, run_id):
+        """One run row. Fields are read with .get so the many tests that seed
+        ``runs`` with a partial dict keep working."""
+        row = self.runs.get(run_id)
+        if row is None:
+            return None
+        return SimpleNamespace(
+            id=run_id,
+            user_id=row.get("user_id"),
+            trigger=row.get("trigger"),
+            user_message=row.get("user_message"),
+            final_answer=row.get("final_answer"),
+            status=row.get("status"),
+            created_at=row.get("created_at"),
+        )
+
     async def list_chat_runs(self, user_id, *, limit=10):
         rows = [
             SimpleNamespace(id=rid, **{
