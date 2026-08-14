@@ -191,6 +191,21 @@ and converting every `StyleSheet.create` to read from it — a refactor across
 ~45 files. Half-done (some screens dark, some light) is worse than light-only,
 which is a defensible v1 for a finance app.
 
+### Shipping to the stores
+
+`eas.json` holds the build profiles. The two Supabase values are NOT in it:
+`.env` is gitignored and EAS cloud builds never see it, so set them once as
+EAS secrets or the build produces an app that cannot sign in.
+
+```sh
+eas secret:create --scope project --name EXPO_PUBLIC_SUPABASE_URL --value "https://<ref>.supabase.co"
+eas secret:create --scope project --name EXPO_PUBLIC_SUPABASE_ANON_KEY --value "sb_publishable_..."
+```
+
+`EXPO_PUBLIC_API_BASE` is a plain public hostname and lives in `eas.json`
+directly. The three `REPLACE_WITH_*` fields under `submit.production.ios`
+need filling before `eas submit` will run.
+
 ### Before submitting
 
 `IOS_TEAM_ID` and `ANDROID_CERT_FINGERPRINTS` must be set in Railway or both

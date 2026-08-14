@@ -26,3 +26,6 @@ expo-env.d.ts
 npm-debug.*
 yarn-debug.*
 yarn-error.*
+
+# Play Console service account key (eas submit). Never commit.
+play-service-account.json
