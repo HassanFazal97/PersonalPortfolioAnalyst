@@ -29,12 +29,21 @@ AUTHORIZE_URL = "https://discord.com/oauth2/authorize"
 TOKEN_URL = "https://discord.com/api/oauth2/token"
 STATE_TTL_SECONDS = 600
 
+# The native app's custom scheme, matching ``scheme`` in mobile/app.json.
+APP_SCHEME = "cirvia"
+
 # Where the callback may send the browser afterwards, keyed by the short
 # name the UI passes to connect-url. An allowlist — never a raw URL — so a
 # forged state can't turn the callback into an open redirect.
+#
+# ``app`` returns to the native client instead of a web page: the callback
+# arrives in an ASWebAuthenticationSession / Custom Tab, and redirecting to
+# the app's scheme is what closes that sheet and hands control back. Because
+# the map is an allowlist of literals, adding it opens no redirect surface.
 RETURN_PATHS: dict[str, str] = {
     "settings": "/app/settings",
     "onboarding": "/app/onboarding",
+    "app": f"{APP_SCHEME}://settings/delivery",
 }
 
 

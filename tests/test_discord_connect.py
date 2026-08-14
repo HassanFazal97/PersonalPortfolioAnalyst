@@ -262,6 +262,46 @@ def test_callback_onboarding_returns_to_onboarding(monkeypatch):
     assert resp.headers["location"] == "/app/onboarding?discord=connected"
 
 
+def test_callback_app_returns_to_the_native_scheme(monkeypatch):
+    """The native client's return target: redirecting to the app scheme is
+    what closes the ASWebAuthenticationSession and hands control back."""
+    repo = FakeRepo()
+    repo.seed_user(_OWNER)
+    _fake_exchange(monkeypatch)
+    client = _client(monkeypatch, repo, env=_DISCORD_ENV)
+    state = discord_connect.sign_state(_SECRET, _OWNER, return_to="app")
+    resp = client.get(
+        CALLBACK, params={"code": "abc", "state": state}, follow_redirects=False
+    )
+    assert resp.headers["location"] == "cirvia://settings/delivery?discord=connected"
+    # The webhook still lands the same way it does for the web flow.
+    assert repo._notification_channels[(_OWNER, "discord")].destination == WEBHOOK
+    assert repo._users_by_id[_OWNER].preferred_channel == "discord"
+
+
+def test_callback_app_cancelled_returns_to_the_native_scheme(monkeypatch):
+    repo = FakeRepo()
+    repo.seed_user(_OWNER)
+    client = _client(monkeypatch, repo, env=_DISCORD_ENV)
+    state = discord_connect.sign_state(_SECRET, _OWNER, return_to="app")
+    resp = client.get(
+        CALLBACK,
+        params={"error": "access_denied", "state": state},
+        follow_redirects=False,
+    )
+    # Cancelling must still bounce back into the app, or the sheet strands.
+    assert resp.headers["location"] == "cirvia://settings/delivery?discord=cancelled"
+
+
+def test_return_paths_are_literals_not_caller_supplied():
+    """The allowlist is what stops the callback becoming an open redirect —
+    including now that one of its values is an off-origin scheme."""
+    import pytest as _pytest
+
+    with _pytest.raises(ValueError):
+        discord_connect.sign_state(_SECRET, _OWNER, return_to="https://evil.test")
+
+
 def test_callback_invalid_state_redirects_error(monkeypatch):
     repo = FakeRepo()
     repo.seed_user(_OWNER)
