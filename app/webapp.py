@@ -792,6 +792,7 @@ _APP_NAV_LINKS = (
     ("picks", "/app/picks", "Model Picks"),
     ("risk", "/app/risk", "Risk Lab"),
     ("deep-dives", "/app/deep-dives", "Deep Dives"),
+    ("notable-trades", "/app/notable-trades", "Notable Trades"),
     ("settings", "/app/settings", "Settings"),
 )
 
@@ -821,6 +822,13 @@ _APP_ICONS = {
         ' stroke-linecap="round" stroke-linejoin="round">'
         '<path d="M5 2.5h6l3 3v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-13a1 1 0 0 1 1-1Z"/>'
         '<circle cx="9.3" cy="12" r="2"/><path d="m12 14.5 1.8 1.8"/></svg>'
+    ),
+    "notable-trades": (
+        '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"'
+        ' stroke-linecap="round" stroke-linejoin="round">'
+        '<circle cx="6.5" cy="6" r="2.2"/><path d="M2.6 15.5c0-2.4 1.8-4 3.9-4s3.9 1.6 3.9 4"/>'
+        '<circle cx="14" cy="7.5" r="1.7"/><path d="M11.2 15.2c.2-1.9 1.6-3.1 2.9-3.1 1.5 0 2.9 1.4 3.2 3.4"/>'
+        "</svg>"
     ),
     "settings": (
         '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"'
@@ -1296,6 +1304,87 @@ resetForm.addEventListener('submit', async (ev) => {
   }
 });
 """
+
+
+# --------------------------------------------------------------------------
+# /app/auth/bridge — hand a Supabase recovery link off to the native app
+# --------------------------------------------------------------------------
+#
+# Recovery tokens arrive in the URL *fragment*, which never reaches the
+# server, and email clients won't reliably follow a 302 to a custom scheme —
+# so the app's reset emails redirect here, and this page's only job is to
+# read the fragment client-side and bounce it to cirvia://reset. It is a
+# standalone document, not a _page() shell, because the shell's supabase-js
+# client consumes the recovery hash on load (detectSessionInUrl), which
+# would strip the tokens before they can be forwarded.
+
+_BRIDGE_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Open the Cirvia app</title>
+<meta name="robots" content="noindex">
+<style>
+  body { margin:0; min-height:100dvh; display:flex; align-items:center;
+         justify-content:center; background:#F8F5FC; color:#241D33;
+         font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; }
+  .card { max-width:22rem; padding:2.5rem 1.5rem; text-align:center; }
+  .logo { font-size:1.35rem; font-weight:700; color:#241D33; text-decoration:none; }
+  .logo span { color:#7250BA; }
+  h1 { font-size:1.15rem; margin:1.6rem 0 0.5rem; }
+  p { color:#5C5470; font-size:0.95rem; line-height:1.5; margin:0.4rem 0; }
+  .btn { display:inline-block; margin-top:1.2rem; padding:0.7rem 1.4rem;
+         border-radius:0.6rem; background:#7250BA; color:#fff;
+         text-decoration:none; font-weight:600; }
+  .alt { display:block; margin-top:1rem; font-size:0.85rem; color:#7250BA; }
+  #bridge-open, #bridge-error { display:none; }
+</style>
+</head>
+<body>
+<div class="card">
+  <a class="logo" href="/">Cir<span>via</span></a>
+  <div id="bridge-open">
+    <h1>Continue in the app</h1>
+    <p>Tap below to finish resetting your password in the Cirvia app.</p>
+    <a class="btn" id="open-app">Open the Cirvia app</a>
+    <a class="alt" id="open-web">Set a new password on the web instead</a>
+  </div>
+  <div id="bridge-error">
+    <h1>This link is invalid or has expired</h1>
+    <p>Request a new reset email from the sign-in screen and try again.</p>
+    <a class="btn" href="/app">Back to sign in</a>
+  </div>
+</div>
+<script>
+(function () {
+  var hash = location.hash.replace(/^#/, '');
+  var params = new URLSearchParams(location.search);
+  new URLSearchParams(hash).forEach(function (v, k) { params.set(k, v); });
+  var ok = !params.get('error') &&
+    (params.get('code') || (params.get('access_token') && params.get('refresh_token')));
+  if (!ok) {
+    document.getElementById('bridge-error').style.display = 'block';
+    return;
+  }
+  var appUrl = 'cirvia://reset?' + params.toString();
+  document.getElementById('open-app').href = appUrl;
+  // The web fallback keeps the original shape: /app/reset reads the fragment
+  // exactly as it would from a desktop recovery link.
+  document.getElementById('open-web').href =
+    '/app/reset' + location.search + (hash ? '#' + hash : '');
+  document.getElementById('bridge-open').style.display = 'block';
+  // Auto-attempt the hand-off; in-app email browsers that block scheme
+  // redirects still have the tappable button (a user gesture) above.
+  location.replace(appUrl);
+})();
+</script>
+</body>
+</html>"""
+
+
+def bridge_page() -> str:
+    return _BRIDGE_HTML
 
 
 # --------------------------------------------------------------------------
@@ -4315,6 +4404,11 @@ _STOCK_BODY = """
   <div class="dash-card"><h3>News &amp; digests</h3>
     <div class="news-feed" id="stock-news"><div aria-hidden="true">
       <div class="skl"></div><div class="skl short"></div></div></div></div>
+  <div class="dash-card" id="stock-nt-card" style="display:none;">
+    <h3>Notable trades</h3>
+    <div id="stock-nt-summary"></div>
+    <a class="link-btn" id="stock-nt-link" href="#">See all trades &rarr;</a>
+  </div>
 </aside>
 </div>
 """
@@ -4818,9 +4912,26 @@ async function loadNews() {
   }
 }
 
+async function loadNotableTradesSummary() {
+  let resp;
+  try { resp = await api('/notable-trades/tickers/' + encodeURIComponent(TICKER) + '/summary'); }
+  catch (e) { return; }
+  if (resp.status === 402 || !resp.ok) return;  // free plan / no data: card stays hidden
+  const data = await resp.json();
+  if (!data.buys && !data.sells) return;
+  document.getElementById('stock-nt-card').style.display = 'block';
+  document.getElementById('stock-nt-link').href = '/app/notable-trades?ticker=' + encodeURIComponent(TICKER);
+  const byType = Object.entries(data.by_type || {})
+    .map(([t, n]) => t + ': ' + n).join(' · ');
+  document.getElementById('stock-nt-summary').innerHTML =
+    '<p>' + data.buys + ' buys, ' + data.sells + ' sells across ' + data.distinct_investors +
+    ' notable investors in the last 90 days' + (byType ? ' (' + esc(byType) + ')' : '') + '.</p>';
+}
+
 loadDetail();
 loadChart(182);
 loadNews();
+loadNotableTradesSummary();
 """
 
 
@@ -6456,6 +6567,295 @@ def deep_dives_page(supabase_url: str, anon_key: str) -> str:
         extra_js=_DEEP_DIVES_JS,
         wrap_class="app-wrap dash-wrap",
         active="deep-dives",
+    )
+
+
+# --------------------------------------------------------------------------
+# /app/notable-trades — Congress / insider / institutional trade feed
+# --------------------------------------------------------------------------
+
+_NOTABLE_TRADES_BODY = """
+<section class="picks-head">
+  <h1>Notable Trades</h1>
+  <p class="picks-sub">Disclosed trading activity from Congress members, corporate
+  insiders, and institutional funds &mdash; sourced from SEC filings and public
+  disclosure datasets, never paraphrased or guessed.</p>
+</section>
+
+<div id="nt-teaser-card" class="dash-card" style="display:none;">
+  <h3>Recent activity</h3>
+  <div id="nt-teaser-list"></div>
+</div>
+<div id="nt-gate" class="dash-card gate-card" style="display:none;">
+  <h2>A Pro feature</h2>
+  <p>See the full feed, filter by trader or ticker, and follow the people you
+  care about &mdash; that&rsquo;s Cirvia&nbsp;Pro.</p>
+  <a class="btn" href="/app/settings?billing=upgrade">Upgrade to Pro</a>
+</div>
+
+<div id="nt-content" style="display:none;">
+  <nav class="dash-tabs" role="tablist" aria-label="Notable trades sections">
+    <button class="dash-tab active" data-panel="nt-feed" role="tab">Feed</button>
+    <button class="dash-tab" data-panel="nt-following" id="nt-following-tab" role="tab" style="display:none;">Following</button>
+  </nav>
+
+  <div class="dash-panel" data-panel="nt-feed" role="tabpanel">
+    <div class="dash-card">
+      <div class="filters-row" id="nt-filters">
+        <label>Trader
+          <select id="nt-filter-type">
+            <option value="">All</option>
+            <option value="congress">Congress</option>
+            <option value="insider">Insiders</option>
+            <option value="institution">Institutions</option>
+          </select>
+        </label>
+        <label>Side
+          <select id="nt-filter-side">
+            <option value="">Buy &amp; sell</option>
+            <option value="buy">Buys only</option>
+            <option value="sell">Sells only</option>
+          </select>
+        </label>
+        <label>Ticker
+          <input id="nt-filter-ticker" type="text" placeholder="e.g. NVDA" autocomplete="off" spellcheck="false">
+        </label>
+        <label>Relevance
+          <select id="nt-filter-relevance">
+            <option value="all">All trades</option>
+            <option value="holdings">Stocks you hold</option>
+            <option value="watchlist">Stocks you watch</option>
+          </select>
+        </label>
+      </div>
+      <div id="nt-feed-list"><div class="muted-note">Loading&hellip;</div></div>
+      <button class="link-btn" id="nt-load-more" style="display:none;">Load more</button>
+    </div>
+  </div>
+
+  <div class="dash-panel" data-panel="nt-following" role="tabpanel" style="display:none;">
+    <div class="dash-card">
+      <h3>Following</h3>
+      <p class="picks-card-sub">Trades from people you follow are flagged with a
+      <span class="watchlist-badge">following</span> badge in the Feed.</p>
+      <div id="nt-following-list"></div>
+    </div>
+  </div>
+</div>
+"""
+
+_NOTABLE_TRADES_JS = r"""
+const ntEsc = (s) => { const d = document.createElement('div'); d.textContent = s ?? '';
+  return d.innerHTML; };
+
+let ntFollowedIds = new Set();
+
+function ntInvestorLabel(inv) {
+  if (!inv) return 'Unknown';
+  if (inv.type === 'congress') {
+    const role = [inv.party, inv.state].filter(Boolean).join('-');
+    return ntEsc(inv.name) + (role ? ' (' + ntEsc(role) + ')' : '');
+  }
+  if (inv.type === 'insider') {
+    return ntEsc(inv.name) + (inv.title ? ' &middot; ' + ntEsc(inv.title) : '') +
+      (inv.company ? ' at ' + ntEsc(inv.company) : '');
+  }
+  if (inv.type === 'institution') {
+    return ntEsc(inv.fund || inv.name);
+  }
+  return ntEsc(inv.name);
+}
+
+function ntTypeLabel(t) {
+  return t === 'congress' ? 'Congress' : t === 'insider' ? 'Insider' : t === 'institution' ? 'Institution' : t;
+}
+
+function ntSourceNote(source) {
+  return (source === 'senate_stock_watcher' || source === 'house_stock_watcher')
+    ? '<span class="nt-source-note" title="Unofficial community dataset, not an SEC filing">unofficial source</span>'
+    : '';
+}
+
+function ntDayKey(t) { return (t.filed_date || '').slice(0, 10); }
+function ntDayLabel(t) {
+  const d = t.filed_date ? new Date(t.filed_date + 'T00:00:00') : null;
+  if (!d || isNaN(d)) return 'Unknown date';
+  return d.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+}
+
+function ntRow(t) {
+  const side = t.transaction_type === 'buy' ? 'pos' : t.transaction_type === 'sell' ? 'neg' : 'mid';
+  const sideLabel = t.transaction_type === 'buy' ? 'Bought' : t.transaction_type === 'sell' ? 'Sold' : 'Traded';
+  const following = t.investor && t.investor.id && ntFollowedIds.has(t.investor.id);
+  const badges = [
+    following ? '<span class="watchlist-badge">following</span>' : '',
+    t.relevance && t.relevance.held ? '<span class="watchlist-badge">held</span>' : '',
+    t.relevance && t.relevance.watched ? '<span class="watchlist-badge">watching</span>' : '',
+  ].filter(Boolean).join(' ');
+  const tickerHtml = t.ticker
+    ? '<a href="/app/stock/' + encodeURIComponent(t.ticker) + '">' + ntEsc(t.ticker) + '</a>'
+    : ntEsc(t.raw_issuer_name || 'Unknown issuer');
+  const followBtn = t.investor && t.investor.id
+    ? '<button class="link-btn nt-follow-btn" data-id="' + ntEsc(t.investor.id) + '" ' +
+      'data-following="' + (following ? '1' : '0') + '">' + (following ? 'Unfollow' : 'Follow') + '</button>'
+    : '';
+  return '<div class="nt-item">' +
+    '<div class="nt-item-top">' +
+      '<span class="tag">' + ntTypeLabel(t.investor ? t.investor.type : '') + '</span>' +
+      '<span class="nt-investor">' + ntInvestorLabel(t.investor) + '</span>' +
+      badges +
+    '</div>' +
+    '<div class="nt-item-body">' +
+      '<span class="' + side + '">' + sideLabel + '</span> ' + tickerHtml +
+      (t.amount_range ? ', ' + ntEsc(t.amount_range) : '') +
+      (t.filing_lag_days !== null && t.filing_lag_days > 30
+        ? ' <span class="nt-late" title="Disclosed ' + t.filing_lag_days + ' days after the trade">late filing</span>' : '') +
+    '</div>' +
+    '<div class="nt-item-meta">Filed ' + ntEsc(t.filed_date) + ' ' + ntSourceNote(t.source) + ' ' + followBtn + '</div>' +
+  '</div>';
+}
+
+function ntRenderList(el, items) {
+  if (!items.length) { el.innerHTML = '<div class="muted-note">No trades match these filters.</div>'; return; }
+  const parts = [];
+  let lastDay = null;
+  for (const t of items) {
+    const key = ntDayKey(t);
+    if (key !== lastDay) { parts.push('<div class="news-day">' + ntEsc(ntDayLabel(t)) + '</div>'); lastDay = key; }
+    parts.push(ntRow(t));
+  }
+  el.innerHTML = parts.join('');
+  staggerIn(el.querySelectorAll('.nt-item'));
+}
+
+async function ntToggleFollow(investorId, following) {
+  try {
+    const resp = await api('/notable-trades/follows/' + encodeURIComponent(investorId),
+      { method: following ? 'DELETE' : 'POST' });
+    if (!resp.ok) return;
+    const data = await resp.json();
+    ntFollowedIds = new Set((data.items || []).map((f) => f.investor_id));
+    document.getElementById('nt-following-tab').style.display = ntFollowedIds.size ? '' : 'none';
+    ntRenderFollowing(data.items || []);
+    ntLoadFeed();
+  } catch (e) { /* stay quiet, feed re-render on next load will reconcile */ }
+}
+
+function ntRenderFollowing(items) {
+  const el = document.getElementById('nt-following-list');
+  if (!items.length) { el.innerHTML = '<div class="muted-note">You aren\'t following anyone yet. Use Follow on a trade in the Feed.</div>'; return; }
+  el.innerHTML = items.map((f) =>
+    '<div class="nt-item"><div class="nt-item-top"><span class="tag">' + ntTypeLabel(f.investor.type) +
+    '</span><span class="nt-investor">' + ntInvestorLabel(f.investor) + '</span></div>' +
+    '<div class="nt-item-meta"><button class="link-btn nt-follow-btn" data-id="' + ntEsc(f.investor_id) +
+    '" data-following="1">Unfollow</button></div></div>'
+  ).join('');
+}
+
+async function ntLoadFollows() {
+  let resp;
+  try { resp = await api('/notable-trades/follows'); } catch (e) { return; }
+  if (!resp.ok) return;
+  const data = await resp.json();
+  ntFollowedIds = new Set((data.items || []).map((f) => f.investor_id));
+  document.getElementById('nt-following-tab').style.display = ntFollowedIds.size ? '' : 'none';
+  ntRenderFollowing(data.items || []);
+}
+
+function ntBuildParams() {
+  const params = new URLSearchParams();
+  const type = document.getElementById('nt-filter-type').value;
+  const side = document.getElementById('nt-filter-side').value;
+  const ticker = document.getElementById('nt-filter-ticker').value.trim();
+  const relevance = document.getElementById('nt-filter-relevance').value;
+  if (type) params.set('trader_type', type);
+  if (side) params.set('side', side);
+  if (ticker) params.set('ticker', ticker.toUpperCase());
+  if (relevance && relevance !== 'all') params.set('relevance', relevance);
+  return params;
+}
+
+async function ntLoadFeed() {
+  const el = document.getElementById('nt-feed-list');
+  let resp;
+  try { resp = await api('/notable-trades?' + ntBuildParams().toString()); }
+  catch (e) { return; }
+  if (!resp.ok) { el.innerHTML = '<div class="muted-note">Notable trades are unavailable right now.</div>'; return; }
+  const data = await resp.json();
+  ntRenderList(el, data.items || []);
+}
+
+async function ntLoadTeaser() {
+  let resp;
+  try { resp = await fetch('/notable-trades/teaser?limit=6'); } catch (e) { return; }
+  if (!resp.ok) return;
+  const data = await resp.json();
+  if (!data.items || !data.items.length) return;
+  document.getElementById('nt-teaser-card').style.display = 'block';
+  ntRenderList(document.getElementById('nt-teaser-list'), data.items);
+}
+
+async function ntInit() {
+  let resp;
+  try { resp = await api('/notable-trades?limit=1'); } catch (e) { return; }
+  if (resp.status === 402) {
+    document.getElementById('nt-gate').style.display = 'block';
+    ntLoadTeaser();
+    return;
+  }
+  document.getElementById('nt-content').style.display = 'block';
+  await ntLoadFollows();
+  await ntLoadFeed();
+
+  document.querySelectorAll('.dash-tabs [data-panel]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.dash-tabs .dash-tab').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      document.querySelectorAll('#nt-content .dash-panel').forEach((p) =>
+        p.style.display = p.dataset.panel === btn.dataset.panel ? '' : 'none');
+    });
+  });
+  ['nt-filter-type', 'nt-filter-side', 'nt-filter-relevance'].forEach((id) =>
+    document.getElementById(id).addEventListener('change', ntLoadFeed));
+  let ntSearchTimer = null;
+  document.getElementById('nt-filter-ticker').addEventListener('input', () => {
+    clearTimeout(ntSearchTimer);
+    ntSearchTimer = setTimeout(ntLoadFeed, 350);
+  });
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('.nt-follow-btn');
+    if (!btn) return;
+    ntToggleFollow(btn.dataset.id, btn.dataset.following === '1');
+  });
+}
+
+requireSession().then((ok) => { if (ok) ntInit(); });
+"""
+
+_NOTABLE_TRADES_CSS = """
+.nt-item { padding: 0.65rem 0; border-top: 1px solid var(--line); }
+.nt-item:first-child { border-top: 0; }
+.nt-item-top { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.nt-investor { font-weight: 600; color: var(--ink); }
+.nt-item-body { color: var(--ink); margin-top: 0.25rem; }
+.nt-item-body a { color: var(--accent-text); }
+.nt-item-meta { color: var(--ink-3); font-size: 0.78rem; margin-top: 0.2rem;
+  display: flex; align-items: center; gap: 0.5rem; }
+.nt-source-note { font-style: italic; }
+.nt-late { color: var(--warn); }
+.nt-follow-btn { margin-left: auto; font-size: 0.78rem; }
+"""
+
+
+def notable_trades_page(supabase_url: str, anon_key: str) -> str:
+    return _page(
+        "Notable Trades | Cirvia",
+        f"<style>{_NOTABLE_TRADES_CSS}</style>{_NOTABLE_TRADES_BODY}",
+        supabase_url=supabase_url,
+        anon_key=anon_key,
+        extra_js=_NOTABLE_TRADES_JS,
+        wrap_class="app-wrap picks-wrap",
+        active="notable-trades",
     )
 
 

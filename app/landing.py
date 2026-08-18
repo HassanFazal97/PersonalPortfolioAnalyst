@@ -1387,6 +1387,13 @@ _HOME_FAQ: list[tuple[str, str]] = [
         "accounts.",
     ),
     (
+        "What is Notable Trades?",
+        "A feed of disclosed trading activity from Congress members, corporate "
+        "insiders, and institutional funds, cross-referenced against your own "
+        "holdings and watchlist. It&rsquo;s informational, not a signal to copy "
+        "trades from.",
+    ),
+    (
         "How is my data protected?",
         "Your password stays with your brokerage, your data is encrypted, and your "
         "information is completely separate from every other user&rsquo;s. See our "
@@ -1445,7 +1452,8 @@ _HOME_BODY = """
   <div class="ledger" data-reveal-group data-stagger="0.45">
     <div class="ledger-row" data-reveal-item>
       <h3>Morning digest</h3>
-      <p>Overnight moves, what changed, and what to watch, written for your tickers.
+      <p>Overnight moves, what changed, and what to watch, written for your tickers
+      and delivered by email, text, or Discord, whichever you check first.
       <a href="/sample-digest">See a sample</a>.</p>
       <span class="meta">Weekdays, your time</span>
     </div>
@@ -1455,6 +1463,12 @@ _HOME_BODY = """
       factors first, then AI analysts, then a verifier that re-checks every number.
       Scored on a <a href="/track-record">public track record</a>.</p>
       <span class="meta">Daily, pre-market</span>
+    </div>
+    <div class="ledger-row" data-reveal-item>
+      <h3>Notable Trades<span class="pro-pill">Pro</span></h3>
+      <p>See what Congress members, corporate insiders, and institutional funds are
+      buying and selling, cross-referenced against the stocks you hold and watch.</p>
+      <span class="meta">Updated daily</span>
     </div>
     <div class="ledger-row" data-reveal-item>
       <h3>Deep Dives<span class="pro-pill">Pro</span></h3>
@@ -1564,8 +1578,8 @@ _HOME_BODY = """
     <p>Read-only access syncs positions and balances. Cirvia can never place a trade
     or move money.</p></div></div>
     <div class="step" data-reveal-item><div class="num"></div><div><h3>Get informed, daily</h3>
-    <p>Your digest each weekday morning, alerts when the world moves, answers when
-    you ask.</p></div></div>
+    <p>Your digest each weekday morning by email, text, or Discord, alerts when
+    the world moves, answers when you ask.</p></div></div>
   </div>
 </section>
 
@@ -1598,6 +1612,8 @@ _HOME_BODY = """
         <li>1 connected account</li>
         <li>Weekly digest on up to 3 holdings</li>
         <li>3 chat questions per week</li>
+        <li>1 Deep Dive research report per month</li>
+        <li>Watchlist for up to 3 tickers</li>
       </ul>
       <a class="btn ghost" href="/app#signup">Start free</a>
     </div>
@@ -1606,11 +1622,17 @@ _HOME_BODY = """
       <div class="price">$20<span class="per"> /mo CAD</span></div>
       <p class="price-note">or $160/yr CAD, 4 months free.</p>
       <ul>
+        <li>Unlimited connected accounts</li>
         <li>Daily weekday digest across all holdings</li>
         <li>Model Picks: the daily verified board, with its
         <a href="/track-record">public track record</a></li>
+        <li>Notable Trades: Congress, insider, and institutional trading activity</li>
+        <li>Deep Dive research reports, 2 per week</li>
         <li>Risk Lab: Monte Carlo, risk contribution, correlation</li>
         <li>Macro alerts when the world moves</li>
+        <li>Price-anomaly alerts on unusual moves</li>
+        <li>10 chat questions per day</li>
+        <li>Watchlist for up to 30 tickers</li>
       </ul>
       <a class="btn ghost" href="/app#signup" data-auth="cta">Get started free</a>
       <p class="price-note" style="margin-top:0.75rem;">New here? Signing up
@@ -1791,6 +1813,22 @@ _METHODOLOGY_BODY = """
   browse the <a href="/screener">full grid</a> with no account. On a stock's own page,
   the per-metric evidence (this stock's ratio vs. its peer median) is part of
   Cirvia&nbsp;Pro, the same as the rest of the fact sheet it's built from.</p>
+
+  <h2>How Notable Trades is sourced</h2>
+  <p>The Notable Trades feed surfaces disclosed trading activity, not analysis:
+  nothing here is screened, ranked, or interpreted the way Model Picks are.
+  Congress trades come from public congressional trading disclosure datasets;
+  insider and institutional trades come from filings made with securities
+  regulators. Every row links back to its original source.</p>
+  <p><strong>Disclosures lag the actual trade.</strong> Members of Congress and
+  corporate insiders have a legal window, days to weeks, to report a trade
+  after it happens, so a trade you see today may have been made well before it
+  was disclosed. This is a record of what was reported, not a live feed of
+  what&rsquo;s happening right now.</p>
+  <p><strong>It&rsquo;s informational, not a signal.</strong> A notable
+  investor buying or selling a stock says nothing about their reasoning,
+  their full portfolio, or their time horizon. Cirvia surfaces the activity;
+  it never suggests copying it.</p>
 
   <h2>Limitations, honestly</h2>
   <ul>
@@ -2196,6 +2234,7 @@ _PRICING_BODY = f"""
         <li>Daily weekday digest across all holdings</li>
         <li>Model Picks: the daily verified board, with its
         <a href="/track-record">public track record</a></li>
+        <li>Notable Trades: Congress, insider, and institutional trading activity</li>
         <li>Deep Dive research reports, 2 per week</li>
         <li>Risk Lab: Monte Carlo, risk contribution, correlation</li>
         <li>Macro alerts when the world moves</li>

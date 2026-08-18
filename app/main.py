@@ -62,6 +62,7 @@ from app.delivery.adapters import build_adapters
 from app.delivery.channels import PUSH_CHANNEL, mask_destination
 from app.delivery.dispatcher import Dispatcher
 from app.delivery.shortcuts import get_latest_digest
+from app.integrations.congress_trades.sync import sync_congress_trades
 from app.integrations.snaptrade.client import SnapTradeError
 from app.integrations.snaptrade.onboarding import (
     portfolio_status,
@@ -129,9 +130,11 @@ from app.tools.tickers import normalize_ticker
 from app.trial_notices import run_trial_notices
 from app.webapp import (
     NOT_CONFIGURED_HTML,
+    bridge_page,
     dashboard_page,
     deep_dives_page,
     login_page,
+    notable_trades_page,
     onboarding_page,
     picks_page,
     reset_page,
@@ -174,6 +177,7 @@ async def lifespan(app: FastAPI):
     app.state.delivery_scheduler = None
     app.state.quote_warm_scheduler = None
     app.state.positions_refresh_scheduler = None
+    app.state.congress_trades_scheduler = None
     # Which channels this deployment can send (drives verification + UI).
     # One shared connection pool across every adapter: sends reuse TCP+TLS
     # instead of paying a fresh handshake per message.
@@ -306,6 +310,20 @@ async def lifespan(app: FastAPI):
             )
             picks_sync_scheduler.start()
             app.state.picks_sync_scheduler = picks_sync_scheduler
+
+        if settings.congress_trades_sync_cron:
+            async def _run_congress_trades_sync() -> None:
+                await sync_congress_trades(repo, settings=settings)
+
+            congress_trades_scheduler = DigestScheduler(
+                heartbeat_wrapped("congress_trades_sync", repo, _run_congress_trades_sync),
+                cron=settings.congress_trades_sync_cron,
+                timezone=settings.tz,
+                job_id="congress_trades_sync",
+                misfire_grace_seconds=settings.digest_misfire_grace_seconds,
+            )
+            congress_trades_scheduler.start()
+            app.state.congress_trades_scheduler = congress_trades_scheduler
 
         if settings.valuation_refresh_cron:
             async def _run_valuation_refresh() -> None:
@@ -444,6 +462,8 @@ async def lifespan(app: FastAPI):
             app.state.picks_scheduler.shutdown()
         if app.state.picks_sync_scheduler is not None:
             app.state.picks_sync_scheduler.shutdown()
+        if app.state.congress_trades_scheduler is not None:
+            app.state.congress_trades_scheduler.shutdown()
         if app.state.valuation_refresh_scheduler is not None:
             app.state.valuation_refresh_scheduler.shutdown()
         if app.state.deep_dive_scheduler is not None:
@@ -570,6 +590,10 @@ _AUTH_EXEMPT_PATHS = {
     # the per-ticker page, not here.
     "/screener",
     "/stocks/valuations",
+    # Small real (never blurred) slice of the notable-trades feed — the
+    # free-tier browse hook, same posture as /stocks/valuations above. The
+    # full filtered feed and follow stay Pro-gated behind the 402 route.
+    "/notable-trades/teaser",
     # The web app pages are static HTML shells; the browser authenticates the
     # API calls it makes from them with a Supabase JWT.
     "/app",
@@ -578,9 +602,14 @@ _AUTH_EXEMPT_PATHS = {
     "/app/risk",
     "/app/picks",
     "/app/deep-dives",
+    "/app/notable-trades",
     "/app/settings",
     "/app/settings/delivery",
     "/app/reset",
+    # The mobile recovery bridge: reads the Supabase token fragment
+    # client-side and bounces it to the cirvia:// scheme. Reached from an
+    # email link in a browser that can attach nothing.
+    "/app/auth/bridge",
     # Twilio cannot attach our bearer token; the route validates
     # X-Twilio-Signature instead.
     "/webhooks/twilio/sms",
@@ -1429,11 +1458,22 @@ def create_app() -> FastAPI:
                 "details": [
                     {
                         "appID": app_id,
-                        "paths": ["/app/*", "/stocks/*", "NOT /app/reset"],
+                        # First match wins, so the exclusions must precede
+                        # the broad /app/* rule in both forms. /app/reset and
+                        # /app/auth/* carry Supabase recovery tokens in the
+                        # URL fragment and must open in the browser, where
+                        # their client-side scripts can read it.
+                        "paths": [
+                            "NOT /app/reset",
+                            "NOT /app/auth/*",
+                            "/app/*",
+                            "/stocks/*",
+                        ],
                         # The modern form Apple prefers; `paths` stays for
                         # older iOS versions that ignore `components`.
                         "components": [
                             {"/": "/app/reset*", "exclude": True},
+                            {"/": "/app/auth/*", "exclude": True},
                             {"/": "/app/*"},
                             {"/": "/stocks/*"},
                         ],
@@ -1591,6 +1631,12 @@ def create_app() -> FastAPI:
         Pro-gated /deep-dive APIs the page calls)."""
         return _webapp_html(deep_dives_page, page_key="deep-dives", request=request)
 
+    @app.get("/app/notable-trades", response_class=HTMLResponse)
+    async def app_notable_trades(request: Request) -> Response:
+        """Congress/insider/institutional trade feed (Pro-gated by the
+        /notable-trades APIs the page calls; a small real teaser is public)."""
+        return _webapp_html(notable_trades_page, page_key="notable-trades", request=request)
+
     @app.get("/app/settings", response_class=HTMLResponse)
     async def app_settings(request: Request) -> Response:
         """Account, brokerage connection, plan, and account deletion."""
@@ -1607,6 +1653,15 @@ def create_app() -> FastAPI:
     async def app_reset(request: Request) -> Response:
         """Set a new password after a Supabase recovery-link redirect."""
         return _webapp_html(reset_page, page_key="reset", request=request)
+
+    @app.get("/app/auth/bridge", response_class=HTMLResponse)
+    async def app_auth_bridge() -> HTMLResponse:
+        """Forward a Supabase recovery link to the native app.
+
+        Standalone static HTML (no Supabase config needed): the recovery
+        tokens live in the URL fragment, which only the page's own script
+        can read, so this renders even when Supabase env is absent."""
+        return HTMLResponse(bridge_page())
 
     @app.get("/health")
     async def health() -> dict:
@@ -2679,6 +2734,195 @@ def create_app() -> FastAPI:
         await repo.remove_watchlist_ticker(user_id, t)
         await snapshot.store.invalidate(user_id, "watchlist")
         return await _watchlist_payload(repo, user_id)
+
+    # ---- Notable Investor Trades (Congress / insider / 13F feed) ---------
+    # Pro-only, gated the same way as Risk Lab/Picks (hard 402), with a small
+    # real (never blurred) public teaser as the free-tier browse hook.
+
+    def _serialize_notable_trade(
+        trade,
+        investor,
+        *,
+        held: set[str],
+        watched: set[str],
+    ) -> dict:
+        amount_range = None
+        if trade.amount_range_min is not None:
+            lo = f"${trade.amount_range_min:,.0f}"
+            amount_range = (
+                f"{lo}–${trade.amount_range_max:,.0f}"
+                if trade.amount_range_max is not None
+                else f"{lo}+"
+            )
+        filing_lag_days = None
+        if trade.transaction_date is not None:
+            filing_lag_days = (trade.filed_date - trade.transaction_date).days
+        return {
+            "trade_id": str(trade.id),
+            "investor": {
+                "id": str(investor.id) if investor else None,
+                "type": investor.investor_type if investor else None,
+                "name": investor.display_name if investor else "Unknown",
+                "party": investor.party if investor else None,
+                "state": investor.state if investor else None,
+                "chamber": investor.chamber if investor else None,
+                "title": investor.title if investor else None,
+                "fund": investor.fund_name if investor else None,
+                "company": investor.company_name if investor else None,
+            },
+            "ticker": trade.ticker,
+            "raw_issuer_name": trade.raw_issuer_name,
+            "transaction_type": trade.transaction_type,
+            "amount_range": amount_range,
+            "shares": float(trade.shares) if trade.shares is not None else None,
+            "transaction_date": trade.transaction_date.isoformat()
+            if trade.transaction_date
+            else None,
+            "filed_date": trade.filed_date.isoformat(),
+            "filing_lag_days": filing_lag_days,
+            "source": trade.source,
+            "source_url": trade.source_url,
+            "relevance": {
+                "held": bool(trade.ticker and trade.ticker in held),
+                "watched": bool(trade.ticker and trade.ticker in watched),
+            },
+        }
+
+    async def _serialize_notable_trades(repo: Repo, trades: list, *, held: set[str], watched: set[str]) -> list[dict]:
+        investors = await repo.get_notable_investors_by_ids(
+            list({t.investor_id for t in trades})
+        )
+        return [
+            _serialize_notable_trade(t, investors.get(t.investor_id), held=held, watched=watched)
+            for t in trades
+        ]
+
+    def _require_pro(user, user_id: uuid.UUID, message: str) -> None:
+        if effective_plan(user) != "pro" and user_id != _OWNER_USER_ID:
+            raise HTTPException(status_code=402, detail=message)
+
+    @app.get("/notable-trades/teaser")
+    async def notable_trades_teaser(limit: int = 8) -> dict:
+        """Small, real (never blurred/obfuscated), fixed slice of the most
+        recent notable trades across all trader types. Public and
+        auth-exempt, same posture as /stocks/valuations — the free-tier
+        browse hook; filtering, drill-down, and following stay Pro-gated."""
+        repo = _require_repo(app)
+        trades = await repo.list_notable_trades(limit=min(max(limit, 1), 20))
+        items = await _serialize_notable_trades(repo, trades, held=set(), watched=set())
+        return {"items": items}
+
+    @app.get("/notable-trades")
+    async def notable_trades_feed(
+        request: Request,
+        trader_type: str = "",
+        ticker: str = "",
+        side: str = "",
+        since: str = "",
+        until: str = "",
+        investor_id: str = "",
+        relevance: str = "all",
+        cursor: str = "",
+        limit: int = 30,
+    ) -> dict:
+        """Pro-gated global feed, filterable by trader type/ticker/side/date,
+        cursor-paginated on ingested_at so results stay stable as new filings
+        land between page loads (mobile-friendly: no offset drift)."""
+        repo = _require_repo(app)
+        user_id = _user_id(request)
+        user = await repo.get_user(user_id)
+        _require_pro(user, user_id, "Notable investor trades are a Pro feature.")
+
+        held = {p.ticker for p in await repo.list_positions(user_id=user_id)}
+        watched = set(await repo.get_watchlist_tickers(user_id))
+        wanted_ticker = _validated_ticker(ticker) if ticker else None
+        trades = await repo.list_notable_trades(
+            trader_types=[t.strip() for t in trader_type.split(",") if t.strip()] or None,
+            ticker=wanted_ticker,
+            side=side or None,
+            since=date.fromisoformat(since) if since else None,
+            until=date.fromisoformat(until) if until else None,
+            investor_id=uuid.UUID(investor_id) if investor_id else None,
+            limit=min(max(limit, 1), 100),
+            cursor=datetime.fromisoformat(cursor) if cursor else None,
+        )
+        if relevance == "holdings":
+            trades = [t for t in trades if t.ticker and t.ticker in held]
+        elif relevance == "watchlist":
+            trades = [t for t in trades if t.ticker and t.ticker in watched]
+        items = await _serialize_notable_trades(repo, trades, held=held, watched=watched)
+        next_cursor = trades[-1].ingested_at.isoformat() if len(trades) == limit else None
+        return {"items": items, "next_cursor": next_cursor}
+
+    @app.get("/notable-trades/tickers/{ticker}/summary")
+    async def notable_trades_ticker_summary(ticker: str, request: Request) -> dict:
+        """Aggregate buy/sell/investor counts for one ticker, plus the most
+        recent trades — powers the stock-page "who's trading this" card and
+        the /app/notable-trades?ticker= view. Pro-gated like the main feed."""
+        repo = _require_repo(app)
+        user_id = _user_id(request)
+        user = await repo.get_user(user_id)
+        _require_pro(user, user_id, "Notable investor trades are a Pro feature.")
+        t = _validated_ticker(ticker)
+        summary = await repo.notable_trade_ticker_summary(t)
+        recent = await repo.list_notable_trades(ticker=t, limit=5)
+        held = {p.ticker for p in await repo.list_positions(user_id=user_id)}
+        watched = set(await repo.get_watchlist_tickers(user_id))
+        summary["recent"] = await _serialize_notable_trades(repo, recent, held=held, watched=watched)
+        return summary
+
+    @app.get("/notable-trades/follows")
+    async def get_notable_trade_follows(request: Request) -> dict:
+        repo = _require_repo(app)
+        user_id = _user_id(request)
+        follows = await repo.list_notable_investor_follows(user_id)
+        investors = await repo.get_notable_investors_by_ids([f.investor_id for f in follows])
+        items = [
+            {
+                "investor_id": str(f.investor_id),
+                "followed_at": f.created_at.isoformat() if f.created_at else None,
+                "investor": {
+                    "id": str(inv.id),
+                    "type": inv.investor_type,
+                    "name": inv.display_name,
+                    "party": inv.party,
+                    "state": inv.state,
+                    "chamber": inv.chamber,
+                    "title": inv.title,
+                    "fund": inv.fund_name,
+                    "company": inv.company_name,
+                },
+            }
+            for f in follows
+            if (inv := investors.get(f.investor_id)) is not None
+        ]
+        return {"items": items}
+
+    @app.post("/notable-trades/follows/{investor_id}")
+    async def follow_notable_investor(investor_id: str, request: Request) -> dict:
+        repo = _require_repo(app)
+        user_id = _user_id(request)
+        user = await repo.get_user(user_id)
+        _require_pro(user, user_id, "Following notable investors is a Pro feature.")
+        try:
+            inv_id = uuid.UUID(investor_id)
+        except ValueError:
+            raise HTTPException(status_code=404, detail="unknown investor")
+        if await repo.get_notable_investor(inv_id) is None:
+            raise HTTPException(status_code=404, detail="unknown investor")
+        await repo.follow_notable_investor(user_id, inv_id)
+        return await get_notable_trade_follows(request)
+
+    @app.delete("/notable-trades/follows/{investor_id}")
+    async def unfollow_notable_investor(investor_id: str, request: Request) -> dict:
+        repo = _require_repo(app)
+        user_id = _user_id(request)
+        try:
+            inv_id = uuid.UUID(investor_id)
+        except ValueError:
+            raise HTTPException(status_code=404, detail="unknown investor")
+        await repo.unfollow_notable_investor(user_id, inv_id)
+        return await get_notable_trade_follows(request)
 
     # ---- Billing (Stripe) ------------------------------------------------
 

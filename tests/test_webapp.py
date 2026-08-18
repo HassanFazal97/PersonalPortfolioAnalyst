@@ -139,6 +139,32 @@ def test_reset_page_has_password_form(client):
     assert "updateUser" in resp.text
 
 
+def test_auth_bridge_forwards_recovery_to_the_app(client):
+    resp = client.get("/app/auth/bridge")
+    assert resp.status_code == 200
+    assert "cirvia://reset" in resp.text
+    # No supabase-js on this page: the shell's client would consume the
+    # recovery hash on load, and the page's whole job is to pass it along.
+    assert "supabase.min.js" not in resp.text
+    assert "createClient" not in resp.text
+    # A web fallback for phones without the app installed.
+    assert "/app/reset" in resp.text
+
+
+def test_auth_bridge_renders_without_supabase_config(monkeypatch):
+    """Unlike the app shells, the bridge carries no Supabase config — the
+    tokens are in the fragment, readable only by its own script — so it must
+    not degrade to the 503 not-configured page."""
+    monkeypatch.setenv("API_TOKEN", "test-token")
+    monkeypatch.setenv("DATABASE_URL", "")
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_ANON_KEY", raising=False)
+    get_settings.cache_clear()
+    with TestClient(create_app()) as c:
+        assert c.get("/app/auth/bridge").status_code == 200
+    get_settings.cache_clear()
+
+
 def test_dashboard_has_delivery_setup_banner(client):
     resp = client.get("/app/dashboard")
     assert 'id="delivery-banner"' in resp.text

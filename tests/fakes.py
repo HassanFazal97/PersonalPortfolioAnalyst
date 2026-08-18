@@ -55,6 +55,18 @@ class FakeRepo:
         self.fundamentals_snapshots: dict[tuple[str, date], dict] = {}
         # Membership intervals (027); rows mutate removed_at, never delete.
         self.universe_membership: list[SimpleNamespace] = []
+        # Notable Investor Trades (034): global directory + trade rows, plus
+        # per-user follows. Keyed like the real tables' unique indexes so
+        # re-upserts against the same key update in place, mirroring the
+        # Postgres ON CONFLICT behavior these fakes stand in for.
+        self._notable_investors: dict[uuid.UUID, SimpleNamespace] = {}
+        self._notable_investor_by_bioguide: dict[str, uuid.UUID] = {}
+        self._notable_trades: dict[uuid.UUID, SimpleNamespace] = {}
+        self._notable_trade_by_doc: dict[tuple[str, str], uuid.UUID] = {}
+        self._notable_trade_seq = 0
+        self._notable_follows: dict[tuple[Any, uuid.UUID], SimpleNamespace] = {}
+        self._notable_sync_state: dict[tuple[str, str], str] = {}
+        self._notable_trade_mentions: set[tuple[Any, uuid.UUID]] = set()
 
     def seed_user(self, user_id, *, plan="free", digest_enabled=True, email=None,
                   digest_tickers=None, stripe_customer_id=None,
@@ -1227,6 +1239,161 @@ class FakeRepo:
             open_rows[ticker].removed_at = as_of
             removed += 1
         return {"added": added, "removed": removed, "open": len(wanted)}
+
+    # ---- notable investor trades (mirrors app/db/repo.py, migration 034) --
+
+    async def upsert_congress_investor(self, investor: Any) -> uuid.UUID:
+        existing_id = self._notable_investor_by_bioguide.get(investor.bioguide_id)
+        if existing_id is not None:
+            row = self._notable_investors[existing_id]
+            row.display_name = investor.display_name
+            row.chamber = investor.chamber
+            row.party = investor.party
+            row.state = investor.state
+            return existing_id
+        new_id = uuid.uuid4()
+        self._notable_investors[new_id] = SimpleNamespace(
+            id=new_id,
+            investor_type="congress",
+            display_name=investor.display_name,
+            slug=investor.slug,
+            chamber=investor.chamber,
+            party=investor.party,
+            state=investor.state,
+            bioguide_id=investor.bioguide_id,
+            title=None,
+            fund_name=None,
+            company_name=None,
+        )
+        self._notable_investor_by_bioguide[investor.bioguide_id] = new_id
+        return new_id
+
+    async def upsert_notable_investor_trade(self, *, investor_id, trade: Any) -> bool:
+        key = (trade.source, trade.source_document_id)
+        if key in self._notable_trade_by_doc:
+            return False
+        new_id = uuid.uuid4()
+        self._notable_trade_seq += 1
+        self._notable_trades[new_id] = SimpleNamespace(
+            id=new_id,
+            investor_id=investor_id,
+            source=trade.source,
+            ticker=trade.ticker,
+            raw_issuer_name=trade.raw_issuer_name,
+            transaction_type=trade.transaction_type,
+            transaction_code=trade.transaction_code,
+            amount_range_min=trade.amount_range_min,
+            amount_range_max=trade.amount_range_max,
+            shares=None,
+            transaction_date=trade.transaction_date,
+            filed_date=trade.filed_date,
+            source_url=trade.source_url,
+            source_document_id=trade.source_document_id,
+            raw_payload=trade.raw_payload,
+            ingested_at=datetime.now(timezone.utc) + timedelta(microseconds=self._notable_trade_seq),
+        )
+        self._notable_trade_by_doc[key] = new_id
+        return True
+
+    async def list_notable_trades(
+        self,
+        *,
+        trader_types=None,
+        ticker=None,
+        side=None,
+        since=None,
+        until=None,
+        investor_id=None,
+        limit=30,
+        cursor=None,
+    ):
+        rows = list(self._notable_trades.values())
+        if trader_types:
+            wanted_investors = {
+                i.id for i in self._notable_investors.values()
+                if i.investor_type in trader_types
+            }
+            rows = [r for r in rows if r.investor_id in wanted_investors]
+        if ticker:
+            rows = [r for r in rows if r.ticker == ticker]
+        if side:
+            rows = [r for r in rows if r.transaction_type == side]
+        if since:
+            rows = [r for r in rows if r.filed_date >= since]
+        if until:
+            rows = [r for r in rows if r.filed_date <= until]
+        if investor_id:
+            rows = [r for r in rows if r.investor_id == investor_id]
+        if cursor:
+            rows = [r for r in rows if r.ingested_at < cursor]
+        rows.sort(key=lambda r: (r.filed_date, r.ingested_at), reverse=True)
+        return rows[:limit]
+
+    async def get_notable_investor(self, investor_id):
+        return self._notable_investors.get(investor_id)
+
+    async def get_notable_investors_by_ids(self, investor_ids):
+        return {
+            i: self._notable_investors[i]
+            for i in investor_ids
+            if i in self._notable_investors
+        }
+
+    async def notable_trade_ticker_summary(self, ticker, *, days=90):
+        cutoff = date.today() - timedelta(days=days)
+        rows = [
+            r for r in self._notable_trades.values()
+            if r.ticker == ticker and r.filed_date >= cutoff
+        ]
+        by_type: dict[str, int] = {}
+        investors: set[uuid.UUID] = set()
+        buys = sells = 0
+        for r in rows:
+            inv = self._notable_investors.get(r.investor_id)
+            if inv is not None:
+                by_type[inv.investor_type] = by_type.get(inv.investor_type, 0) + 1
+            investors.add(r.investor_id)
+            if r.transaction_type == "buy":
+                buys += 1
+            elif r.transaction_type == "sell":
+                sells += 1
+        return {
+            "ticker": ticker,
+            "buys": buys,
+            "sells": sells,
+            "distinct_investors": len(investors),
+            "by_type": by_type,
+        }
+
+    async def list_notable_investor_follows(self, user_id):
+        rows = [row for (uid, _), row in self._notable_follows.items() if uid == user_id]
+        return sorted(rows, key=lambda r: r.created_at, reverse=True)
+
+    async def get_followed_investor_ids(self, user_id):
+        return {iid for (uid, iid) in self._notable_follows if uid == user_id}
+
+    async def follow_notable_investor(self, user_id, investor_id) -> bool:
+        key = (user_id, investor_id)
+        if key in self._notable_follows:
+            return False
+        self._notable_follows[key] = SimpleNamespace(
+            id=uuid.uuid4(), user_id=user_id, investor_id=investor_id,
+            created_at=datetime.now(timezone.utc),
+        )
+        return True
+
+    async def unfollow_notable_investor(self, user_id, investor_id) -> bool:
+        return self._notable_follows.pop((user_id, investor_id), None) is not None
+
+    async def get_sync_watermark(self, source, external_key):
+        return self._notable_sync_state.get((source, external_key))
+
+    async def set_sync_watermark(self, source, external_key, last_seen_at):
+        self._notable_sync_state[(source, external_key)] = last_seen_at
+
+    async def record_notable_trade_mentions(self, user_id, trade_ids):
+        for tid in trade_ids:
+            self._notable_trade_mentions.add((user_id, tid))
 
     # ---- notification channels (mirrors app/db/repo.py) -----------------
 

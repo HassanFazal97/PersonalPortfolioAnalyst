@@ -252,6 +252,37 @@ class Settings(BaseSettings):
     # How many top-ranked names get a full analyst pass, and how many survive
     # to the dashboard.
     picks_top_candidates: int = Field(default=15, alias="PICKS_TOP_CANDIDATES")
+
+    # ---- Notable Investor Trades (Congress / insider / 13F feed; Pro-only) --
+    # Every request to sec.gov/data.sec.gov must carry a descriptive
+    # User-Agent per SEC's fair-access policy, or requests get blocked. Set
+    # this to a real contact address before running in production.
+    sec_edgar_user_agent: str = Field(
+        default="Cirvia/1.0 (contact: ops@cirvia.ca)", alias="SEC_EDGAR_USER_AGENT"
+    )
+    # Unofficial community datasets (no free structured official source for
+    # Congress disclosures exists — the real thing is scanned PDFs). Daily
+    # cadence: "" disables the in-process job — still triggerable manually.
+    senate_stock_watcher_url: str = Field(
+        default="https://senate-stock-watcher-data.s3-us-west-2.amazonaws.com/aggregate/all_transactions.json",
+        alias="SENATE_STOCK_WATCHER_URL",
+    )
+    house_stock_watcher_url: str = Field(
+        default="https://house-stock-watcher-data.s3-us-west-2.amazonaws.com/data/all_transactions.json",
+        alias="HOUSE_STOCK_WATCHER_URL",
+    )
+    congress_trades_sync_cron: str = Field(
+        default="", alias="CONGRESS_TRADES_SYNC_CRON"
+    )
+    # Form 4 filings are due within 2 business days, so this polls on a short
+    # interval during market hours rather than a daily cron. 0 disables.
+    form4_sync_interval_minutes: int = Field(
+        default=0, alias="FORM4_SYNC_INTERVAL_MINUTES"
+    )
+    # 13F is quarterly (45-day-after-quarter-end deadline), but a daily poll of
+    # the submissions feed is cheap even off-season (finds nothing new), so
+    # one cron handles it year-round. "" disables.
+    thirteenf_sync_cron: str = Field(default="", alias="THIRTEENF_SYNC_CRON")
     picks_final_count: int = Field(default=10, alias="PICKS_FINAL_COUNT")
     picks_max_movers: int = Field(default=10, alias="PICKS_MAX_MOVERS")
     # Calendar-day price window synced/loaded per ticker (~288 trading days —

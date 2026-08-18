@@ -41,6 +41,11 @@ from app.db.models import (
     MemoryChunk,
     ModelCall,
     NewsItem,
+    NotableInvestor,
+    NotableInvestorFollow,
+    NotableInvestorSyncState,
+    NotableInvestorTrade,
+    NotableTradeDigestMention,
     NotificationChannel,
     OutboundMessage,
     Position,
@@ -2421,3 +2426,264 @@ class Repo:
                 .order_by(StockPickEntry.run_date.desc(), StockPickEntry.rank)
             )
             return list(result.scalars().all())
+
+    # ---- notable investor trades (Congress / insider / 13F feed) ---------
+
+    async def upsert_congress_investor(self, investor: Any) -> uuid.UUID:
+        """Upsert a NotableInvestor row for a Congress member, keyed by
+        ``bioguide_id`` (the real one if the source provides it, else a
+        deterministic chamber+name slug — see congress_trades/mapper.py).
+        ``investor`` duck-types congress_trades.mapper.MappedInvestor."""
+        now = datetime.now(timezone.utc)
+        values = {
+            "investor_type": "congress",
+            "display_name": investor.display_name,
+            "slug": investor.slug,
+            "chamber": investor.chamber,
+            "party": investor.party,
+            "state": investor.state,
+            "bioguide_id": investor.bioguide_id,
+            "updated_at": now,
+        }
+        stmt = pg_insert(NotableInvestor).values(**values)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[NotableInvestor.bioguide_id],
+            index_where=(NotableInvestor.investor_type == "congress"),
+            set_={
+                "display_name": stmt.excluded.display_name,
+                "chamber": stmt.excluded.chamber,
+                "party": stmt.excluded.party,
+                "state": stmt.excluded.state,
+                "updated_at": now,
+            },
+        ).returning(NotableInvestor.id)
+        async with self._session() as s:
+            result = await s.execute(stmt)
+            await s.commit()
+            return result.scalar_one()
+
+    async def upsert_notable_investor_trade(
+        self, *, investor_id: uuid.UUID, trade: Any
+    ) -> bool:
+        """Upsert a NotableInvestorTrade row keyed by (source,
+        source_document_id). Returns True when the row is newly inserted,
+        False when it already existed (used for sync summary stats).
+        ``trade`` duck-types congress_trades.mapper.MappedTrade (or the
+        future Form 4/13F equivalents, once those sources land)."""
+        values = {
+            "investor_id": investor_id,
+            "source": trade.source,
+            "ticker": trade.ticker,
+            "raw_issuer_name": trade.raw_issuer_name,
+            "transaction_type": trade.transaction_type,
+            "transaction_code": trade.transaction_code,
+            "amount_range_min": trade.amount_range_min,
+            "amount_range_max": trade.amount_range_max,
+            "transaction_date": trade.transaction_date,
+            "filed_date": trade.filed_date,
+            "source_url": trade.source_url,
+            "source_document_id": trade.source_document_id,
+            "raw_payload": trade.raw_payload,
+        }
+        stmt = pg_insert(NotableInvestorTrade).values(**values)
+        stmt = stmt.on_conflict_do_nothing(
+            index_elements=[
+                NotableInvestorTrade.source,
+                NotableInvestorTrade.source_document_id,
+            ],
+            # The unique index is partial (WHERE source_document_id IS NOT
+            # NULL, migration 034) — Postgres requires the ON CONFLICT target
+            # to match the index's predicate exactly, or it can't find a
+            # matching constraint and raises InvalidColumnReferenceError.
+            index_where=NotableInvestorTrade.source_document_id.isnot(None),
+        )
+        async with self._session() as s:
+            result = await s.execute(stmt)
+            await s.commit()
+            return bool(result.rowcount)
+
+    async def list_notable_trades(
+        self,
+        *,
+        trader_types: list[str] | None = None,
+        ticker: str | None = None,
+        side: str | None = None,
+        since: date | None = None,
+        until: date | None = None,
+        investor_id: uuid.UUID | None = None,
+        limit: int = 30,
+        cursor: datetime | None = None,
+    ) -> list[NotableInvestorTrade]:
+        """Global trade feed, newest filed first, keyset-paginated on
+        filed_date/id (cursor = the last row's ingested_at from the previous
+        page) so the API can offer cursor-based pagination without offset
+        drift as new rows land."""
+        async with self._session() as s:
+            q = select(NotableInvestorTrade).order_by(
+                NotableInvestorTrade.filed_date.desc(),
+                NotableInvestorTrade.id.desc(),
+            )
+            if trader_types:
+                q = q.join(NotableInvestor).where(
+                    NotableInvestor.investor_type.in_(trader_types)
+                )
+            if ticker:
+                q = q.where(NotableInvestorTrade.ticker == ticker)
+            if side:
+                q = q.where(NotableInvestorTrade.transaction_type == side)
+            if since:
+                q = q.where(NotableInvestorTrade.filed_date >= since)
+            if until:
+                q = q.where(NotableInvestorTrade.filed_date <= until)
+            if investor_id:
+                q = q.where(NotableInvestorTrade.investor_id == investor_id)
+            if cursor:
+                q = q.where(NotableInvestorTrade.ingested_at < cursor)
+            result = await s.execute(q.limit(limit))
+            return list(result.scalars().all())
+
+    async def get_notable_investor(self, investor_id: uuid.UUID) -> NotableInvestor | None:
+        async with self._session() as s:
+            return await s.get(NotableInvestor, investor_id)
+
+    async def get_notable_investors_by_ids(
+        self, investor_ids: list[uuid.UUID]
+    ) -> dict[uuid.UUID, NotableInvestor]:
+        if not investor_ids:
+            return {}
+        async with self._session() as s:
+            result = await s.execute(
+                select(NotableInvestor).where(NotableInvestor.id.in_(investor_ids))
+            )
+            return {row.id: row for row in result.scalars().all()}
+
+    async def notable_trade_ticker_summary(self, ticker: str, *, days: int = 90) -> dict[str, Any]:
+        """Aggregate buy/sell/investor counts for one ticker over the trailing
+        window, broken out by trader type — powers the stock-page "who's
+        trading this" card and the /notable-trades?ticker= view."""
+        since = date.today() - timedelta(days=days)
+        async with self._session() as s:
+            result = await s.execute(
+                select(
+                    NotableInvestor.investor_type,
+                    NotableInvestorTrade.transaction_type,
+                    NotableInvestorTrade.investor_id,
+                )
+                .join(NotableInvestor, NotableInvestor.id == NotableInvestorTrade.investor_id)
+                .where(
+                    NotableInvestorTrade.ticker == ticker,
+                    NotableInvestorTrade.filed_date >= since,
+                )
+            )
+            rows = result.all()
+        by_type: dict[str, int] = {}
+        investors: set[uuid.UUID] = set()
+        buys = sells = 0
+        for investor_type, transaction_type, investor_id in rows:
+            by_type[investor_type] = by_type.get(investor_type, 0) + 1
+            investors.add(investor_id)
+            if transaction_type == "buy":
+                buys += 1
+            elif transaction_type == "sell":
+                sells += 1
+        return {
+            "ticker": ticker,
+            "buys": buys,
+            "sells": sells,
+            "distinct_investors": len(investors),
+            "by_type": by_type,
+        }
+
+    async def list_notable_investor_follows(
+        self, user_id: uuid.UUID
+    ) -> list[NotableInvestorFollow]:
+        async with self._session() as s:
+            result = await s.execute(
+                select(NotableInvestorFollow)
+                .where(NotableInvestorFollow.user_id == user_id)
+                .order_by(NotableInvestorFollow.created_at.desc())
+            )
+            return list(result.scalars().all())
+
+    async def get_followed_investor_ids(self, user_id: uuid.UUID) -> set[uuid.UUID]:
+        async with self._session() as s:
+            result = await s.execute(
+                select(NotableInvestorFollow.investor_id).where(
+                    NotableInvestorFollow.user_id == user_id
+                )
+            )
+            return set(result.scalars().all())
+
+    async def follow_notable_investor(
+        self, user_id: uuid.UUID, investor_id: uuid.UUID
+    ) -> bool:
+        """Idempotent insert; False when already followed."""
+        async with self._session() as s:
+            result = await s.execute(
+                pg_insert(NotableInvestorFollow)
+                .values(user_id=user_id, investor_id=investor_id)
+                .on_conflict_do_nothing(index_elements=["user_id", "investor_id"])
+            )
+            await s.commit()
+            return bool(result.rowcount)
+
+    async def unfollow_notable_investor(
+        self, user_id: uuid.UUID, investor_id: uuid.UUID
+    ) -> bool:
+        async with self._session() as s:
+            result = await s.execute(
+                delete(NotableInvestorFollow).where(
+                    NotableInvestorFollow.user_id == user_id,
+                    NotableInvestorFollow.investor_id == investor_id,
+                )
+            )
+            await s.commit()
+            return bool(result.rowcount)
+
+    async def get_sync_watermark(self, source: str, external_key: str) -> str | None:
+        async with self._session() as s:
+            row = await s.get(NotableInvestorSyncState, (source, external_key))
+            return row.last_seen_at if row else None
+
+    async def set_sync_watermark(
+        self, source: str, external_key: str, last_seen_at: str
+    ) -> None:
+        now = datetime.now(timezone.utc)
+        async with self._session() as s:
+            stmt = pg_insert(NotableInvestorSyncState).values(
+                source=source,
+                external_key=external_key,
+                last_seen_at=last_seen_at,
+                updated_at=now,
+            )
+            stmt = stmt.on_conflict_do_update(
+                index_elements=[
+                    NotableInvestorSyncState.source,
+                    NotableInvestorSyncState.external_key,
+                ],
+                set_={"last_seen_at": last_seen_at, "updated_at": now},
+            )
+            await s.execute(stmt)
+            await s.commit()
+
+    async def record_notable_trade_mentions(
+        self, user_id: uuid.UUID, trade_ids: list[uuid.UUID]
+    ) -> None:
+        """Mark trades as already surfaced in a digest for this user so a
+        later digest never re-mentions them (composite-PK insert-once, same
+        idiom as funnel_events)."""
+        if not trade_ids:
+            return
+        today = date.today()
+        async with self._session() as s:
+            stmt = pg_insert(NotableTradeDigestMention).values(
+                [
+                    {"user_id": user_id, "trade_id": tid, "surfaced_on": today}
+                    for tid in trade_ids
+                ]
+            )
+            stmt = stmt.on_conflict_do_nothing(
+                index_elements=["user_id", "trade_id"]
+            )
+            await s.execute(stmt)
+            await s.commit()

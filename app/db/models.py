@@ -721,6 +721,172 @@ class DeletedAuthId(Base):
     )
 
 
+class NotableInvestor(Base):
+    """Directory of trackable people/funds for the Notable Investor Trades
+    feature (migration 034) — global, not tenant data. An insider is scoped
+    per-issuer (sec_cik + company_cik) rather than per-person, since Form 4
+    reporting relationships are issuer-scoped; a cross-company person view
+    can be built at read time by grouping on sec_cik if ever needed."""
+
+    __tablename__ = "notable_investors"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    # congress | insider | institution
+    investor_type: Mapped[str] = mapped_column(Text, nullable=False)
+    display_name: Mapped[str] = mapped_column(Text, nullable=False)
+    slug: Mapped[str] = mapped_column(Text, nullable=False)
+    chamber: Mapped[str | None] = mapped_column(Text)
+    party: Mapped[str | None] = mapped_column(Text)
+    state: Mapped[str | None] = mapped_column(Text)
+    bioguide_id: Mapped[str | None] = mapped_column(Text)
+    company_name: Mapped[str | None] = mapped_column(Text)
+    company_cik: Mapped[str | None] = mapped_column(Text)
+    title: Mapped[str | None] = mapped_column(Text)
+    fund_name: Mapped[str | None] = mapped_column(Text)
+    manager_cik: Mapped[str | None] = mapped_column(Text)
+    sec_cik: Mapped[str | None] = mapped_column(Text)
+    metadata_: Mapped[dict] = mapped_column(
+        "metadata", JSONB, nullable=False, server_default=text("'{}'")
+    )
+    created_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    __table_args__ = (
+        CheckConstraint(
+            "investor_type IN ('congress','insider','institution')",
+            name="notable_investors_type_check",
+        ),
+    )
+
+
+class NotableInvestorTrade(Base):
+    """One disclosed transaction/holding-line from Congress, an insider's
+    Form 4, or a fund's 13F (migration 034) — global, not tenant data.
+    ``raw_payload`` keeps the full original record so a mapping bug can be
+    fixed and replayed without re-fetching from the network. ``ticker`` is
+    nullable: a filing that fails ticker/CUSIP resolution is still stored,
+    never dropped, and can be re-resolved later as the ticker cache grows."""
+
+    __tablename__ = "notable_investor_trades"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    investor_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("notable_investors.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    # senate_stock_watcher | house_stock_watcher | sec_form4 | sec_13f
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    ticker: Mapped[str | None] = mapped_column(Text)
+    raw_issuer_name: Mapped[str | None] = mapped_column(Text)
+    cusip: Mapped[str | None] = mapped_column(Text)
+    issuer_cik: Mapped[str | None] = mapped_column(Text)
+    # buy | sell | exchange | other
+    transaction_type: Mapped[str] = mapped_column(Text, nullable=False)
+    transaction_code: Mapped[str | None] = mapped_column(Text)
+    amount_range_min: Mapped[Decimal | None] = mapped_column(Numeric)
+    amount_range_max: Mapped[Decimal | None] = mapped_column(Numeric)
+    shares: Mapped[Decimal | None] = mapped_column(Numeric)
+    price_per_share: Mapped[Decimal | None] = mapped_column(Numeric)
+    value_usd: Mapped[Decimal | None] = mapped_column(Numeric)
+    transaction_date: Mapped[date | None] = mapped_column(Date)
+    filed_date: Mapped[date] = mapped_column(Date, nullable=False)
+    quarter_end_date: Mapped[date | None] = mapped_column(Date)
+    source_url: Mapped[str | None] = mapped_column(Text)
+    source_document_id: Mapped[str | None] = mapped_column(Text)
+    raw_payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    ingested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    __table_args__ = (
+        CheckConstraint(
+            "transaction_type IN ('buy','sell','exchange','other')",
+            name="notable_investor_trades_type_check",
+        ),
+    )
+
+
+class NotableInvestorSyncState(Base):
+    """Per-(source, external key) incremental sync watermark (migration 034)
+    so Form 4 / 13F polling parses only new accessions each run instead of
+    re-crawling a filer's full filing history."""
+
+    __tablename__ = "notable_investor_sync_state"
+
+    source: Mapped[str] = mapped_column(Text, primary_key=True)
+    external_key: Mapped[str] = mapped_column(Text, primary_key=True)
+    last_seen_at: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class SecCompanyTicker(Base):
+    """Cache of SEC's company_tickers.json (migration 034), refreshed weekly,
+    backing the notable-trades ticker/CIK resolver with a DB lookup instead
+    of a live HTTP call per filing."""
+
+    __tablename__ = "sec_company_tickers"
+
+    cik: Mapped[str] = mapped_column(Text, primary_key=True)
+    ticker: Mapped[str] = mapped_column(Text, nullable=False)
+    title: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class NotableInvestorFollow(Base):
+    """A notable investor (Congress member/insider/fund) the user opted to
+    follow (migration 034) — mirrors WatchlistItem's shape exactly."""
+
+    __tablename__ = "notable_investor_follows"
+    __table_args__ = (UniqueConstraint("user_id", "investor_id"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    user_id: Mapped[uuid.UUID] = _user_id_column()
+    investor_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("notable_investors.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    created_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class NotableTradeDigestMention(Base):
+    """Once-per-(user, trade) digest mention marker (migration 034), same
+    composite-PK idiom as FunnelEvent: a trade is a discrete historical event
+    that should never be re-surfaced in a later digest once mentioned."""
+
+    __tablename__ = "notable_trade_digest_mentions"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    trade_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("notable_investor_trades.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    surfaced_on: Mapped[date] = mapped_column(Date, nullable=False)
+
+
 class SchemaMigration(Base):
     """Tracks which numbered migration files have been applied."""
 
