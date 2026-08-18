@@ -51,6 +51,7 @@ function SplashGate() {
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="index" />
       <Stack.Screen name="(auth)" />
+      <Stack.Screen name="reset" />
       <Stack.Screen name="(tabs)" />
       <Stack.Screen name="(onboarding)" />
       <Stack.Screen name="chat" options={{ presentation: 'modal' }} />

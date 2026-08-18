@@ -158,8 +158,13 @@ on a user with no portfolio is how an install base ends up permanently muted.
 
 M8 is partly in: universal links / App Links (served from
 `/.well-known/*` and templated from config), the iOS privacy manifest and
-associated domains, offline states, the a11y sweep, and the review-account
-seeder (`scripts/seed_review_account.py`).
+associated domains, offline states, the a11y sweep, the review-account
+seeder (`scripts/seed_review_account.py`), and the password-reset flow
+(reset emails redirect to `/app/auth/bridge`, which bounces the recovery
+tokens to `cirvia://reset`; `app/+native-intent.tsx` also catches the
+Android App-Link arrival and both land on `app/reset.tsx`). Store-listing
+copy, the Data Safety form, and the screenshot plan are drafted in
+`docs/STORE_LISTINGS.md`.
 
 Not started: the M10 post-onboarding product tour (post-launch scope — see
 `docs/MOBILE_APP_PLAN.md`). The web app shipped its tour; the completion flag

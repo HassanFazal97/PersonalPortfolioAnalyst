@@ -48,7 +48,13 @@ def test_aasa_scopes_to_app_and_stocks_only(monkeypatch):
 
     detail = client.get(AASA).json()["applinks"]["details"][0]
 
-    assert detail["paths"] == ["/app/*", "/stocks/*", "NOT /app/reset"]
+    # NOT entries first: legacy `paths` matching is first-match-wins too.
+    assert detail["paths"] == [
+        "NOT /app/reset",
+        "NOT /app/auth/*",
+        "/app/*",
+        "/stocks/*",
+    ]
     covered = {c.get("/") for c in detail["components"]}
     assert "/app/*" in covered and "/stocks/*" in covered
     # Nothing claims the root, /pricing, or /track-record.
@@ -60,18 +66,21 @@ def test_aasa_scopes_to_app_and_stocks_only(monkeypatch):
 
 
 def test_aasa_excludes_the_password_reset_bridge(monkeypatch):
-    """Supabase recovery lands on /app/reset with the token in the URL
-    fragment. Fragments never reach the server, so that page has to run its
-    client-side bridge in the browser rather than being swallowed by the app."""
+    """Supabase recovery lands on /app/reset (web) or /app/auth/bridge
+    (mobile) with the token in the URL fragment. Fragments never reach the
+    server, so those pages have to run their client-side bridges in the
+    browser rather than being swallowed by the app."""
     client = _client(monkeypatch, IOS_TEAM_ID="ABCDE12345")
 
     detail = client.get(AASA).json()["applinks"]["details"][0]
-    excluded = [c for c in detail["components"] if c.get("exclude")]
+    excluded = {c["/"] for c in detail["components"] if c.get("exclude")}
 
-    assert excluded and excluded[0]["/"].startswith("/app/reset")
-    # And the exclusion must precede the broad /app/* rule, or it never applies.
+    assert "/app/reset*" in excluded
+    assert "/app/auth/*" in excluded
+    # And the exclusions must precede the broad /app/* rule, or they never apply.
     order = [c.get("/") for c in detail["components"]]
     assert order.index("/app/reset*") < order.index("/app/*")
+    assert order.index("/app/auth/*") < order.index("/app/*")
 
 
 def test_aasa_404s_when_no_team_id_is_configured(monkeypatch):

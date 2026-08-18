@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useMemo, useState, type ReactNode
 import { setSignOutHandler } from '@/api/client';
 import { clearAllCaches } from '@/api/storage';
 import { startSessionAutoRefresh, supabase } from '@/auth/supabase';
+import { API_BASE } from '@/config';
 import { disablePush } from '@/push/register';
 
 type SessionState = {
@@ -77,8 +78,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         if (error) throw error;
       },
       sendPasswordReset: async (email) => {
+        // Not the scheme directly: email clients won't reliably follow a
+        // redirect to cirvia://, and the recovery tokens ride in the URL
+        // fragment. The web bridge reads the fragment and hands off to
+        // cirvia://reset (see /app/auth/bridge in app/webapp.py). Must be
+        // in the Supabase Auth redirect allowlist.
         const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-          redirectTo: 'cirvia://reset',
+          redirectTo: `${API_BASE}/app/auth/bridge`,
         });
         if (error) throw error;
       },

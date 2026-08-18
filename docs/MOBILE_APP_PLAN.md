@@ -209,7 +209,9 @@ in v1: one code path.
 
 ## Client scope
 
-Route tree under `mobile/app/`: `(auth)/sign-in`, `(auth)/reset`, a 7-step `(onboarding)/` flow,
+Route tree under `mobile/app/`: `(auth)/sign-in`, a top-level `reset` (outside the
+`(auth)` group: claiming recovery tokens creates a session, and the group's layout
+redirects any session to the tabs), a 7-step `(onboarding)/` flow,
 `(tabs)/` with Digest | News | Holdings | Watching | Deep Dive, a `chat` modal, `stock/[ticker]`,
 `picks`, `dives/[id]`, and `settings/{account,brokerage,delivery,profile,plan,danger}`.
 
@@ -387,6 +389,14 @@ redirects to the app scheme. Plan for a small bearer-exempt `/app/auth/bridge` p
 server-side redirect. (If the client uses PKCE, the callback carries `?code=` as a query param
 instead, which a route *can* see — but still bounce it to the app rather than exchanging it
 server-side.)
+
+**Implemented (Aug 2026):** `/app/auth/bridge` in `app/webapp.py` (standalone HTML — the shared
+shell's supabase-js client would consume the recovery hash), `mobile/app/reset.tsx`, and
+`mobile/app/+native-intent.tsx`, which normalises both arrival shapes (iOS via the bridge's
+`cirvia://reset?…` hand-off; Android App Links deliver `/app/auth/bridge#…` straight to the app)
+to `/reset` with the tokens as query params. The AASA file excludes `/app/auth/*`. **Ops:** add
+`https://cirvia.ca/app/auth/bridge` and `https://www.cirvia.ca/app/auth/bridge` to the Supabase
+Auth redirect allowlist, or reset emails fall back to the site URL.
 
 ### Two additions worth adopting
 
