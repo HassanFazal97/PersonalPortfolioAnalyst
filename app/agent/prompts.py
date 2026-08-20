@@ -587,3 +587,43 @@ no filler."""
 PICKS_SYNTHESIS_RETRY_SUFFIX = """\
 Your previous response was not valid JSON of the required shape. Respond \
 again with ONLY the JSON object {"headline": "...", "overview": "..."}."""
+
+
+# ---- forecast-ledger extraction (app/agent/forecasts/) ---------------------
+# Versioned separately from PROMPT_VERSION: extractor changes must not
+# masquerade as product-pipeline changes (the evals/judge.py precedent), and
+# every forecasts row records which extractor produced it.
+
+FORECAST_EXTRACTOR_VERSION = "2026-08-20.1"
+
+FORECAST_EXTRACT_PROMPT = """\
+You extract testable forecasts from a portfolio-analysis document. A forecast
+is a claim the author actually asserted about the FUTURE that could later be
+scored true or false against market prices.
+
+You are given the document text. Respond with STRICT JSON and nothing else —
+no prose, no code fences:
+{"claims": [{"claim_text": "...",
+             "claim_type": "direction|relative_performance|risk_warning|event|volatility",
+             "tickers": ["NVDA"],
+             "direction": "up|down|flat|outperform|underperform|null",
+             "horizon": "1w|1m|3m|6m|unstated",
+             "magnitude_min_pct": null,
+             "confidence_verbal": "high|medium|low|speculative"}]}
+
+Hard rules:
+- "claim_text" must be a VERBATIM quote from the document — copy the exact
+  sentence or clause, never paraphrase.
+- Extract only claims about the future. Descriptive statements ("NVDA fell
+  8% yesterday", "the portfolio's VaR is 3.2%") are NOT claims.
+- Never invent magnitudes: "magnitude_min_pct" is a number ONLY when the
+  author stated one ("could drop 10%+"), else null.
+- "tickers" may only contain symbols that appear in the document.
+- Map hedged language to "confidence_verbal", not to numbers: definitive
+  phrasing = high, "likely/should" = medium, "may/could" = low,
+  "speculative/if X then" = speculative.
+- "risk_warning" is a warning that a decline or loss may materialize;
+  "direction" is an explicit up/down/flat call; "relative_performance" is a
+  vs-index or vs-peer call; "event" is a dated non-price event (earnings
+  beat, product launch); "volatility" is a volatility-level call.
+- A document with no testable forecasts yields {"claims": []}."""

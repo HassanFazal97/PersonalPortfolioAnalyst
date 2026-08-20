@@ -32,6 +32,7 @@ from app.config import get_settings  # noqa: E402
 from app.tools.registry import CHAT_TOOLS, ToolContext  # noqa: E402
 from evals.classifier_eval import run_classifier_eval  # noqa: E402
 from evals.fake_tools import build_fake_dispatch  # noqa: E402
+from evals.forecast_extraction_eval import run_forecast_extraction_eval  # noqa: E402
 from evals.judge import JUDGE_PROMPT_VERSION, run_judge  # noqa: E402
 from evals.report import (  # noqa: E402
     EXIT_INFRA,
@@ -142,7 +143,9 @@ async def run_chat_suite(
 
 async def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--suite", choices=["chat", "classifier", "all"], default="all")
+    parser.add_argument(
+        "--suite", choices=["chat", "classifier", "forecasts", "all"], default="all"
+    )
     parser.add_argument("--case", default=None, help="run a single chat case id")
     parser.add_argument("--parallel", type=int, default=4)
     parser.add_argument("--max-cost", type=float, default=5.00)
@@ -160,6 +163,7 @@ async def main() -> int:
 
     chat_results: list[CaseResult] = []
     classifier: dict | None = None
+    forecasts: dict | None = None
 
     if args.suite in ("chat", "all"):
         cases = load_cases()
@@ -178,6 +182,16 @@ async def main() -> int:
         print(f"classifier suite (model {settings.classifier_model})")
         classifier = await run_classifier_eval(client, settings.classifier_model, cost)
         print(f"  accuracy {classifier['accuracy']:.2%} on {classifier['total']} headlines")
+
+    if args.suite in ("forecasts", "all"):
+        print(f"forecast extraction suite (model {settings.classifier_model})")
+        forecasts = await run_forecast_extraction_eval(
+            client, settings.classifier_model, cost
+        )
+        print(
+            f"  precision {forecasts['precision']:.2%} / "
+            f"recall {forecasts['recall']:.2%} on {forecasts['cases']} cases"
+        )
 
     # ---- regression gate --------------------------------------------------
     baseline = load_baseline("chat")
@@ -209,6 +223,7 @@ async def main() -> int:
         judge_model=judge_model,
         chat_results=chat_results,
         classifier=classifier,
+        forecasts=forecasts,
         total_cost_usd=cost.cost_usd,
         baseline=baseline,
         regressed=regressed,
@@ -232,7 +247,11 @@ async def main() -> int:
     )
     if infra:
         return EXIT_INFRA
-    if regressed or (classifier and not classifier["passed"]):
+    if (
+        regressed
+        or (classifier and not classifier["passed"])
+        or (forecasts and not forecasts["passed"])
+    ):
         return EXIT_REGRESSION
     return EXIT_OK
 

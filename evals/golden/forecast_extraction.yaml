@@ -1,0 +1,119 @@
+# Golden cases for the forecast extractor (evals/forecast_extraction_eval.py).
+#
+# "expected" claims are hand-labeled: claim_text must be the verbatim quote
+# the extractor should return, claim_type/direction the labels it should
+# assign. Cases with expected: [] are adversarial — descriptive, historical,
+# or hedged-past text where extracting ANY claim is an error.
+cases:
+  - id: digest_direction_call
+    text: |
+      Good morning. NVDA reports earnings Thursday and options markets are
+      pricing a large move. Given the inventory correction in data-center
+      GPUs, NVDA could drop 10%+ if guidance disappoints. Your position is
+      currently 18% of the portfolio.
+    expected:
+      - claim_text: "NVDA could drop 10%+ if guidance disappoints"
+        claim_type: direction
+        direction: down
+
+  - id: digest_relative_call
+    text: |
+      Canadian banks look washed out after the quarter. We expect RY to
+      outperform the S&P 500 over the next quarter as credit provisions
+      normalize. RY closed at $148.22 yesterday, up 1.1%.
+    expected:
+      - claim_text: "We expect RY to outperform the S&P 500 over the next quarter as credit provisions normalize"
+        claim_type: relative_performance
+        direction: outperform
+
+  - id: digest_descriptive_only
+    text: |
+      Your portfolio gained 2.3% this week while the S&P 500 rose 1.1%.
+      SHOP.TO was the top contributor, adding 0.9 points. Portfolio VaR
+      stands at 3.2% and your largest position is XEQT at 31%.
+    expected: []
+
+  - id: digest_past_performance
+    text: |
+      Last month we flagged concentration risk in your semiconductor names;
+      since then AMD has fallen 12% and the hedge saved you about $400.
+      The screen's April picks beat the index by 3 points.
+    expected: []
+
+  - id: dive_risk_warning
+    text: |
+      NVDA is 31% of your total risk contribution despite being 18% of book
+      value. A sector rotation out of AI infrastructure could produce a
+      portfolio drawdown of 12% or more over the coming quarter. Trimming
+      would reduce CVaR by 90bps.
+    expected:
+      - claim_text: "A sector rotation out of AI infrastructure could produce a portfolio drawdown of 12% or more over the coming quarter"
+        claim_type: risk_warning
+
+  - id: dive_mixed_claims
+    text: |
+      Fundamentals: TD trades at 10.2x forward earnings versus a 12.5x
+      five-year average. We believe TD should re-rate higher over the next
+      six months as the anti-money-laundering overhang clears. Technicals:
+      the stock reclaimed its 200-day average on strong volume.
+    expected:
+      - claim_text: "We believe TD should re-rate higher over the next six months as the anti-money-laundering overhang clears"
+        claim_type: direction
+        direction: up
+
+  - id: macro_alert_warning
+    text: |
+      New tariff escalation announced on semiconductor imports. Names with
+      China-exposed supply chains may see meaningful downside over the next
+      month; NVDA and AMD are your affected holdings.
+    expected:
+      - claim_text: "Names with China-exposed supply chains may see meaningful downside over the next month"
+        claim_type: risk_warning
+
+  - id: hedged_non_claim
+    text: |
+      It is impossible to say where rates go from here. Some strategists
+      think the Bank of Canada may cut, others expect a hold. We take no
+      view on the September decision and your bond ladder is positioned
+      for either outcome.
+    expected: []
+
+  - id: volatility_call
+    text: |
+      With earnings season starting and positioning stretched, realized
+      volatility is likely to rise sharply over the coming month. Your
+      options-free portfolio has no direct vega exposure.
+    expected:
+      - claim_text: "realized volatility is likely to rise sharply over the coming month"
+        claim_type: volatility
+
+  - id: event_claim
+    text: |
+      SHOP.TO reports on May 6. We expect Shopify to beat consensus revenue
+      estimates this quarter on the strength of holiday GMV already visible
+      in third-party card data.
+    expected:
+      - claim_text: "We expect Shopify to beat consensus revenue estimates this quarter on the strength of holiday GMV already visible in third-party card data"
+        claim_type: event
+
+  - id: multiple_claims_one_doc
+    text: |
+      Two things stand out today. First, ENB should outperform the index
+      over the next quarter as pipeline volumes recover. Second, your cash
+      drag is growing — GIC rates have fallen below 4%. Separately, CNR
+      may drift lower this month while the rail labour dispute is
+      unresolved.
+    expected:
+      - claim_text: "ENB should outperform the index over the next quarter as pipeline volumes recover"
+        claim_type: relative_performance
+        direction: outperform
+      - claim_text: "CNR may drift lower this month while the rail labour dispute is unresolved"
+        claim_type: direction
+        direction: down
+
+  - id: numbers_without_forecast
+    text: |
+      Rebalancing summary: sold 12 shares of AAPL at $228.10, bought 40
+      shares of XIC at $37.85. Cash balance is now $2,140. Next scheduled
+      contribution lands on the 15th.
+    expected: []

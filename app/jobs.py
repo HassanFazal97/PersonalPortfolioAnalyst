@@ -125,7 +125,11 @@ def job_health(
     now = now or datetime.now(timezone.utc)
 
     specs: dict[str, dict[str, Any]] = {
-        "morning_digest": {"kind": "cron", "cron": settings.digest_cron, "enabled": True},
+        "morning_digest": {
+            "kind": "cron",
+            "cron": settings.digest_cron,
+            "enabled": bool(settings.digest_cron),
+        },
         "macro_scan": {
             "kind": "interval",
             "interval_s": settings.macro_scan_interval_minutes * 60,
@@ -165,6 +169,36 @@ def job_health(
             "kind": "cron",
             "cron": settings.picks_cron,
             "enabled": bool(settings.picks_cron),
+        },
+        "forecast_ledger": {
+            "kind": "cron",
+            "cron": settings.forecast_ledger_cron,
+            "enabled": bool(settings.forecast_ledger_cron),
+        },
+        "form4_sync": {
+            "kind": "interval",
+            "interval_s": settings.form4_sync_interval_minutes * 60,
+            "enabled": settings.form4_sync_interval_minutes > 0,
+        },
+        "thirteenf_sync": {
+            "kind": "cron",
+            "cron": settings.thirteenf_sync_cron,
+            "enabled": bool(settings.thirteenf_sync_cron),
+        },
+        "congress_trades_sync": {
+            "kind": "cron",
+            "cron": settings.congress_trades_sync_cron,
+            "enabled": bool(settings.congress_trades_sync_cron),
+        },
+        "valuation_refresh": {
+            "kind": "cron",
+            "cron": settings.valuation_refresh_cron,
+            "enabled": bool(settings.valuation_refresh_cron),
+        },
+        "trial_notices": {
+            "kind": "cron",
+            "cron": settings.trial_notices_cron,
+            "enabled": bool(settings.trial_notices_cron),
         },
     }
 

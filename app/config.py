@@ -244,6 +244,11 @@ class Settings(BaseSettings):
     # cost-bearing jobs, even though this one costs $0 — no point computing
     # verdicts nobody can see yet.
     valuation_refresh_cron: str = Field(default="", alias="VALUATION_REFRESH_CRON")
+    # Forecast ledger (app/agent/forecasts/): nightly extraction of scoreable
+    # claims from pipeline outputs + resolution of elapsed horizons. Must run
+    # after DAILY_PRICES_CRON so the day's bars exist (recommend
+    # "10 19 * * 1-5"). "" disables (the default, like other cron jobs).
+    forecast_ledger_cron: str = Field(default="", alias="FORECAST_LEDGER_CRON")
     # Hard USD cap for one picks run (analysts + movers + critic + synthesis).
     # Typical runs land near $2; analysts stop being admitted at 80% of this.
     picks_max_cost_usd: float = Field(default=5.00, alias="PICKS_MAX_COST_USD")
@@ -283,6 +288,24 @@ class Settings(BaseSettings):
     # the submissions feed is cheap even off-season (finds nothing new), so
     # one cron handles it year-round. "" disables.
     thirteenf_sync_cron: str = Field(default="", alias="THIRTEENF_SYNC_CRON")
+    # Form 4 issuer scope cap: distinct held+watched US tickers, resolved to
+    # CIKs via the cached SEC map. Each issuer costs ~1 request per poll.
+    form4_max_issuers: int = Field(default=50, alias="FORM4_MAX_ISSUERS")
+    # 13F manager roster (comma-separated filer CIKs). Defaults to a small
+    # set of widely-followed funds: Berkshire Hathaway, Scion, Pershing
+    # Square, Renaissance Technologies, Bridgewater, Third Point, Baupost,
+    # Tiger Global. A wrong/renamed CIK fails soft (logged, skipped) — verify
+    # against EDGAR full-text search when editing.
+    thirteenf_manager_ciks: str = Field(
+        default=(
+            "0001067983,0001649339,0001336528,0001037389,"
+            "0001350694,0001040273,0001061768,0001167483"
+        ),
+        alias="THIRTEENF_MANAGER_CIKS",
+    )
+    # Holdings kept per 13F filing (top by reported value) — whale funds file
+    # thousands of rows; the feed's story is their biggest bets.
+    thirteenf_max_holdings: int = Field(default=100, alias="THIRTEENF_MAX_HOLDINGS")
     picks_final_count: int = Field(default=10, alias="PICKS_FINAL_COUNT")
     picks_max_movers: int = Field(default=10, alias="PICKS_MAX_MOVERS")
     # Calendar-day price window synced/loaded per ticker (~288 trading days —

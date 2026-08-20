@@ -104,6 +104,17 @@ The analytical core is already unusually rigorous for a retail product — Ledoi
 
 ## Phase 4 — Continuous from ~month 3: LLM layer + guardrails
 
+*Cross-reference (Aug 20, 2026): the **forecast ledger** shipped alongside this
+roadmap — migration 035, `app/agent/forecasts/`, `app/quant/forecastscore.py`,
+nightly `FORECAST_LEDGER_CRON`, owner-only `GET /forecasts/calibration`. It
+extracts every scoreable claim (digests, deep dives, picks mirror, macro/
+anomaly alerts) into structured forecasts, resolves them against stored
+prices, and accumulates (context, reasoning trace, forecast, outcome) tuples.
+It scores the analyst's* **claims**, *never predicts returns — no conflict
+with the "ML return prediction" deprioritization. Public exposure waits for
+the ≥30 resolved-families gate per bucket; the eval expansion below gains a
+`forecasts` suite (extraction precision/recall) in `evals/`.*
+
 1. **Quant-fluent chat** (M) — wire the new tools (what-if, health score, factor exposures, regime, tax location) into the agent registry; upgrade prompting so the agent plans multi-tool counterfactual answers; selective extended thinking on complex-analysis intents. The gap isn't model quality — it's that the agent can't yet run the counterfactual, which is what an analyst does.
 2. **Proactive insight cards** (M) — weekly deterministic scanner (Python decides what's noteworthy: health deltas, factor drift, regime change, dividend downgrades, tax drag, cohort milestones), Haiku narrates — the proven `app/agent/anomaly/` pattern; dedupe via memory embeddings. An analyst who only answers when asked isn't an analyst. This is the retention engine.
 3. **Eval expansion** (M, continuous) — golden cases per new tool with a numeric-consistency checker (every number in the answer must appear in a tool result within rounding); picks-narrative eval with adversarial fixtures (contradictory metrics → model must declare gaps); "correct answer is 'it depends'" cases judged for calibrated hedging. The trust story dies on one screenshot of the agent misquoting its own VaR.

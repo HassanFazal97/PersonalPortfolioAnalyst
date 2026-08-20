@@ -35,6 +35,7 @@ from app.db.models import (
     DeepDiveReport,
     DeletedAuthId,
     Digest,
+    Forecast,
     FundamentalsSnapshot,
     FunnelEvent,
     JobHeartbeat,
@@ -50,6 +51,7 @@ from app.db.models import (
     OutboundMessage,
     Position,
     PushDevice,
+    SecCompanyTicker,
     SnaptradeCredentials,
     StockPickEntry,
     StockPicksRun,
@@ -2427,6 +2429,119 @@ class Repo:
             )
             return list(result.scalars().all())
 
+    # ---- forecast ledger (migration 035) ----------------------------------
+
+    async def insert_forecasts_if_new(self, rows: list[dict[str, Any]]) -> int:
+        """Insert extracted forecast rows; duplicates (same ``claim_key``) are
+        skipped, so re-running extraction over the same source window is a
+        no-op. Returns rows actually inserted."""
+        if not rows:
+            return 0
+        async with self._session() as s:
+            result = await s.execute(
+                pg_insert(Forecast)
+                .values(rows)
+                .on_conflict_do_nothing(index_elements=[Forecast.claim_key])
+                .returning(Forecast.id)
+            )
+            inserted = len(result.scalars().all())
+            await s.commit()
+            return inserted
+
+    async def list_due_forecasts(
+        self, as_of: date, *, limit: int = 2000
+    ) -> list[Forecast]:
+        """Open rows whose horizon has elapsed (the resolver sweep — served
+        by the partial index on ``due_date WHERE status='open'``)."""
+        async with self._session() as s:
+            result = await s.execute(
+                select(Forecast)
+                .where(Forecast.status == "open", Forecast.due_date <= as_of)
+                .order_by(Forecast.due_date)
+                .limit(limit)
+            )
+            return list(result.scalars().all())
+
+    async def resolve_forecast(
+        self, forecast_id: uuid.UUID, **fields: Any
+    ) -> None:
+        """Write resolution fields onto one row (status/outcome/realized_value/
+        benchmark_value/brier/resolution_detail/resolver_version)."""
+        async with self._session() as s:
+            row = await s.get(Forecast, forecast_id)
+            if row is None:
+                return
+            for key, value in fields.items():
+                setattr(row, key, value)
+            row.resolved_at = datetime.now(timezone.utc)
+            await s.commit()
+
+    async def list_forecasts(
+        self,
+        *,
+        source: str | None = None,
+        status: str | None = None,
+        since: date | None = None,
+        limit: int = 5000,
+    ) -> list[Forecast]:
+        """Ledger reads for calibration stats and the dataset export."""
+        async with self._session() as s:
+            q = select(Forecast)
+            if source is not None:
+                q = q.where(Forecast.source == source)
+            if status is not None:
+                q = q.where(Forecast.status == status)
+            if since is not None:
+                q = q.where(Forecast.as_of_date >= since)
+            result = await s.execute(
+                q.order_by(Forecast.as_of_date.desc()).limit(limit)
+            )
+            return list(result.scalars().all())
+
+    # Cross-user source reads for the ledger's extraction phase (runs under
+    # the owner service context, like every scheduled job).
+
+    async def list_digests_since(self, since: datetime) -> list[Digest]:
+        async with self._session() as s:
+            result = await s.execute(
+                select(Digest)
+                .where(Digest.created_at >= since)
+                .order_by(Digest.created_at)
+            )
+            return list(result.scalars().all())
+
+    async def list_deep_dive_reports_since(
+        self, since: datetime, *, statuses: tuple[str, ...] = ("completed", "partial")
+    ) -> list[DeepDiveReport]:
+        async with self._session() as s:
+            result = await s.execute(
+                select(DeepDiveReport)
+                .where(
+                    DeepDiveReport.created_at >= since,
+                    DeepDiveReport.status.in_(statuses),
+                )
+                .order_by(DeepDiveReport.created_at)
+            )
+            return list(result.scalars().all())
+
+    async def list_alerts_since(self, since: datetime) -> list[Alert]:
+        async with self._session() as s:
+            result = await s.execute(
+                select(Alert)
+                .where(Alert.created_at >= since)
+                .order_by(Alert.created_at)
+            )
+            return list(result.scalars().all())
+
+    async def count_forecasts_by_status(self) -> dict[str, int]:
+        async with self._session() as s:
+            result = await s.execute(
+                select(Forecast.status, func.count(Forecast.id)).group_by(
+                    Forecast.status
+                )
+            )
+            return {status: int(n) for status, n in result.all()}
+
     # ---- notable investor trades (Congress / insider / 13F feed) ---------
 
     async def upsert_congress_investor(self, investor: Any) -> uuid.UUID:
@@ -2484,6 +2599,14 @@ class Repo:
             "source_url": trade.source_url,
             "source_document_id": trade.source_document_id,
             "raw_payload": trade.raw_payload,
+            # SEC-source fields (migration 034 columns; congress rows leave
+            # them None — MappedTrade simply doesn't define them).
+            "cusip": getattr(trade, "cusip", None),
+            "issuer_cik": getattr(trade, "issuer_cik", None),
+            "shares": getattr(trade, "shares", None),
+            "price_per_share": getattr(trade, "price_per_share", None),
+            "value_usd": getattr(trade, "value_usd", None),
+            "quarter_end_date": getattr(trade, "quarter_end_date", None),
         }
         stmt = pg_insert(NotableInvestorTrade).values(**values)
         stmt = stmt.on_conflict_do_nothing(
@@ -2639,6 +2762,108 @@ class Repo:
             )
             await s.commit()
             return bool(result.rowcount)
+
+    async def upsert_insider_investor(self, investor: Any) -> uuid.UUID:
+        """Upsert an insider (Form 4 reporting owner), keyed by
+        (sec_cik, company_cik) — issuer-scoped identity per migration 034.
+        ``investor`` duck-types sec_edgar.mapper.MappedInsider."""
+        now = datetime.now(timezone.utc)
+        values = {
+            "investor_type": "insider",
+            "display_name": investor.display_name,
+            "slug": investor.slug,
+            "company_name": investor.company_name,
+            "company_cik": investor.company_cik,
+            "title": investor.title,
+            "sec_cik": investor.sec_cik,
+            "updated_at": now,
+        }
+        stmt = pg_insert(NotableInvestor).values(**values)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[NotableInvestor.sec_cik, NotableInvestor.company_cik],
+            index_where=(NotableInvestor.investor_type == "insider"),
+            set_={
+                "display_name": stmt.excluded.display_name,
+                "company_name": stmt.excluded.company_name,
+                "title": stmt.excluded.title,
+                "updated_at": now,
+            },
+        ).returning(NotableInvestor.id)
+        async with self._session() as s:
+            result = await s.execute(stmt)
+            await s.commit()
+            return result.scalar_one()
+
+    async def upsert_institution_investor(self, investor: Any) -> uuid.UUID:
+        """Upsert a 13F filer, keyed by manager_cik.
+        ``investor`` duck-types sec_edgar.mapper.MappedInstitution."""
+        now = datetime.now(timezone.utc)
+        values = {
+            "investor_type": "institution",
+            "display_name": investor.display_name,
+            "slug": investor.slug,
+            "fund_name": investor.fund_name,
+            "manager_cik": investor.manager_cik,
+            "sec_cik": investor.manager_cik,
+            "updated_at": now,
+        }
+        stmt = pg_insert(NotableInvestor).values(**values)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[NotableInvestor.manager_cik],
+            index_where=(NotableInvestor.investor_type == "institution"),
+            set_={
+                "display_name": stmt.excluded.display_name,
+                "fund_name": stmt.excluded.fund_name,
+                "updated_at": now,
+            },
+        ).returning(NotableInvestor.id)
+        async with self._session() as s:
+            result = await s.execute(stmt)
+            await s.commit()
+            return result.scalar_one()
+
+    async def upsert_sec_company_tickers(self, rows: list[dict[str, Any]]) -> int:
+        """Replace-style refresh of the SEC CIK<->ticker map: ``rows`` are
+        ``{"cik", "ticker", "title"}`` dicts (cik zero-padded 10-digit str)."""
+        if not rows:
+            return 0
+        now = datetime.now(timezone.utc)
+        async with self._session() as s:
+            stmt = pg_insert(SecCompanyTicker).values(
+                [{**r, "updated_at": now} for r in rows]
+            )
+            stmt = stmt.on_conflict_do_update(
+                index_elements=[SecCompanyTicker.cik],
+                set_={
+                    "ticker": stmt.excluded.ticker,
+                    "title": stmt.excluded.title,
+                    "updated_at": now,
+                },
+            )
+            await s.execute(stmt)
+            await s.commit()
+        return len(rows)
+
+    async def get_ciks_for_tickers(self, tickers: list[str]) -> dict[str, str]:
+        """ticker -> zero-padded CIK for every ticker we have a mapping for."""
+        if not tickers:
+            return {}
+        async with self._session() as s:
+            result = await s.execute(
+                select(SecCompanyTicker).where(SecCompanyTicker.ticker.in_(tickers))
+            )
+            return {row.ticker: row.cik for row in result.scalars().all()}
+
+    async def sec_company_tickers_count(self) -> int:
+        async with self._session() as s:
+            result = await s.execute(select(func.count(SecCompanyTicker.cik)))
+            return int(result.scalar_one())
+
+    async def list_distinct_position_tickers(self) -> list[str]:
+        """Distinct tickers held by any user — the Form 4 issuer scope."""
+        async with self._session() as s:
+            result = await s.execute(select(Position.ticker).distinct())
+            return sorted(result.scalars().all())
 
     async def get_sync_watermark(self, source: str, external_key: str) -> str | None:
         async with self._session() as s:

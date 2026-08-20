@@ -14,11 +14,11 @@ import json
 import logging
 import re
 import uuid
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
-from collections import OrderedDict
 from time import monotonic, perf_counter
 from urllib.parse import parse_qsl
 from zoneinfo import ZoneInfo
@@ -37,6 +37,7 @@ from app.agent.budget import Budget
 from app.agent.chat_context import build_chat_context, compose_chat_system_prompt
 from app.agent.deep_dive import run_deep_dive, run_deep_dives_for_all
 from app.agent.digest_pipeline import run_digest_pipeline, run_digests_for_all
+from app.agent.forecasts.jobs import run_forecast_ledger
 from app.agent.loop import run_agent
 from app.agent.macro.orchestrator import run_macro_scan, run_macro_scans_for_all
 from app.agent.news_refresh import refresh_news_for_user, run_news_refresh_for_all
@@ -63,6 +64,7 @@ from app.delivery.channels import PUSH_CHANNEL, mask_destination
 from app.delivery.dispatcher import Dispatcher
 from app.delivery.shortcuts import get_latest_digest
 from app.integrations.congress_trades.sync import sync_congress_trades
+from app.integrations.sec_edgar.sync import sync_13f, sync_form4
 from app.integrations.snaptrade.client import SnapTradeError
 from app.integrations.snaptrade.onboarding import (
     portfolio_status,
@@ -105,7 +107,7 @@ from app.profile import (
     profile_payload,
     resolve_risk_tolerance,
 )
-from app.quant import trackrecord
+from app.quant import forecastscore, trackrecord
 from app.scheduler import DeliveryScheduler, DigestScheduler, IntervalScheduler
 from app.streaming import SENTINEL, ProgressBroker, sse_response
 from app.tools import (
@@ -199,18 +201,22 @@ async def lifespan(app: FastAPI):
             "instance must run the schedulers or digests will not fire."
         )
     if repo is not None and settings.run_schedulers:
-        async def _run_digest() -> None:
-            await run_digests_for_all(repo)
-            await snapshot.store.clear()
+        # Guarded like every other job: DIGEST_CRON="" disables the morning
+        # digest instead of crashing startup (CronTrigger.from_crontab("")
+        # raises) — the only way to run data jobs without digest LLM spend.
+        if settings.digest_cron:
+            async def _run_digest() -> None:
+                await run_digests_for_all(repo)
+                await snapshot.store.clear()
 
-        scheduler = DigestScheduler(
-            heartbeat_wrapped("morning_digest", repo, _run_digest),
-            cron=settings.digest_cron,
-            timezone=settings.tz,
-            misfire_grace_seconds=settings.digest_misfire_grace_seconds,
-        )
-        scheduler.start()
-        app.state.scheduler = scheduler
+            scheduler = DigestScheduler(
+                heartbeat_wrapped("morning_digest", repo, _run_digest),
+                cron=settings.digest_cron,
+                timezone=settings.tz,
+                misfire_grace_seconds=settings.digest_misfire_grace_seconds,
+            )
+            scheduler.start()
+            app.state.scheduler = scheduler
 
         if settings.macro_scan_interval_minutes > 0:
             async def _run_macro() -> None:
@@ -354,6 +360,49 @@ async def lifespan(app: FastAPI):
             )
             picks_scheduler.start()
             app.state.picks_scheduler = picks_scheduler
+
+        if settings.form4_sync_interval_minutes > 0:
+            async def _run_form4_sync() -> None:
+                await sync_form4(repo, settings=get_settings())
+
+            form4_scheduler = IntervalScheduler(
+                heartbeat_wrapped("form4_sync", repo, _run_form4_sync),
+                minutes=settings.form4_sync_interval_minutes,
+                timezone=settings.tz,
+            )
+            form4_scheduler.start()
+            app.state.form4_scheduler = form4_scheduler
+
+        if settings.thirteenf_sync_cron:
+            async def _run_13f_sync() -> None:
+                await sync_13f(repo, settings=get_settings())
+
+            thirteenf_scheduler = DigestScheduler(
+                heartbeat_wrapped("thirteenf_sync", repo, _run_13f_sync),
+                cron=settings.thirteenf_sync_cron,
+                timezone=settings.tz,
+                job_id="thirteenf_sync",
+                misfire_grace_seconds=settings.digest_misfire_grace_seconds,
+            )
+            thirteenf_scheduler.start()
+            app.state.thirteenf_scheduler = thirteenf_scheduler
+
+        if settings.forecast_ledger_cron:
+            async def _run_forecast_ledger() -> None:
+                from app.agent.anthropic_client import shared_client
+
+                client = shared_client() if settings.anthropic_api_key else None
+                await run_forecast_ledger(repo, get_settings(), client=client)
+
+            forecast_ledger_scheduler = DigestScheduler(
+                heartbeat_wrapped("forecast_ledger", repo, _run_forecast_ledger),
+                cron=settings.forecast_ledger_cron,
+                timezone=settings.tz,
+                job_id="forecast_ledger",
+                misfire_grace_seconds=settings.digest_misfire_grace_seconds,
+            )
+            forecast_ledger_scheduler.start()
+            app.state.forecast_ledger_scheduler = forecast_ledger_scheduler
 
         if settings.trial_notices_cron:
             async def _run_trial_notices() -> None:
@@ -765,6 +814,9 @@ _TRACK_BENCHMARK_TICKER = "SPY"
 # load: serve a cached payload rather than re-querying per request.
 _TRACK_RECORD_TTL_SECONDS = 900.0
 _track_record_cache: dict[int, tuple[float, dict]] = {}
+
+# Forecast-ledger calibration (owner-only route), same TTL posture.
+_calibration_cache: dict[str, tuple[float, dict]] = {}
 
 
 async def _valuations_payload(repo: Repo) -> dict:
@@ -2193,6 +2245,38 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=403, detail="owner only")
         repo = _require_repo(app)
         return {"events": await repo.funnel_counts()}
+
+    @app.get("/forecasts/calibration")
+    async def forecasts_calibration(request: Request) -> dict:
+        """Owner-only forecast-ledger calibration stats. Internal-first: the
+        public surface (a "Claims ledger" block on /track-record) waits until
+        buckets clear the >=30 resolved-families gate — small samples read
+        as noise (the homepage stat-strip precedent)."""
+        if _user_id(request) != _OWNER_USER_ID:
+            raise HTTPException(status_code=403, detail="owner only")
+        repo = _require_repo(app)
+        cached = _calibration_cache.get("all")
+        if cached is not None and perf_counter() - cached[0] < _TRACK_RECORD_TTL_SECONDS:
+            return cached[1]
+        resolved = await repo.list_forecasts(status="resolved")
+        rows = [
+            {
+                "family_key": f.family_key,
+                "source": f.source,
+                "claim_type": f.claim_type,
+                "confidence_verbal": f.confidence_verbal,
+                "outcome": f.outcome,
+                "brier": float(f.brier) if f.brier is not None else None,
+                "probability": float(f.probability) if f.probability is not None else None,
+            }
+            for f in resolved
+        ]
+        payload = {
+            "counts": await repo.count_forecasts_by_status(),
+            "calibration": forecastscore.calibration_summary(rows),
+        }
+        _calibration_cache["all"] = (perf_counter(), payload)
+        return payload
 
     @app.get("/runs")
     async def list_runs(

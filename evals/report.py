@@ -72,6 +72,7 @@ def write_reports(
     judge_model: str,
     chat_results: list[CaseResult],
     classifier: dict | None,
+    forecasts: dict | None = None,
     total_cost_usd: float,
     baseline: dict,
     regressed: list[str],
@@ -94,6 +95,7 @@ def write_reports(
         "regressions": regressed,
         "chat": [r.model_dump() for r in chat_results],
         "classifier": classifier,
+        "forecasts": forecasts,
     }
     json_path.write_text(json.dumps(payload, indent=2, default=str))
 
@@ -134,6 +136,14 @@ def write_reports(
                 f"| {r.case_id} | {mark} | {', '.join(r.tools_used)} | {'; '.join(notes)[:400]} |"
             )
         lines.append("")
+    if forecasts:
+        lines += [
+            f"## Forecast extraction — precision {forecasts['precision']:.2%} "
+            f"(floor {forecasts['precision_floor']:.2%}), "
+            f"recall {forecasts['recall']:.2%} "
+            f"(floor {forecasts['recall_floor']:.2%})",
+            "",
+        ]
     if classifier:
         lines += [
             f"## Classifier — accuracy {classifier['accuracy']:.2%} "

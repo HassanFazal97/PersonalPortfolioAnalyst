@@ -56,7 +56,7 @@ DEFAULT_HORIZONS_DAYS = (7, 30, 91, 182)
 _Series = tuple[list[dt.date], list[float]]
 
 
-def _clean_series(rows: list[tuple[dt.date, float]] | None) -> _Series:
+def clean_series(rows: list[tuple[dt.date, float]] | None) -> _Series:
     """Sort a ``(date, price)`` series and drop non-positive prices.
 
     Duplicate dates keep the last value seen. A non-positive adjusted close is
@@ -74,18 +74,25 @@ def _clean_series(rows: list[tuple[dt.date, float]] | None) -> _Series:
     return dates, prices
 
 
-def _last_before(series: _Series, day: dt.date) -> tuple[dt.date, float] | None:
+def last_before(series: _Series, day: dt.date) -> tuple[dt.date, float] | None:
     """Last (date, price) bar strictly before ``day``, or None."""
     dates, prices = series
     i = bisect_left(dates, day) - 1
     return (dates[i], prices[i]) if i >= 0 else None
 
 
-def _last_on_or_before(series: _Series, day: dt.date) -> tuple[dt.date, float] | None:
+def last_on_or_before(series: _Series, day: dt.date) -> tuple[dt.date, float] | None:
     """Last (date, price) bar on or before ``day``, or None (LOCF lookup)."""
     dates, prices = series
     i = bisect_right(dates, day) - 1
     return (dates[i], prices[i]) if i >= 0 else None
+
+
+# Backwards-compatible aliases (helpers were private before forecastscore.py
+# began sharing the same measurement conventions).
+_clean_series = clean_series
+_last_before = last_before
+_last_on_or_before = last_on_or_before
 
 
 def _cohorts(entries: list[dict[str, Any]]) -> list[tuple[dt.date, list[str]]]:
@@ -132,8 +139,8 @@ def cohort_returns(
     Returns ``{"cohorts": [...newest first...], "horizon_summary": {...}}``
     with percents rounded to 2 decimals. ``beat`` compares unrounded values.
     """
-    series = {t: _clean_series(rows) for t, rows in prices.items()}
-    bench = _clean_series(benchmark)
+    series = {t: clean_series(rows) for t, rows in prices.items()}
+    bench = clean_series(benchmark)
     latest_bench = bench[0][-1] if bench[0] else None
 
     cohorts_out: list[dict[str, Any]] = []
@@ -146,7 +153,7 @@ def cohort_returns(
         entries_bars: dict[str, tuple[dt.date, float]] = {}
         for t in members:
             s = series.get(t)
-            bar = _last_before(s, run_date) if s else None
+            bar = last_before(s, run_date) if s else None
             if bar is not None:
                 entries_bars[t] = bar
 
@@ -158,8 +165,8 @@ def cohort_returns(
             if latest_bench is None or end > latest_bench:
                 horizons[key] = None  # horizon not fully elapsed: don't report
                 continue
-            b_entry = _last_before(bench, run_date)
-            b_exit = _last_on_or_before(bench, end)
+            b_entry = last_before(bench, run_date)
+            b_exit = last_on_or_before(bench, end)
             if b_entry is None or b_exit is None or b_exit[0] <= b_entry[0]:
                 horizons[key] = None  # no benchmark span to compare against
                 continue
@@ -168,7 +175,7 @@ def cohort_returns(
                 bar = entries_bars.get(t)
                 if bar is None:
                     continue
-                exit_bar = _last_on_or_before(series[t], end)
+                exit_bar = last_on_or_before(series[t], end)
                 if exit_bar is None or exit_bar[0] <= bar[0]:
                     continue  # no bar after entry within the horizon
                 rets.append(exit_bar[1] / bar[1] - 1.0)
@@ -220,11 +227,11 @@ def _benchmark_navs(bench: _Series, dates: list[dt.date]) -> np.ndarray:
     """Benchmark NAV at each date (LOCF), normalized to 1.0 at ``dates[0]``."""
     if not bench[0]:
         return np.ones(len(dates))
-    base_bar = _last_on_or_before(bench, dates[0])
+    base_bar = last_on_or_before(bench, dates[0])
     base = base_bar[1] if base_bar else bench[1][0]
     out = []
     for d in dates:
-        bar = _last_on_or_before(bench, d)
+        bar = last_on_or_before(bench, d)
         out.append((bar[1] if bar else base) / base)
     return np.array(out, dtype=float)
 
@@ -258,8 +265,8 @@ def simulate_top_picks(
     ``tailrisk.max_drawdown``. Fewer than 2 NAV points -> ``{"nav": [],
     "stats": None}``.
     """
-    series = {t: _clean_series(rows) for t, rows in prices.items()}
-    bench = _clean_series(benchmark)
+    series = {t: clean_series(rows) for t, rows in prices.items()}
+    bench = clean_series(benchmark)
 
     # Per cohort: the priceable top-N basket, its union calendar, and its
     # rebalance bar (last union date strictly before run_date).
@@ -268,7 +275,7 @@ def simulate_top_picks(
         basket = [
             t
             for t in members[:top_n]
-            if t in series and _last_before(series[t], run_date) is not None
+            if t in series and last_before(series[t], run_date) is not None
         ]
         if basket:
             union = sorted(set().union(*(set(series[t][0]) for t in basket)))
@@ -304,14 +311,14 @@ def simulate_top_picks(
         # Rebalance: equal weights at each member's entry-bar price.
         share = nav / len(basket)
         values = {t: share for t in basket}
-        prev = {t: _last_on_or_before(series[t], entry_date)[1] for t in basket}
+        prev = {t: last_on_or_before(series[t], entry_date)[1] for t in basket}
 
         grid = [d for d in union if entry_date < d <= seg_end]
         if seg_end > entry_date and (not grid or grid[-1] != seg_end):
             grid.append(seg_end)  # boundary bar may come from the next basket
         for d in grid:
             for t in basket:
-                bar = _last_on_or_before(series[t], d)
+                bar = last_on_or_before(series[t], d)
                 price = bar[1] if bar else prev[t]
                 values[t] *= price / prev[t]
                 prev[t] = price

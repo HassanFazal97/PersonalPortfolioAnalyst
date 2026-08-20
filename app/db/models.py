@@ -887,6 +887,72 @@ class NotableTradeDigestMention(Base):
     surfaced_on: Mapped[date] = mapped_column(Date, nullable=False)
 
 
+class Forecast(Base):
+    """One structured, scoreable analytical claim (migration 035).
+
+    Inserted by the nightly forecast-ledger job (extraction phase), resolved
+    in place by its resolution phase once ``due_date`` has fully elapsed
+    against the benchmark calendar. ``run_id`` anchors the producing run's
+    reasoning trace (model_calls/tool_calls); ``claim_key`` makes
+    re-extraction idempotent; ``family_key`` groups the same claim restated
+    across days so calibration can score per claim family."""
+
+    __tablename__ = "forecasts"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("agent_runs.id"), nullable=False
+    )
+    # NULL = global claim (picks, macro); set = tenant claim (digest, dive).
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE")
+    )
+    # digest | deep_dive | picks | macro | anomaly
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    source_ref: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    source_content_hash: Mapped[str | None] = mapped_column(Text)
+    # direction | relative_performance | risk_warning | event | volatility
+    claim_type: Mapped[str] = mapped_column(Text, nullable=False)
+    claim_text: Mapped[str] = mapped_column(Text, nullable=False)
+    tickers: Mapped[list] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'")
+    )
+    primary_ticker: Mapped[str | None] = mapped_column(Text)
+    benchmark: Mapped[str | None] = mapped_column(Text)
+    # up | down | flat | outperform | underperform
+    direction: Mapped[str | None] = mapped_column(Text)
+    magnitude_min_pct: Mapped[Decimal | None] = mapped_column(Numeric)
+    magnitude_max_pct: Mapped[Decimal | None] = mapped_column(Numeric)
+    horizon_days: Mapped[int] = mapped_column(Integer, nullable=False)
+    as_of_date: Mapped[date] = mapped_column(Date, nullable=False)
+    due_date: Mapped[date] = mapped_column(Date, nullable=False)
+    # high | medium | low | speculative
+    confidence_verbal: Mapped[str] = mapped_column(Text, nullable=False)
+    probability: Mapped[Decimal | None] = mapped_column(Numeric)
+    # deterministic | haiku
+    extractor: Mapped[str] = mapped_column(Text, nullable=False)
+    extractor_version: Mapped[str] = mapped_column(Text, nullable=False)
+    pipeline_prompt_version: Mapped[str | None] = mapped_column(Text)
+    extraction_model: Mapped[str | None] = mapped_column(Text)
+    claim_key: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    family_key: Mapped[str] = mapped_column(Text, nullable=False)
+    # open | resolved | expired | invalid
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="open")
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # hit | miss | indeterminate
+    outcome: Mapped[str | None] = mapped_column(Text)
+    realized_value: Mapped[Decimal | None] = mapped_column(Numeric)
+    benchmark_value: Mapped[Decimal | None] = mapped_column(Numeric)
+    brier: Mapped[Decimal | None] = mapped_column(Numeric)
+    resolution_detail: Mapped[dict | None] = mapped_column(JSONB)
+    resolver_version: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class SchemaMigration(Base):
     """Tracks which numbered migration files have been applied."""
 
