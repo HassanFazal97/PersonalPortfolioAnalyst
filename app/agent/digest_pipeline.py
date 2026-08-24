@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
 import traceback
 import uuid
@@ -24,7 +25,11 @@ from zoneinfo import ZoneInfo
 from app.agent import planner, synthesizer
 from app.agent.budget import Budget
 from app.agent.loop import run_agent
-from app.agent.prompts import CHAT_SYSTEM_PROMPT, PROMPT_VERSION
+from app.agent.prompts import (
+    CHAT_SYSTEM_PROMPT,
+    NOTABLE_TRADES_HEADER,
+    PROMPT_VERSION,
+)
 from app.auth.context import set_current_user_id
 from app.config import DEFAULT_USER_ID, Settings, get_settings, monthly_cost_cap
 from app.db.repo import Repo
@@ -44,8 +49,10 @@ from app.profile import (
     profile_from_user,
     synthesize_profile_suffix,
 )
-from app.tools import market, news, portfolio
+from app.tools import market, news, notable, portfolio
 from app.tools.registry import CHAT_TOOLS, ToolContext
+
+logger = logging.getLogger(__name__)
 
 FALLBACK_BODY = "Digest failed this morning; check /runs for details."
 
@@ -151,8 +158,15 @@ async def build_market_context(
     return json.dumps(context, default=str)
 
 
-def _findings_text(results: list[dict[str, str]], market_context: str) -> str:
-    lines = ["MARKET CONTEXT:", market_context, "", "INVESTIGATION FINDINGS:"]
+def _findings_text(
+    results: list[dict[str, str]],
+    market_context: str,
+    notable_block: str | None = None,
+) -> str:
+    lines = ["MARKET CONTEXT:", market_context, ""]
+    if notable_block:
+        lines += [NOTABLE_TRADES_HEADER, notable_block, ""]
+    lines += ["INVESTIGATION FINDINGS:"]
     for r in results:
         lines.append(f"\nQ: {r['question']}\nFinding: {r['answer']}")
     return "\n".join(lines)
@@ -496,6 +510,23 @@ async def run_digest_pipeline(
                 watch_tickers, watch_quotes, news_tickers
             )
 
+        # Notable investor trades (Pro): fresh disclosed filings on held/
+        # watched tickers + followed investors, never re-offered once shown.
+        notable_block: str | None = None
+        offered_trade_ids: list[uuid.UUID] = []
+        if plan == "pro":
+            try:
+                notable_block, offered_trade_ids = (
+                    await notable.build_digest_notable_block(
+                        db,
+                        uid,
+                        tickers=sorted(held_tickers | set(watch_tickers)),
+                        today=local_today,
+                    )
+                )
+            except Exception:  # noqa: BLE001 - the digest stands without it
+                logger.warning("notable trades block failed", exc_info=True)
+
         results: list[dict[str, str]] = []
         for inv in investigations:
             sub_budget = Budget(max_iterations=5, max_cost_usd=0.30, model=settings.model)
@@ -517,11 +548,19 @@ async def run_digest_pipeline(
             observer=observer,
             budget=budget,
             ctx=ctx,
-            findings_text=_findings_text(results, market_context),
+            findings_text=_findings_text(
+                results, market_context, notable_block=notable_block
+            ),
             iteration_start=2,
             holdings_scaffold=holdings_scaffold,
             system_suffix=synthesize_profile_suffix(profile),
         )
+
+        if offered_trade_ids:
+            try:
+                await db.record_notable_trade_mentions(uid, offered_trade_ids)
+            except Exception:  # noqa: BLE001 - dedup marker must never fail a digest
+                logger.warning("notable trade mention record failed", exc_info=True)
 
         await db.finalize_run(
             anchor_run_id,

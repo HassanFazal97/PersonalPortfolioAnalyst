@@ -17,6 +17,7 @@ from app.tools import (
     fundamentals,
     market,
     news,
+    notable,
     portfolio,
     portfolio_risk,
     recall,
@@ -407,6 +408,9 @@ PRO_CHAT_TOOLS: list[dict[str, Any]] = [
     ESTIMATE_DOWNSIDE_RISK_SCHEMA,
     ASSESS_RISK_ADJUSTED_PERFORMANCE_SCHEMA,
     PROJECT_PORTFOLIO_OUTCOMES_SCHEMA,
+    # Notable-trades feed (Congress / Form 4 / 13F) is a Pro feature at the
+    # API routes, so its chat surface is Pro-gated the same way.
+    notable.GET_NOTABLE_TRADES_SCHEMA,
 ]
 
 # The synthesize stage exposes ONLY send_digest so the run must terminate by
@@ -428,6 +432,7 @@ DISPATCH: dict[str, ToolFn] = {
     "project_portfolio_outcomes": portfolio_risk.project_portfolio_outcomes,
     "scan_anomalies": anomalies.scan_anomalies,
     "recall_memory": recall.recall_memory,
+    "get_notable_trades": notable.get_notable_trades,
 }
 
 # Tools that fan out to live market-data fetches need more headroom than the
@@ -447,6 +452,8 @@ TOOL_TIMEOUTS: dict[str, float] = {
     "scan_anomalies": 30.0,
     # One Voyage embed round-trip + one indexed pgvector query.
     "recall_memory": 15.0,
+    # Two indexed reads (trades + investors).
+    "get_notable_trades": 10.0,
 }
 
 # Anthropic server-side web search (same tool the macro specialists use).

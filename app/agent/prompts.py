@@ -627,3 +627,16 @@ Hard rules:
   vs-index or vs-peer call; "event" is a dated non-price event (earnings
   beat, product launch); "volatility" is a volatility-level call.
 - A document with no testable forecasts yields {"claims": []}."""
+
+
+# Header for the deterministic notable-trades block injected into the digest
+# synthesizer's findings (Pro). The instructions ride with the data so the
+# synthesizer needs no separate prompt change.
+NOTABLE_TRADES_HEADER = """\
+NOTABLE INVESTOR TRADES (disclosed public filings — Congress/insider/fund \
+activity relevant to this user's tickers; facts are verbatim from filings):
+Weave in AT MOST the 1-2 most relevant to today's story, with the investor \
+name and filing date. Disclosure lags mean these are days to weeks old — say \
+so. Informational only: never frame a disclosed trade as a reason for the \
+user to buy or sell. Skip the section entirely if nothing is relevant \
+today."""

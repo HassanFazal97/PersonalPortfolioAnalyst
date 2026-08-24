@@ -268,6 +268,12 @@ class Settings(BaseSettings):
     # Unofficial community datasets (no free structured official source for
     # Congress disclosures exists — the real thing is scanned PDFs). Daily
     # cadence: "" disables the in-process job — still triggerable manually.
+    # ⚠ DEAD UPSTREAM as of Aug 24, 2026: both S3 buckets return 403, the
+    # stockwatcher sites no longer resolve, and the GitHub mirrors froze in
+    # 2021 — the cron is blanked in prod and ingested rows are frozen
+    # history. Replacing the source needs either a keyed API (Quiver
+    # Quantitative / Unusual Whales, paid) or scraping the official
+    # Senate eFD / House Clerk disclosures directly (a real project).
     senate_stock_watcher_url: str = Field(
         default="https://senate-stock-watcher-data.s3-us-west-2.amazonaws.com/aggregate/all_transactions.json",
         alias="SENATE_STOCK_WATCHER_URL",

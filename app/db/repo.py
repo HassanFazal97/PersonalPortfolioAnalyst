@@ -2865,6 +2865,43 @@ class Repo:
             result = await s.execute(select(Position.ticker).distinct())
             return sorted(result.scalars().all())
 
+    async def list_unmentioned_notable_trades(
+        self,
+        user_id: uuid.UUID,
+        *,
+        tickers: list[str],
+        since: date,
+        limit: int = 25,
+    ) -> list[NotableInvestorTrade]:
+        """Fresh disclosed trades this user hasn't seen in a digest yet:
+        recent filings on their held/watched tickers, plus anything by an
+        investor they follow (regardless of ticker), minus every trade
+        already recorded in notable_trade_digest_mentions."""
+        async with self._session() as s:
+            follows = select(NotableInvestorFollow.investor_id).where(
+                NotableInvestorFollow.user_id == user_id
+            )
+            mentioned = select(NotableTradeDigestMention.trade_id).where(
+                NotableTradeDigestMention.user_id == user_id
+            )
+            relevance = [NotableInvestorTrade.investor_id.in_(follows)]
+            if tickers:
+                relevance.append(NotableInvestorTrade.ticker.in_(tickers))
+            result = await s.execute(
+                select(NotableInvestorTrade)
+                .where(
+                    NotableInvestorTrade.filed_date >= since,
+                    or_(*relevance),
+                    NotableInvestorTrade.id.not_in(mentioned),
+                )
+                .order_by(
+                    NotableInvestorTrade.filed_date.desc(),
+                    NotableInvestorTrade.value_usd.desc().nulls_last(),
+                )
+                .limit(limit)
+            )
+            return list(result.scalars().all())
+
     async def get_sync_watermark(self, source: str, external_key: str) -> str | None:
         async with self._session() as s:
             row = await s.get(NotableInvestorSyncState, (source, external_key))
