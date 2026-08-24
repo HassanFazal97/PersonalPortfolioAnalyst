@@ -65,12 +65,18 @@ def _recent_filings(submissions: dict[str, Any]) -> list[dict[str, Any]]:
             values = recent.get(key) or []
             return values[i] if i < len(values) else None
 
+        # Ownership forms list primaryDocument behind an XSL-viewer prefix
+        # ("xslF345X06/wk-form4_....xml") — that path serves the rendered
+        # HTML; the raw XML is the bare filename after the slash.
+        primary = _col("primaryDocument")
+        if primary:
+            primary = primary.rsplit("/", 1)[-1]
         out.append(
             {
                 "form": form,
                 "accession": _col("accessionNumber"),
                 "filing_date": _col("filingDate"),
-                "primary_document": _col("primaryDocument"),
+                "primary_document": primary,
                 "report_date": _col("reportDate"),
             }
         )
