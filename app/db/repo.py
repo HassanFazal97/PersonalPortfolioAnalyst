@@ -2827,9 +2827,24 @@ class Repo:
         ``{"cik", "ticker", "title"}`` dicts (cik zero-padded 10-digit str).
 
         Chunked: the full SEC map is ~12k rows x 4 bind params, and one
-        statement would blow asyncpg's 32,767-parameter ceiling."""
+        statement would blow asyncpg's 32,767-parameter ceiling.
+
+        Deduped by cik: SEC lists every share class (GOOGL and GOOG share
+        one CIK) but the table is keyed by cik, and duplicate keys in one
+        INSERT..ON CONFLICT raise CardinalityViolation. First occurrence
+        wins — SEC orders the file so the primary listing comes first;
+        secondary-class tickers simply don't resolve to a CIK (acceptable:
+        Form 4 filings are per-issuer, so the primary class covers them)."""
         if not rows:
             return 0
+        seen: set[str] = set()
+        deduped = []
+        for r in rows:
+            if r["cik"] in seen:
+                continue
+            seen.add(r["cik"])
+            deduped.append(r)
+        rows = deduped
         now = datetime.now(timezone.utc)
         chunk_size = 5000
         async with self._session() as s:
