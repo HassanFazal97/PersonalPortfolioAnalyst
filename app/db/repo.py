@@ -2824,23 +2824,29 @@ class Repo:
 
     async def upsert_sec_company_tickers(self, rows: list[dict[str, Any]]) -> int:
         """Replace-style refresh of the SEC CIK<->ticker map: ``rows`` are
-        ``{"cik", "ticker", "title"}`` dicts (cik zero-padded 10-digit str)."""
+        ``{"cik", "ticker", "title"}`` dicts (cik zero-padded 10-digit str).
+
+        Chunked: the full SEC map is ~12k rows x 4 bind params, and one
+        statement would blow asyncpg's 32,767-parameter ceiling."""
         if not rows:
             return 0
         now = datetime.now(timezone.utc)
+        chunk_size = 5000
         async with self._session() as s:
-            stmt = pg_insert(SecCompanyTicker).values(
-                [{**r, "updated_at": now} for r in rows]
-            )
-            stmt = stmt.on_conflict_do_update(
-                index_elements=[SecCompanyTicker.cik],
-                set_={
-                    "ticker": stmt.excluded.ticker,
-                    "title": stmt.excluded.title,
-                    "updated_at": now,
-                },
-            )
-            await s.execute(stmt)
+            for start in range(0, len(rows), chunk_size):
+                chunk = rows[start : start + chunk_size]
+                stmt = pg_insert(SecCompanyTicker).values(
+                    [{**r, "updated_at": now} for r in chunk]
+                )
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=[SecCompanyTicker.cik],
+                    set_={
+                        "ticker": stmt.excluded.ticker,
+                        "title": stmt.excluded.title,
+                        "updated_at": now,
+                    },
+                )
+                await s.execute(stmt)
             await s.commit()
         return len(rows)
 
