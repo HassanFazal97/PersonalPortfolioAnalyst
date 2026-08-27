@@ -20,7 +20,10 @@ from typing import Any
 
 from app.quant.forecastscore import CONFIDENCE_PRIOR_MAP, snap_horizon
 
-FORECAST_MAPPER_VERSION = "2026-08-20.1"
+FORECAST_MAPPER_VERSION = "2026-08-27.1"
+
+# Shared horizon vocabulary (also used by the Haiku extractor's validator).
+HORIZON_VOCAB = {"1w": 7, "1m": 30, "3m": 91, "6m": 182, "unstated": None}
 
 PICKS_HORIZON_DAYS = 91  # the picks cohort's headline horizon
 BENCHMARK_TICKER = "SPY"
@@ -220,6 +223,53 @@ def map_deep_dive_risks(
                 as_of_date=as_of_date,
                 confidence_verbal=SEVERITY_CONFIDENCE_MAP.get(severity, "speculative"),
                 probability=None,
+                extractor="deterministic",
+                extractor_version=FORECAST_MAPPER_VERSION,
+            )
+        )
+    return rows
+
+
+def map_deep_dive_theses(
+    *,
+    report_id: uuid.UUID,
+    run_id: uuid.UUID,
+    user_id: uuid.UUID,
+    as_of_date: dt.date,
+    report: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """The synthesis stage's typed ``theses`` (schema v2, hypothesis-driven
+    dives) map deterministically: direction/horizon/confidence are already
+    closed-vocabulary (clean_theses validated them at parse time), so no
+    model call is needed and the claim is exactly what the report shows the
+    user. outperform/underperform read as relative-performance vs SPY."""
+    rows = []
+    for thesis in report.get("theses") or []:
+        direction = thesis.get("direction")
+        horizon_days = HORIZON_VOCAB.get(thesis.get("horizon"))
+        claim = (thesis.get("claim_text") or "").strip()
+        confidence = thesis.get("confidence")
+        if not claim or direction is None or confidence is None:
+            continue
+        claim_type = (
+            "relative_performance"
+            if direction in ("outperform", "underperform")
+            else "direction"
+        )
+        rows.append(
+            build_row(
+                source="deep_dive",
+                run_id=run_id,
+                user_id=user_id,
+                source_ref=report_id,
+                claim_type=claim_type,
+                claim_text=claim,
+                tickers=[t for t in thesis.get("tickers") or [] if isinstance(t, str)],
+                direction=direction,
+                horizon_days=horizon_days,
+                as_of_date=as_of_date,
+                confidence_verbal=confidence,
+                probability=None,  # verbal prior fills in
                 extractor="deterministic",
                 extractor_version=FORECAST_MAPPER_VERSION,
             )

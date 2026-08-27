@@ -77,6 +77,15 @@ async def _extract_structured(
                 report=report.report,
             )
         )
+        rows.extend(
+            mappers.map_deep_dive_theses(
+                report_id=report.id,
+                run_id=report.run_id,
+                user_id=report.user_id,
+                as_of_date=report.created_at.date(),
+                report=report.report,
+            )
+        )
 
     skipped_alerts = 0
     for alert in await repo.list_alerts_since(since):

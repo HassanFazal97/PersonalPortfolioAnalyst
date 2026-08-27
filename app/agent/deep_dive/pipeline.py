@@ -48,7 +48,7 @@ from app.plans import user_plan_and_tz
 from app.profile import build_profile_context, profile_from_user
 from app.tools.registry import ToolContext
 
-REPORT_SCHEMA_VERSION = 1
+REPORT_SCHEMA_VERSION = 2
 DISCLAIMER = "Informational only: not investment advice."
 
 _STAGES = ("plan", "research", "verify", "synthesize")
@@ -89,15 +89,35 @@ def _join_text(content: list[dict[str, Any]]) -> str:
     ).strip()
 
 
-def parse_plan(text: str) -> dict[str, list[str]] | None:
-    """Planner output -> {specialist: [questions]}, or None if unparseable."""
+def parse_plan(
+    text: str,
+) -> tuple[dict[str, list[str]] | None, list[dict[str, str]]]:
+    """Planner output -> ({specialist: [questions]} or None, hypotheses).
+
+    Hypotheses are best-effort: a plan with valid questions but malformed
+    hypotheses still runs (the dive degrades to question-driven, exactly the
+    pre-hypothesis behavior)."""
     try:
         data = json.loads(_strip_fences(text))
     except (json.JSONDecodeError, TypeError):
-        return None
-    questions = data.get("questions") if isinstance(data, dict) else None
+        return None, []
+    if not isinstance(data, dict):
+        return None, []
+    hypotheses: list[dict[str, str]] = []
+    for h in data.get("hypotheses") or []:
+        if isinstance(h, dict) and h.get("statement"):
+            hypotheses.append(
+                {
+                    "id": str(h.get("id") or f"H{len(hypotheses) + 1}"),
+                    "statement": str(h["statement"]),
+                    "confirm": str(h.get("confirm", "")),
+                    "refute": str(h.get("refute", "")),
+                }
+            )
+    hypotheses = hypotheses[:3]
+    questions = data.get("questions")
     if not isinstance(questions, dict):
-        return None
+        return None, hypotheses
     cleaned: dict[str, list[str]] = {}
     for spec in ROSTER:
         qs = questions.get(spec.name)
@@ -105,7 +125,7 @@ def parse_plan(text: str) -> dict[str, list[str]] | None:
             picked = [str(q) for q in qs if q][:3]
             if picked:
                 cleaned[spec.name] = picked
-    return cleaned or None
+    return cleaned or None, hypotheses
 
 
 def parse_checks(text: str) -> list[dict[str, str]]:
@@ -131,6 +151,40 @@ def parse_checks(text: str) -> list[dict[str, str]]:
     return cleaned
 
 
+_THESIS_DIRECTIONS = frozenset({"up", "down", "flat", "outperform", "underperform"})
+_THESIS_HORIZONS = frozenset({"1w", "1m", "3m", "6m"})
+_THESIS_CONFIDENCE = frozenset({"high", "medium", "low", "speculative"})
+
+
+def clean_theses(raw: Any) -> list[dict[str, Any]]:
+    """Coerce the synthesis 'theses' list; anything off-vocabulary is dropped
+    (a thesis that can't be scored deterministically must not enter the
+    forecast ledger). Cap 3 — the prompt's own limit, enforced."""
+    out: list[dict[str, Any]] = []
+    for t in raw if isinstance(raw, list) else []:
+        if len(out) >= 3 or not isinstance(t, dict):
+            continue
+        claim = str(t.get("claim_text") or "").strip()
+        tickers = [x for x in (t.get("tickers") or []) if isinstance(x, str)]
+        if (
+            not claim
+            or t.get("direction") not in _THESIS_DIRECTIONS
+            or t.get("horizon") not in _THESIS_HORIZONS
+            or t.get("confidence") not in _THESIS_CONFIDENCE
+        ):
+            continue
+        out.append(
+            {
+                "claim_text": claim,
+                "tickers": tickers,
+                "direction": t["direction"],
+                "horizon": t["horizon"],
+                "confidence": t["confidence"],
+            }
+        )
+    return out
+
+
 def parse_report(text: str) -> dict[str, Any] | None:
     try:
         data = json.loads(_strip_fences(text))
@@ -138,6 +192,7 @@ def parse_report(text: str) -> dict[str, Any] | None:
         return None
     if not isinstance(data, dict) or not data.get("overview"):
         return None
+    data["theses"] = clean_theses(data.get("theses"))
     return data
 
 
@@ -186,8 +241,26 @@ class _Progress:
             pass
 
 
-def _questions_message(questions: list[str]) -> str:
-    lines = ["Research questions for your specialty:"]
+def _hypotheses_block(hypotheses: list[dict[str, str]]) -> str:
+    lines = ["HYPOTHESES UNDER TEST (gather evidence FOR and AGAINST any that"
+             " touch your specialty — a refutation is as valuable as a"
+             " confirmation):"]
+    for h in hypotheses:
+        lines.append(f"{h['id']}: {h['statement']}")
+        if h.get("confirm"):
+            lines.append(f"   confirms: {h['confirm']}")
+        if h.get("refute"):
+            lines.append(f"   refutes: {h['refute']}")
+    return "\n".join(lines)
+
+
+def _questions_message(
+    questions: list[str], hypotheses: list[dict[str, str]] | None = None
+) -> str:
+    lines = []
+    if hypotheses:
+        lines += [_hypotheses_block(hypotheses), ""]
+    lines += ["Research questions for your specialty:"]
     lines += [f"{i}. {q}" for i, q in enumerate(questions, 1)]
     return "\n".join(lines)
 
@@ -197,8 +270,12 @@ def _findings_blob(
     findings: dict[str, str],
     checks: list[dict[str, str]] | None,
     failed: list[str],
+    hypotheses: list[dict[str, str]] | None = None,
 ) -> str:
-    parts = ["MARKET CONTEXT:", market_context, "", "SPECIALIST FINDINGS:"]
+    parts = ["MARKET CONTEXT:", market_context, ""]
+    if hypotheses:
+        parts += [_hypotheses_block(hypotheses), ""]
+    parts += ["SPECIALIST FINDINGS:"]
     for name, text in findings.items():
         parts.append(f"\n[{name}]\n{text}")
     if failed:
@@ -299,7 +376,7 @@ async def run_deep_dive(
         # framing to the user's horizon; specialists stay generic (they answer
         # whatever the plan asks).
         profile_block = build_profile_context(profile_from_user(user))
-        questions = await _plan_questions(
+        questions, hypotheses = await _plan_questions(
             client,
             settings.model,
             observer,
@@ -318,6 +395,7 @@ async def run_deep_dive(
                     db,
                     spec,
                     questions.get(spec.name, _FALLBACK_QUESTIONS[spec.name]),
+                    hypotheses=hypotheses,
                     user_id=user_id,
                     client=client,
                     settings=settings,
@@ -369,11 +447,12 @@ async def run_deep_dive(
             settings.model,
             observer,
             budget,
-            _findings_blob(market_context, findings, checks, failed),
+            _findings_blob(market_context, findings, checks, failed, hypotheses),
             profile_block=profile_block,
         )
         report["schema_version"] = REPORT_SCHEMA_VERSION
         report["as_of"] = date.today().isoformat()
+        report["hypotheses"] = hypotheses  # what the desk set out to test
         report["failed_specialists"] = failed
         report["disclaimer"] = DISCLAIMER
         report["verification_summary"] = _verification_summary(report, checks)
@@ -400,7 +479,7 @@ async def _plan_questions(
     market_context: str,
     *,
     profile_block: str = "",
-) -> dict[str, list[str]]:
+) -> tuple[dict[str, list[str]], list[dict[str, str]]]:
     system_prompt = DEEP_DIVE_PLAN_PROMPT + profile_block
     messages = [{"role": "user", "content": market_context}]
     content, _ = await call_and_log(
@@ -413,9 +492,9 @@ async def _plan_questions(
         iteration=1,
         budget=budget,
     )
-    parsed = parse_plan(_join_text(content))
-    if parsed is not None:
-        return parsed
+    questions, hypotheses = parse_plan(_join_text(content))
+    if questions is not None:
+        return questions, hypotheses
     messages.append({"role": "assistant", "content": content})
     messages.append({"role": "user", "content": DEEP_DIVE_PLAN_RETRY_SUFFIX})
     content, _ = await call_and_log(
@@ -428,7 +507,8 @@ async def _plan_questions(
         iteration=2,
         budget=budget,
     )
-    return parse_plan(_join_text(content)) or dict(_FALLBACK_QUESTIONS)
+    questions, hypotheses = parse_plan(_join_text(content))
+    return questions or dict(_FALLBACK_QUESTIONS), hypotheses
 
 
 def _forwarder(
@@ -460,6 +540,7 @@ async def _run_specialist(
     spec: Specialist,
     questions: list[str],
     *,
+    hypotheses: list[dict[str, str]] | None = None,
     user_id: uuid.UUID,
     client: Any,
     settings: Any,
@@ -478,7 +559,7 @@ async def _run_specialist(
     )
     try:
         sub = await run_agent(
-            _questions_message(questions),
+            _questions_message(questions, hypotheses),
             trigger="deep_dive",
             system_prompt=spec.system_prompt,
             tools=spec.tools,
@@ -594,7 +675,7 @@ async def _synthesize(
             "The research stages completed, but the final report could not be "
             "formatted. Run the deep dive again to get a full report."
         )
-    return {"overview": raw, "summary": raw[:900], "sections": []}
+    return {"overview": raw, "summary": raw[:900], "sections": [], "theses": []}
 
 
 def _verification_summary(

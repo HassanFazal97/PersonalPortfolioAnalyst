@@ -21,6 +21,7 @@ import json
 import re
 from typing import Any
 
+from app.agent.forecasts.mappers import HORIZON_VOCAB
 from app.agent.prompts import FORECAST_EXTRACT_PROMPT, FORECAST_EXTRACTOR_VERSION
 
 _VALID_CLAIM_TYPES = frozenset(
@@ -28,7 +29,6 @@ _VALID_CLAIM_TYPES = frozenset(
 )
 _VALID_DIRECTIONS = frozenset({"up", "down", "flat", "outperform", "underperform"})
 _VALID_CONFIDENCE = frozenset({"high", "medium", "low", "speculative"})
-_HORIZON_MAP = {"1w": 7, "1m": 30, "3m": 91, "6m": 182, "unstated": None}
 _MAX_CLAIMS_PER_DOC = 12
 _MAX_DOC_CHARS = 20_000
 
@@ -92,7 +92,7 @@ def validate_claims(
         elif direction not in _VALID_DIRECTIONS:
             drops["bad_enum"] += 1
             continue
-        horizon_days = _HORIZON_MAP.get(row.get("horizon"), None)
+        horizon_days = HORIZON_VOCAB.get(row.get("horizon"), None)
         tickers = [
             t
             for t in (row.get("tickers") or [])
